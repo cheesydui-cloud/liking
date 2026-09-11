@@ -2,6 +2,19 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.1.3 — 2026-09-12
+
+真机验收：Xray 流量采集把 1.9G 机器吃满。
+
+### 修复
+- `xray api statsquery` 加 4 秒超时，避免卡死的采集进程把 API 连接堆在 10085
+- 流量采集改为 30 秒一次，且同时只跑一条
+- 拉起 Xray / sing-box 时设置 `GOMEMLIMIT=256MiB`，避免 Go 堆 + 透明大页把整机换爆
+
+### 升级注意
+- 升到 v0.1.3 后请重新执行节点 Agent 安装命令
+- 回滚：`liking-upgrade --release v0.1.2`（需对应 Release 资产）
+
 ## v0.1.2 — 2026-09-12
 
 真机验收：配置没变时不再每 30 秒重启 Xray。

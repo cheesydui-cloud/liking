@@ -116,7 +116,7 @@ func (a *Agent) session(ctx context.Context) error {
 
 	ping := time.NewTicker(10 * time.Second)
 	defer ping.Stop()
-	stats := time.NewTicker(15 * time.Second)
+	stats := time.NewTicker(30 * time.Second)
 	defer stats.Stop()
 
 	envCh := make(chan wsproto.Envelope, 8)

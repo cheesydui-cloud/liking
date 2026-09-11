@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,12 +26,13 @@ type proc struct {
 }
 
 type Cores struct {
-	dir     string
-	mu      sync.Mutex
-	procs   map[string]*proc
-	last    map[string]json.RawMessage
-	xrayAPI string
-	xrayBin string
+	dir       string
+	mu        sync.Mutex
+	collectMu sync.Mutex
+	procs     map[string]*proc
+	last      map[string]json.RawMessage
+	xrayAPI   string
+	xrayBin   string
 }
 
 func NewCores(dir string) *Cores {
@@ -148,6 +150,7 @@ func (c *Cores) applyMita(raw json.RawMessage) error {
 
 func (c *Cores) startLocked(name, bin string, args []string) error {
 	cmd := exec.Command(bin, args...)
+	cmd.Env = append(os.Environ(), "GOMEMLIMIT=256MiB")
 	logf, err := os.OpenFile(filepath.Join(c.dir, name+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
 	if err == nil {
 		cmd.Stdout = logf
@@ -231,13 +234,19 @@ func (c *Cores) Running() []string {
 }
 
 func (c *Cores) Collect() []wsproto.Sample {
+	if !c.collectMu.TryLock() {
+		return nil
+	}
+	defer c.collectMu.Unlock()
 	c.mu.Lock()
 	bin, api := c.xrayBin, c.xrayAPI
 	c.mu.Unlock()
 	if bin == "" || api == "" {
 		return nil
 	}
-	cmd := exec.Command(bin, "api", "statsquery", "--server="+api, "-reset")
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "api", "statsquery", "--server="+api, "-reset")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil

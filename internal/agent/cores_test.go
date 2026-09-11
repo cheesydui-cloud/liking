@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"liking/internal/wsproto"
 )
@@ -116,5 +117,25 @@ func TestApplyMissingMitaStillStartsXray(t *testing.T) {
 	}
 	if c.procs["xray"].cmd.Process.Pid != pid {
 		t.Fatalf("xray restarted pid %d -> %d", pid, c.procs["xray"].cmd.Process.Pid)
+	}
+}
+
+func TestCollectTimesOut(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	if err := os.Mkdir(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fake := filepath.Join(binDir, "xray")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := NewCores(filepath.Join(dir, "data"))
+	c.xrayBin = fake
+	c.xrayAPI = "127.0.0.1:9"
+	start := time.Now()
+	_ = c.Collect()
+	if time.Since(start) > 6*time.Second {
+		t.Fatalf("collect took %s", time.Since(start))
 	}
 }
