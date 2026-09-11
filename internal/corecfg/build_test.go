@@ -55,4 +55,24 @@ func TestBuildXrayAndMita(t *testing.T) {
 	if _, ok := xray["inbounds"]; !ok {
 		t.Fatal("xray inbounds")
 	}
+	routing, _ := xray["routing"].(map[string]any)
+	rules, _ := routing["rules"].([]any)
+	apiRule := ""
+	for _, r := range rules {
+		m, _ := r.(map[string]any)
+		tags, _ := m["inboundTag"].([]any)
+		for _, t := range tags {
+			if t == "api" {
+				apiRule, _ = m["outboundTag"].(string)
+			}
+		}
+	}
+	if apiRule != "api" {
+		t.Fatalf("api inbound must route to api module, got %q", apiRule)
+	}
+	for _, o := range xray["outbounds"].([]any) {
+		if o.(map[string]any)["tag"] == "api-out" {
+			t.Fatal("freedom api-out loops the stats API onto itself")
+		}
+	}
 }

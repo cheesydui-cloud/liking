@@ -22,10 +22,11 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 	outs = append(outs,
 		map[string]any{"tag": "direct", "protocol": "freedom"},
 		map[string]any{"tag": "block", "protocol": "blackhole"},
-		map[string]any{"tag": "api-out", "protocol": "freedom"},
 	)
+	// API inbound must route to the api module tag, not freedom.
+	// freedom here loops 127.0.0.1:10085 onto itself and opens tens of thousands of fds.
 	rules = append(rules, map[string]any{
-		"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api-out",
+		"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api",
 	})
 
 	used := false
