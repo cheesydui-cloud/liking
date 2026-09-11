@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -75,6 +76,9 @@ func (c *Cores) applyJSON(name, file string, raw json.RawMessage, bin string, pr
 	if name == "xray" {
 		c.xrayBin = bin
 	}
+	if bytes.Equal(raw, prev) && c.aliveLocked(name) {
+		return nil
+	}
 	if err := os.WriteFile(path, raw, 0o640); err != nil {
 		return err
 	}
@@ -118,6 +122,9 @@ func (c *Cores) applyMita(raw json.RawMessage) error {
 		c.stopLocked("mita")
 		_ = os.Remove(path)
 		delete(c.last, "mita")
+		return nil
+	}
+	if bytes.Equal(raw, c.last["mita"]) {
 		return nil
 	}
 	bin := lookBin("mita")
@@ -169,6 +176,19 @@ func (c *Cores) startLocked(name, bin string, args []string) error {
 	c.procs[name] = &proc{cmd: cmd, done: done}
 	log.Printf("agent: started %s pid=%d", name, cmd.Process.Pid)
 	return nil
+}
+
+func (c *Cores) aliveLocked(name string) bool {
+	p := c.procs[name]
+	if p == nil || p.cmd == nil || p.cmd.Process == nil {
+		return false
+	}
+	select {
+	case <-p.done:
+		return false
+	default:
+		return true
+	}
 }
 
 func (c *Cores) stopLocked(name string) {

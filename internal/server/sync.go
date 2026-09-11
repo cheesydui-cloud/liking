@@ -63,6 +63,7 @@ func (s *Server) kickSync(id int64) {
 }
 
 func (s *Server) syncLoop(id int64) {
+	var last string
 	for {
 		s.kickMu.Lock()
 		if !s.kickWant[id] {
@@ -73,7 +74,13 @@ func (s *Server) syncLoop(id int64) {
 		s.kickWant[id] = false
 		s.kickMu.Unlock()
 		if err := s.pushServer(id); err != nil {
-			log.Printf("sync server %d: %v", id, err)
+			msg := err.Error()
+			if msg != last {
+				log.Printf("sync server %d: %v", id, err)
+				last = msg
+			}
+		} else {
+			last = ""
 		}
 	}
 }

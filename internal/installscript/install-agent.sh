@@ -66,6 +66,10 @@ case "$ARCH" in
 esac
 
 mkdir -p "$INSTALL_DIR" "$ETC_DIR" "$DATA_DIR" "$SYSTEMD_DIR"
+# v0.1.0 内核日志写在面板目录，升到独立 agent 目录后清掉残留
+if [[ "$DATA_DIR" != "/var/lib/liking" ]]; then
+  rm -f /var/lib/liking/xray.log /var/lib/liking/singbox.log /var/lib/liking/mita.log
+fi
 printf '%s\n' "$TOKEN" > "$ETC_DIR/panel.token"
 chmod 600 "$ETC_DIR/panel.token"
 printf '%s\n' "$PANEL_URL" > "$ETC_DIR/panel.url"

@@ -106,4 +106,15 @@ func TestApplyMissingMitaStillStartsXray(t *testing.T) {
 	if len(run) != 1 || run[0] != "xray" {
 		t.Fatalf("running %v", run)
 	}
+	pid := c.procs["xray"].cmd.Process.Pid
+	err = c.Apply(wsproto.ApplyConfig{Xray: xrayCfg, Mita: mitaCfg})
+	if err == nil || !strings.Contains(err.Error(), "mita") {
+		t.Fatalf("want mita error on second apply, got %v", err)
+	}
+	if !c.aliveLocked("xray") {
+		t.Fatal("xray should stay up")
+	}
+	if c.procs["xray"].cmd.Process.Pid != pid {
+		t.Fatalf("xray restarted pid %d -> %d", pid, c.procs["xray"].cmd.Process.Pid)
+	}
 }

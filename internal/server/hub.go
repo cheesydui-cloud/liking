@@ -297,7 +297,11 @@ func (h *Hub) SendApply(serverID int64, cfg wsproto.ApplyConfig) error {
 			return fmt.Errorf("malformed apply_ack: %w", err)
 		}
 		if !ack.OK {
-			return fmt.Errorf("apply rejected: %s", ack.Error)
+			msg := strings.TrimSpace(ack.Error)
+			if msg == "" {
+				return fmt.Errorf("配置下发被拒绝")
+			}
+			return fmt.Errorf("%s", msg)
 		}
 		return nil
 	case <-time.After(applyAckTimeout):
