@@ -1,0 +1,70 @@
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { api } from '../lib/api'
+import { Badge, Empty, PageHead, SkeletonRows } from '../components/ui'
+
+export default function Dashboard() {
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    api.get('/dashboard').then(setD).catch(e => setErr(e.message))
+  }, [])
+  if (err) return <div style={{ color: 'var(--color-danger)' }}>{err}</div>
+  if (!d) return <div className="card"><SkeletonRows /></div>
+
+  const cards = [
+    { label: '服务器', value: d.servers, to: '/servers', hint: '节点总数' },
+    { label: '在线', value: d.online, to: '/servers', hint: 'Agent 心跳' },
+    { label: '入站', value: d.inbounds, to: '/inbounds', hint: '已配置线路' },
+    { label: '用户', value: d.users, to: '/users', hint: '含管理员' },
+  ]
+
+  return (
+    <div>
+      <PageHead kicker="Overview" title="总览" desc="节点在线状态与线路规模。先加服务器，再开入站，然后把套餐绑给用户。" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        {cards.map(c => (
+          <Link key={c.label} to={c.to} className="card p-5 hover:border-[var(--color-gold)] transition-colors">
+            <div className="kicker">{c.label}</div>
+            <div className="font-display text-[40px] leading-none mt-3 tabular-nums">{c.value}</div>
+            <div className="text-[12px] text-ink-mut mt-2">{c.hint}</div>
+          </Link>
+        ))}
+      </div>
+      <div className="card overflow-hidden">
+        <div className="px-5 py-4 flex items-center justify-between border-b" style={{ borderColor: 'var(--color-line-soft)' }}>
+          <div className="font-display text-[22px]">服务器</div>
+          <Link to="/servers" className="linkish text-[13px]">管理</Link>
+        </div>
+        {(d.server_list || []).length === 0 ? (
+          <Empty title="还没有服务器" hint="添加一台节点，复制一键安装命令，在机器上以 root 执行。" action={<Link to="/servers" className="btn-primary">去添加</Link>} />
+        ) : (
+          <div className="table-wrap">
+            <table className="data">
+              <thead><tr><th>名称</th><th>地址</th><th>状态</th><th>系统</th></tr></thead>
+              <tbody>
+                {(d.server_list || []).map(s => (
+                  <tr key={s.id}>
+                    <td className="font-medium">{s.name}</td>
+                    <td className="font-mono text-[12px] text-ink-soft">{s.public_host || '—'}</td>
+                    <td>
+                      <span className={`dot ${s.online ? 'dot-on' : 'dot-off'}`} />
+                      <span className="ml-2">{s.online ? '在线' : '离线'}</span>
+                    </td>
+                    <td className="text-ink-mut">{[s.os, s.arch].filter(Boolean).join(' / ') || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      {d.online === 0 && (d.servers || 0) > 0 && (
+        <div className="mt-4 text-[13px] text-ink-mut flex items-center gap-2">
+          <Badge tone="gold">提示</Badge>
+          节点离线时，请确认 Agent 已安装，且能访问面板的 8899 端口。
+        </div>
+      )}
+    </div>
+  )
+}

@@ -1,0 +1,788 @@
+package db
+
+import (
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
+	"fmt"
+	"strings"
+	"time"
+)
+
+func now() int64 { return time.Now().Unix() }
+
+func RandomHex(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func GetSetting(d *sql.DB, key string) (string, error) {
+	var v string
+	err := d.QueryRow(`SELECT value FROM settings WHERE key=?`, key).Scan(&v)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return v, err
+}
+
+func SetSetting(d *sql.DB, key, value string) error {
+	_, err := d.Exec(`INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
+	return err
+}
+
+func CountUsers(d *sql.DB) (int, error) {
+	var n int
+	err := d.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&n)
+	return n, err
+}
+
+func CreateUser(d *sql.DB, username, passwordHash, role, remark string) (*User, error) {
+	tok, err := RandomHex(16)
+	if err != nil {
+		return nil, err
+	}
+	res, err := d.Exec(`INSERT INTO users(username,password_hash,role,remark,sub_token,created_at) VALUES(?,?,?,?,?,?)`,
+		username, passwordHash, role, remark, tok, now())
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	return GetUser(d, id)
+}
+
+func GetUser(d *sql.DB, id int64) (*User, error) {
+	u := &User{}
+	var en int
+	var tlim sql.NullInt64
+	err := d.QueryRow(`SELECT id,username,password_hash,role,remark,enabled,expires_at,traffic_limit,used_up,used_down,cycle_start,sub_token,created_at FROM users WHERE id=?`, id).
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Remark, &en, &u.ExpiresAt, &tlim, &u.UsedUp, &u.UsedDown, &u.CycleStart, &u.SubToken, &u.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	u.Enabled = en == 1
+	if tlim.Valid {
+		v := tlim.Int64
+		u.TrafficLimit = &v
+	}
+	attachPackage(d, u)
+	return u, nil
+}
+
+func GetUserByName(d *sql.DB, username string) (*User, error) {
+	var id int64
+	if err := d.QueryRow(`SELECT id FROM users WHERE username=?`, username).Scan(&id); err != nil {
+		return nil, err
+	}
+	return GetUser(d, id)
+}
+
+func GetUserBySubToken(d *sql.DB, token string) (*User, error) {
+	var id int64
+	if err := d.QueryRow(`SELECT id FROM users WHERE sub_token=?`, token).Scan(&id); err != nil {
+		return nil, err
+	}
+	return GetUser(d, id)
+}
+
+func attachPackage(d *sql.DB, u *User) {
+	var pid int64
+	var name string
+	var exp int64
+	err := d.QueryRow(`SELECT p.id, p.name, up.expires_at FROM user_packages up JOIN packages p ON p.id=up.package_id WHERE up.user_id=?`, u.ID).
+		Scan(&pid, &name, &exp)
+	if err != nil {
+		return
+	}
+	u.PackageID = &pid
+	u.PackageName = name
+	u.PkgExpires = exp
+}
+
+func queryIDs(d *sql.DB, q string, args ...any) ([]int64, error) {
+	rows, err := d.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func ListUsers(d *sql.DB) ([]*User, error) {
+	ids, err := queryIDs(d, `SELECT id FROM users ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*User, 0, len(ids))
+	for _, id := range ids {
+		u, err := GetUser(d, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, nil
+}
+
+func UpdateUser(d *sql.DB, u *User) error {
+	en := 0
+	if u.Enabled {
+		en = 1
+	}
+	_, err := d.Exec(`UPDATE users SET remark=?, enabled=?, expires_at=?, traffic_limit=? WHERE id=?`,
+		u.Remark, en, u.ExpiresAt, u.TrafficLimit, u.ID)
+	return err
+}
+
+func SetUserPassword(d *sql.DB, id int64, hash string) error {
+	_, err := d.Exec(`UPDATE users SET password_hash=? WHERE id=?`, hash, id)
+	return err
+}
+
+func RotateSubToken(d *sql.DB, id int64) (string, error) {
+	tok, err := RandomHex(16)
+	if err != nil {
+		return "", err
+	}
+	_, err = d.Exec(`UPDATE users SET sub_token=? WHERE id=?`, tok, id)
+	return tok, err
+}
+
+func ResetUserTraffic(d *sql.DB, id int64) error {
+	_, err := d.Exec(`UPDATE users SET used_up=0, used_down=0, cycle_start=? WHERE id=?`, now(), id)
+	return err
+}
+
+func AddUserTraffic(d *sql.DB, id int64, up, down int64) error {
+	_, err := d.Exec(`UPDATE users SET used_up=used_up+?, used_down=used_down+? WHERE id=?`, up, down, id)
+	return err
+}
+
+func DeleteUser(d *sql.DB, id int64) error {
+	_, err := d.Exec(`DELETE FROM users WHERE id=?`, id)
+	return err
+}
+
+func PutSession(d *sql.DB, token string, userID, expiresAt int64) error {
+	_, err := d.Exec(`INSERT INTO sessions(token,user_id,expires_at) VALUES(?,?,?)`, token, userID, expiresAt)
+	return err
+}
+
+func GetSessionUser(d *sql.DB, token string) (*User, error) {
+	var uid, exp int64
+	if err := d.QueryRow(`SELECT user_id, expires_at FROM sessions WHERE token=?`, token).Scan(&uid, &exp); err != nil {
+		return nil, err
+	}
+	if exp < now() {
+		_, _ = d.Exec(`DELETE FROM sessions WHERE token=?`, token)
+		return nil, sql.ErrNoRows
+	}
+	return GetUser(d, uid)
+}
+
+func DeleteSession(d *sql.DB, token string) error {
+	_, err := d.Exec(`DELETE FROM sessions WHERE token=?`, token)
+	return err
+}
+
+func CreateServer(d *sql.DB, name, publicHost, token string) (*Server, error) {
+	res, err := d.Exec(`INSERT INTO servers(name,public_host,token,created_at) VALUES(?,?,?,?)`, name, publicHost, token, now())
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	return GetServer(d, id)
+}
+
+func GetServer(d *sql.DB, id int64) (*Server, error) {
+	s := &Server{}
+	err := d.QueryRow(`SELECT id,name,public_host,token,online,last_seen,agent_ver,os,arch,connect_ip,config_rev,created_at FROM servers WHERE id=?`, id).
+		Scan(&s.ID, &s.Name, &s.PublicHost, &s.Token, &s.Online, &s.LastSeen, &s.AgentVer, &s.OS, &s.Arch, &s.ConnectIP, &s.ConfigRev, &s.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func GetServerByToken(d *sql.DB, token string) (*Server, error) {
+	var id int64
+	if err := d.QueryRow(`SELECT id FROM servers WHERE token=?`, token).Scan(&id); err != nil {
+		return nil, err
+	}
+	return GetServer(d, id)
+}
+
+func ListServers(d *sql.DB) ([]*Server, error) {
+	ids, err := queryIDs(d, `SELECT id FROM servers ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*Server, 0, len(ids))
+	for _, id := range ids {
+		s, err := GetServer(d, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+func UpdateServer(d *sql.DB, s *Server) error {
+	_, err := d.Exec(`UPDATE servers SET name=?, public_host=? WHERE id=?`, s.Name, s.PublicHost, s.ID)
+	return err
+}
+
+func DeleteServer(d *sql.DB, id int64) error {
+	_, err := d.Exec(`DELETE FROM servers WHERE id=?`, id)
+	return err
+}
+
+func MarkAllServersOffline(d *sql.DB) error {
+	_, err := d.Exec(`UPDATE servers SET online=0`)
+	return err
+}
+
+func MarkServerOnline(d *sql.DB, id int64, ver, osName, arch, ip string) error {
+	_, err := d.Exec(`UPDATE servers SET online=1, last_seen=?, agent_ver=?, os=?, arch=?, connect_ip=? WHERE id=?`,
+		now(), ver, osName, arch, ip, id)
+	return err
+}
+
+func MarkServerOffline(d *sql.DB, id int64) error {
+	_, err := d.Exec(`UPDATE servers SET online=0 WHERE id=?`, id)
+	return err
+}
+
+func SetServerRev(d *sql.DB, id int64, rev string) error {
+	_, err := d.Exec(`UPDATE servers SET config_rev=? WHERE id=?`, rev, id)
+	return err
+}
+
+func CreateCert(d *sql.DB, name, certPEM, keyPEM, domains string) (*Certificate, error) {
+	res, err := d.Exec(`INSERT INTO certificates(name,cert_pem,key_pem,domains) VALUES(?,?,?,?)`, name, certPEM, keyPEM, domains)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	return GetCert(d, id)
+}
+
+func GetCert(d *sql.DB, id int64) (*Certificate, error) {
+	c := &Certificate{}
+	err := d.QueryRow(`SELECT id,name,cert_pem,key_pem,domains FROM certificates WHERE id=?`, id).
+		Scan(&c.ID, &c.Name, &c.CertPEM, &c.KeyPEM, &c.Domains)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func ListCerts(d *sql.DB) ([]*Certificate, error) {
+	rows, err := d.Query(`SELECT id,name,domains FROM certificates ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Certificate
+	for rows.Next() {
+		c := &Certificate{}
+		if err := rows.Scan(&c.ID, &c.Name, &c.Domains); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func DeleteCert(d *sql.DB, id int64) error {
+	_, err := d.Exec(`DELETE FROM certificates WHERE id=?`, id)
+	return err
+}
+
+func CreatePackage(d *sql.DB, name string, trafficBytes int64, cycleDays, resetDay int, direction string) (*Package, error) {
+	if direction == "" {
+		direction = "oneway"
+	}
+	if cycleDays <= 0 {
+		cycleDays = 30
+	}
+	res, err := d.Exec(`INSERT INTO packages(name,traffic_bytes,cycle_days,reset_day,direction,created_at) VALUES(?,?,?,?,?,?)`,
+		name, trafficBytes, cycleDays, resetDay, direction, now())
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	return GetPackage(d, id)
+}
+
+func GetPackage(d *sql.DB, id int64) (*Package, error) {
+	p := &Package{}
+	err := d.QueryRow(`SELECT id,name,traffic_bytes,cycle_days,reset_day,direction,created_at FROM packages WHERE id=?`, id).
+		Scan(&p.ID, &p.Name, &p.TrafficBytes, &p.CycleDays, &p.ResetDay, &p.Direction, &p.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := d.Query(`SELECT inbound_id, multiplier FROM package_inbounds WHERE package_id=?`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var iid int64
+		var m float64
+		if err := rows.Scan(&iid, &m); err != nil {
+			return nil, err
+		}
+		p.InboundIDs = append(p.InboundIDs, iid)
+		p.Multipliers = append(p.Multipliers, m)
+	}
+	return p, rows.Err()
+}
+
+func ListPackages(d *sql.DB) ([]*Package, error) {
+	ids, err := queryIDs(d, `SELECT id FROM packages ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*Package, 0, len(ids))
+	for _, id := range ids {
+		p, err := GetPackage(d, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+func SetPackageInbounds(d *sql.DB, pkgID int64, inboundIDs []int64, multipliers []float64) error {
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM package_inbounds WHERE package_id=?`, pkgID); err != nil {
+		return err
+	}
+	for i, iid := range inboundIDs {
+		m := 1.0
+		if i < len(multipliers) && multipliers[i] > 0 {
+			m = multipliers[i]
+		}
+		if _, err := tx.Exec(`INSERT INTO package_inbounds(package_id,inbound_id,multiplier) VALUES(?,?,?)`, pkgID, iid, m); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func UpdatePackage(d *sql.DB, p *Package) error {
+	_, err := d.Exec(`UPDATE packages SET name=?, traffic_bytes=?, cycle_days=?, reset_day=?, direction=? WHERE id=?`,
+		p.Name, p.TrafficBytes, p.CycleDays, p.ResetDay, p.Direction, p.ID)
+	return err
+}
+
+func DeletePackage(d *sql.DB, id int64) error {
+	if _, err := d.Exec(`DELETE FROM user_packages WHERE package_id=?`, id); err != nil {
+		return err
+	}
+	_, err := d.Exec(`DELETE FROM packages WHERE id=?`, id)
+	return err
+}
+
+func BindUserPackage(d *sql.DB, userID, packageID, expiresAt int64) error {
+	_, err := d.Exec(`INSERT INTO user_packages(user_id,package_id,bound_at,expires_at) VALUES(?,?,?,?)
+		ON CONFLICT(user_id) DO UPDATE SET package_id=excluded.package_id, bound_at=excluded.bound_at, expires_at=excluded.expires_at`,
+		userID, packageID, now(), expiresAt)
+	if err != nil {
+		return err
+	}
+	_, err = d.Exec(`UPDATE users SET cycle_start=?, used_up=0, used_down=0, expires_at=? WHERE id=?`, now(), expiresAt, userID)
+	return err
+}
+
+func UnbindUserPackage(d *sql.DB, userID int64) error {
+	_, err := d.Exec(`DELETE FROM user_packages WHERE user_id=?`, userID)
+	return err
+}
+
+func CreateInbound(d *sql.DB, in *Inbound) (*Inbound, error) {
+	res, err := d.Exec(`INSERT INTO inbounds(server_id,name,profile,protocol,network,security,core,listen,port,enabled,settings,cert_id,line_kind,exit_inbound_id,exit_uri,created_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		in.ServerID, in.Name, in.Profile, in.Protocol, in.Network, in.Security, in.Core, in.Listen, in.Port, boolInt(in.Enabled),
+		in.Settings, in.CertID, nz(in.LineKind, "direct"), in.ExitInboundID, in.ExitURI, now())
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	return GetInbound(d, id)
+}
+
+func GetInbound(d *sql.DB, id int64) (*Inbound, error) {
+	in := &Inbound{}
+	var en int
+	var certID, exitID sql.NullInt64
+	err := d.QueryRow(`SELECT i.id,i.server_id,i.name,i.profile,i.protocol,i.network,i.security,i.core,i.listen,i.port,i.enabled,i.settings,i.cert_id,i.line_kind,i.exit_inbound_id,i.exit_uri,i.created_at,
+		s.name, s.public_host, s.online
+		FROM inbounds i JOIN servers s ON s.id=i.server_id WHERE i.id=?`, id).
+		Scan(&in.ID, &in.ServerID, &in.Name, &in.Profile, &in.Protocol, &in.Network, &in.Security, &in.Core, &in.Listen, &in.Port, &en, &in.Settings, &certID, &in.LineKind, &exitID, &in.ExitURI, &in.CreatedAt,
+			&in.ServerName, &in.ServerHost, &in.ServerOnline)
+	if err != nil {
+		return nil, err
+	}
+	in.Enabled = en == 1
+	if certID.Valid {
+		v := certID.Int64
+		in.CertID = &v
+	}
+	if exitID.Valid {
+		v := exitID.Int64
+		in.ExitInboundID = &v
+	}
+	return in, nil
+}
+
+func ListInbounds(d *sql.DB) ([]*Inbound, error) {
+	ids, err := queryIDs(d, `SELECT id FROM inbounds ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	return getInbounds(d, ids)
+}
+
+func ListInboundsByServer(d *sql.DB, serverID int64) ([]*Inbound, error) {
+	ids, err := queryIDs(d, `SELECT id FROM inbounds WHERE server_id=? ORDER BY id`, serverID)
+	if err != nil {
+		return nil, err
+	}
+	return getInbounds(d, ids)
+}
+
+func getInbounds(d *sql.DB, ids []int64) ([]*Inbound, error) {
+	out := make([]*Inbound, 0, len(ids))
+	for _, id := range ids {
+		in, err := GetInbound(d, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, in)
+	}
+	return out, nil
+}
+
+func UsedPortsOnServer(d *sql.DB, serverID int64, excludeID int64) (map[int]struct{}, error) {
+	rows, err := d.Query(`SELECT id, port FROM inbounds WHERE server_id=?`, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	used := map[int]struct{}{}
+	for rows.Next() {
+		var id int64
+		var port int
+		if err := rows.Scan(&id, &port); err != nil {
+			return nil, err
+		}
+		if id == excludeID {
+			continue
+		}
+		used[port] = struct{}{}
+	}
+	return used, rows.Err()
+}
+
+func UpdateInbound(d *sql.DB, in *Inbound) error {
+	_, err := d.Exec(`UPDATE inbounds SET name=?, port=?, enabled=?, settings=?, cert_id=?, line_kind=?, exit_inbound_id=?, exit_uri=? WHERE id=?`,
+		in.Name, in.Port, boolInt(in.Enabled), in.Settings, in.CertID, nz(in.LineKind, "direct"), in.ExitInboundID, in.ExitURI, in.ID)
+	return err
+}
+
+func DeleteInbound(d *sql.DB, id int64) error {
+	_, err := d.Exec(`DELETE FROM inbounds WHERE id=?`, id)
+	return err
+}
+
+func UpsertClient(d *sql.DB, c *Client) error {
+	_, err := d.Exec(`INSERT INTO clients(inbound_id,user_id,email,uuid,password,username,enabled) VALUES(?,?,?,?,?,?,?)
+		ON CONFLICT(inbound_id,user_id) DO UPDATE SET email=excluded.email, uuid=excluded.uuid, password=excluded.password, username=excluded.username, enabled=excluded.enabled`,
+		c.InboundID, c.UserID, c.Email, c.UUID, c.Password, c.Username, boolInt(c.Enabled))
+	return err
+}
+
+func ListClientsByInbound(d *sql.DB, inboundID int64) ([]*Client, error) {
+	rows, err := d.Query(`SELECT id,inbound_id,user_id,email,uuid,password,username,enabled FROM clients WHERE inbound_id=?`, inboundID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanClients(rows)
+}
+
+func ListClientsByUser(d *sql.DB, userID int64) ([]*Client, error) {
+	rows, err := d.Query(`SELECT id,inbound_id,user_id,email,uuid,password,username,enabled FROM clients WHERE user_id=?`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanClients(rows)
+}
+
+func scanClients(rows *sql.Rows) ([]*Client, error) {
+	var out []*Client
+	for rows.Next() {
+		c := &Client{}
+		var en int
+		if err := rows.Scan(&c.ID, &c.InboundID, &c.UserID, &c.Email, &c.UUID, &c.Password, &c.Username, &en); err != nil {
+			return nil, err
+		}
+		c.Enabled = en == 1
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func SetClientsEnabledForUser(d *sql.DB, userID int64, enabled bool) error {
+	_, err := d.Exec(`UPDATE clients SET enabled=? WHERE user_id=?`, boolInt(enabled), userID)
+	return err
+}
+
+func DeleteClientsForUser(d *sql.DB, userID int64) error {
+	_, err := d.Exec(`DELETE FROM clients WHERE user_id=?`, userID)
+	return err
+}
+
+func AddDailyTraffic(d *sql.DB, day string, userID, inboundID, up, down int64) error {
+	_, err := d.Exec(`INSERT INTO traffic_daily(day,user_id,inbound_id,up,down) VALUES(?,?,?,?,?)
+		ON CONFLICT(day,user_id,inbound_id) DO UPDATE SET up=up+excluded.up, down=down+excluded.down`,
+		day, userID, inboundID, up, down)
+	return err
+}
+
+func ClientByEmail(d *sql.DB, email string) (*Client, error) {
+	c := &Client{}
+	var en int
+	err := d.QueryRow(`SELECT id,inbound_id,user_id,email,uuid,password,username,enabled FROM clients WHERE email=?`, email).
+		Scan(&c.ID, &c.InboundID, &c.UserID, &c.Email, &c.UUID, &c.Password, &c.Username, &en)
+	if err != nil {
+		return nil, err
+	}
+	c.Enabled = en == 1
+	return c, nil
+}
+
+func UserBilledBytes(u *User, pkg *Package) int64 {
+	raw := u.UsedUp + u.UsedDown
+	if pkg != nil && pkg.Direction == "twoway" {
+		return raw * 2
+	}
+	return raw
+}
+
+func UserLimitBytes(u *User, pkg *Package) int64 {
+	if u.TrafficLimit != nil {
+		return *u.TrafficLimit
+	}
+	if pkg != nil {
+		return pkg.TrafficBytes
+	}
+	return 0
+}
+
+func UserAccessOK(u *User, pkg *Package) bool {
+	if u == nil || !u.Enabled || u.Role == "admin" {
+		return u != nil && u.Enabled
+	}
+	if u.ExpiresAt > 0 && u.ExpiresAt < now() {
+		return false
+	}
+	if u.PkgExpires > 0 && u.PkgExpires < now() {
+		return false
+	}
+	if pkg == nil && u.PackageID == nil {
+		return false
+	}
+	lim := UserLimitBytes(u, pkg)
+	if lim > 0 && UserBilledBytes(u, pkg) >= lim {
+		return false
+	}
+	return true
+}
+
+func InboundIDsForUser(d *sql.DB, u *User) ([]int64, error) {
+	if u.Role == "admin" {
+		rows, err := d.Query(`SELECT id FROM inbounds WHERE enabled=1`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var ids []int64
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				return nil, err
+			}
+			ids = append(ids, id)
+		}
+		return ids, rows.Err()
+	}
+	if u.PackageID == nil {
+		return nil, nil
+	}
+	p, err := GetPackage(d, *u.PackageID)
+	if err != nil {
+		return nil, err
+	}
+	if len(p.InboundIDs) == 0 {
+		rows, err := d.Query(`SELECT id FROM inbounds WHERE enabled=1`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var ids []int64
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				return nil, err
+			}
+			ids = append(ids, id)
+		}
+		return ids, rows.Err()
+	}
+	return p.InboundIDs, nil
+}
+
+func AddAudit(d *sql.DB, userID *int64, action, detail string) {
+	_, _ = d.Exec(`INSERT INTO audit(at,user_id,action,detail) VALUES(?,?,?,?)`, now(), userID, action, detail)
+}
+
+func boolInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+func nz(s, def string) string {
+	if strings.TrimSpace(s) == "" {
+		return def
+	}
+	return s
+}
+
+func EmailFor(userID, inboundID int64) string {
+	return fmt.Sprintf("u%d.i%d", userID, inboundID)
+}
+
+func TouchServerLastSeen(d *sql.DB, id int64) error {
+	_, err := d.Exec(`UPDATE servers SET last_seen=? WHERE id=?`, now(), id)
+	return err
+}
+
+func UpdateCert(d *sql.DB, c *Certificate) error {
+	_, err := d.Exec(`UPDATE certificates SET name=?, cert_pem=?, key_pem=?, domains=? WHERE id=?`,
+		c.Name, c.CertPEM, c.KeyPEM, c.Domains, c.ID)
+	return err
+}
+
+func CountInboundsByCert(d *sql.DB, certID int64) (int, error) {
+	var n int
+	err := d.QueryRow(`SELECT COUNT(*) FROM inbounds WHERE cert_id=?`, certID).Scan(&n)
+	return n, err
+}
+
+func CountExitsTo(d *sql.DB, inboundID int64) (int, error) {
+	var n int
+	err := d.QueryRow(`SELECT COUNT(*) FROM inbounds WHERE exit_inbound_id=?`, inboundID).Scan(&n)
+	return n, err
+}
+
+func GetClient(d *sql.DB, inboundID, userID int64) (*Client, error) {
+	c := &Client{}
+	var en int
+	err := d.QueryRow(`SELECT id,inbound_id,user_id,email,uuid,password,username,enabled FROM clients WHERE inbound_id=? AND user_id=?`, inboundID, userID).
+		Scan(&c.ID, &c.InboundID, &c.UserID, &c.Email, &c.UUID, &c.Password, &c.Username, &en)
+	if err != nil {
+		return nil, err
+	}
+	c.Enabled = en == 1
+	return c, nil
+}
+
+func DeleteClientsNotIn(d *sql.DB, userID int64, keep []int64) error {
+	if len(keep) == 0 {
+		return DeleteClientsForUser(d, userID)
+	}
+	args := make([]any, 0, 1+len(keep))
+	args = append(args, userID)
+	var b strings.Builder
+	b.WriteString(`DELETE FROM clients WHERE user_id=? AND inbound_id NOT IN (`)
+	for i, id := range keep {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteByte('?')
+		args = append(args, id)
+	}
+	b.WriteByte(')')
+	_, err := d.Exec(b.String(), args...)
+	return err
+}
+
+func ListAudit(d *sql.DB, limit int) ([]*Audit, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := d.Query(`SELECT id,at,user_id,action,detail FROM audit ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Audit
+	for rows.Next() {
+		a := &Audit{}
+		var uid sql.NullInt64
+		if err := rows.Scan(&a.ID, &a.At, &uid, &a.Action, &a.Detail); err != nil {
+			return nil, err
+		}
+		if uid.Valid {
+			v := uid.Int64
+			a.UserID = &v
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func PackageMultiplier(p *Package, inboundID int64) float64 {
+	if p == nil {
+		return 1
+	}
+	for i, id := range p.InboundIDs {
+		if id == inboundID {
+			if i < len(p.Multipliers) && p.Multipliers[i] > 0 {
+				return p.Multipliers[i]
+			}
+			return 1
+		}
+	}
+	return 1
+}
+
+func DeleteExpiredSessions(d *sql.DB) error {
+	_, err := d.Exec(`DELETE FROM sessions WHERE expires_at < ?`, now())
+	return err
+}

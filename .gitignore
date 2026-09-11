@@ -1,0 +1,10 @@
+/bin/
+/data/
+/web/node_modules/
+/web/dist/
+.npm-cache/
+.gocache/
+.gopath/
+.gomod/
+*.exe
+.DS_Store
