@@ -52,7 +52,7 @@ export function UserProvider({ children }) {
   const toast = useCallback((msg, type) => {
     const id = Date.now() + Math.random()
     setToasts(t => [...t.slice(-3), { id, msg, type: type || 'ok' }])
-    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3200)
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), type === 'error' ? 6400 : 3200)
   }, [])
 
   const applySession = useCallback((data) => {
@@ -175,7 +175,7 @@ export function Layout({ children }) {
             style={{ color: 'var(--color-gold)', border: '1px solid color-mix(in srgb, var(--color-gold) 55%, transparent)', background: 'var(--color-accent-soft)' }}>L</div>
           <div className="min-w-0">
             <div className="font-display text-[28px] leading-none tracking-tight truncate">{panelName || 'liking'}</div>
-            <div className="kicker mt-2">{isAdmin ? 'Control' : 'Member'}{version ? ` · ${version}` : ''}</div>
+            <div className="kicker mt-2">{isAdmin ? 'Control' : 'Member'}{version ? ` · v${version}` : ''}</div>
           </div>
         </div>
         <div className="gold-rule mx-6 mb-3" />

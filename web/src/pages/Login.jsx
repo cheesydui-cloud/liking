@@ -43,31 +43,34 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-dvh grid lg:grid-cols-2">
-      <div className="hidden lg:flex flex-col justify-between p-12 relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(900px_500px_at_20%_10%,color-mix(in_srgb,var(--color-gold)_22%,transparent),transparent_60%)]" />
+    <div className="min-h-dvh grid lg:grid-cols-[1.05fr_0.95fr]">
+      <div className="hidden lg:flex flex-col justify-between p-14 relative overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(900px_520px_at_18%_0%,color-mix(in_srgb,var(--color-gold)_26%,transparent),transparent_58%)]" />
+        <div className="absolute -right-10 -bottom-16 font-display text-[420px] leading-none select-none pointer-events-none"
+          style={{ color: 'color-mix(in srgb, var(--color-gold) 9%, transparent)' }}>L</div>
         <div className="relative">
-          <div className="w-12 h-12 rounded-xl grid place-items-center font-display text-[26px] mb-8"
-            style={{ color: 'var(--color-gold)', border: '1px solid color-mix(in srgb, var(--color-gold) 50%, transparent)' }}>L</div>
+          <div className="w-12 h-12 rounded-xl grid place-items-center font-display text-[26px] mb-10"
+            style={{ color: 'var(--color-gold)', border: '1px solid color-mix(in srgb, var(--color-gold) 50%, transparent)', background: 'var(--color-accent-soft)' }}>L</div>
           <div className="kicker">Private Line Desk</div>
-          <div className="font-display text-[64px] leading-[0.9] mt-4">{panelName}</div>
+          <div className="font-display text-[72px] leading-[0.86] mt-5 tracking-tight">{panelName}</div>
         </div>
         <div className="relative max-w-md">
-          <div className="gold-rule mb-6" />
-          <p className="font-display text-[28px] leading-snug text-ink">一条线路，一个出口。<br />少一点花哨，多一点稳。</p>
-          <p className="text-[13.5px] text-ink-mut mt-4">Xray 默认内核 · AnyTLS 走 sing-box · Mieru 走 mita。主控与节点反向纳管。</p>
+          <div className="gold-rule mb-7" />
+          <p className="font-display text-[30px] leading-snug text-ink">一条线路，一个出口。<br />少一点花哨，多一点稳。</p>
+          <p className="text-[13.5px] text-ink-mut mt-5 leading-relaxed">Xray 默认内核 · AnyTLS 走 sing-box · Mieru 走 mita。主控与节点反向纳管，配置下发失败会写在服务器页。</p>
         </div>
-        <div className="relative kicker">v1</div>
+        <div className="relative kicker">Quiet luxury · v1</div>
       </div>
-      <div className="grid place-items-center p-6 sm:p-10">
-        <div className="card w-full max-w-[420px] p-8 sm:p-10">
+      <div className="grid place-items-center p-6 sm:p-12">
+        <div className="card w-full max-w-[440px] p-8 sm:p-11" style={{ boxShadow: '0 30px 80px -40px color-mix(in srgb, var(--color-gold) 35%, transparent)' }}>
           <div className="lg:hidden mb-8">
             <div className="kicker">Sign in</div>
-            <div className="font-display text-[36px] leading-none mt-1">{panelName}</div>
+            <div className="font-display text-[40px] leading-none mt-1">{panelName}</div>
           </div>
-          <div className="hidden lg:block mb-8">
+          <div className="hidden lg:block mb-9">
             <div className="kicker">Welcome back</div>
-            <h1 className="font-display text-[34px] leading-none mt-1">登录面板</h1>
+            <h1 className="font-display text-[38px] leading-none mt-2">登录面板</h1>
+            <p className="text-[13px] text-ink-mut mt-3">管理员进入控制台，用户查看自己的订阅。</p>
           </div>
           {error && (
             <div role="alert" className="mb-5 text-[13px] rounded-xl px-3 py-2.5" style={{ color: 'var(--color-danger)', background: 'var(--color-danger-soft)' }}>

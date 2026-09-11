@@ -42,7 +42,7 @@ bash <(curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/cheesyd
   --gh-proxy https://gh-proxy.com/
 ```
 
-浏览器打开 `http://服务器IP:8899`。首次安装若未指定密码，终端会打印 admin 密码。
+浏览器打开 `http://服务器IP:8899`。首次安装若未指定密码，终端会打印 admin 密码。配置下发失败会显示在「服务器」页。
 
 ## 升级
 
@@ -53,7 +53,7 @@ liking-upgrade
 指定版本：
 
 ```bash
-liking-upgrade --release v0.1.0
+liking-upgrade --release v0.1.1
 ```
 
 只更新安装脚本本身：
@@ -94,7 +94,9 @@ liking-upgrade reset-password --password '新密码'
 | AnyTLS | `sing-box` ≥ 1.12 |
 | Mieru | `mita` |
 
-Agent 只在有对应入站时才拉起该内核。
+Agent 只在有对应入站时才拉起该内核。数据目录：`/var/lib/liking/agent`。
+
+升级面板后请重新执行节点安装命令。443 已被占用时不要强开 443 入站，换端口即可。
 
 ## 本地开发
 

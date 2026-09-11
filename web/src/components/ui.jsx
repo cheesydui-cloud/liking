@@ -81,7 +81,7 @@ export function Field({ label, hint, children }) {
   )
 }
 
-export function Badge({ tone = 'muted', children }) {
+export function Badge({ tone = 'muted', children, className = '' }) {
   const map = {
     gold: { color: 'var(--color-gold)', bg: 'var(--color-accent-soft)' },
     ok: { color: 'var(--color-ok)', bg: 'var(--color-ok-soft)' },
@@ -90,7 +90,7 @@ export function Badge({ tone = 'muted', children }) {
   }
   const t = map[tone] || map.muted
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ color: t.color, background: t.bg }}>
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${className}`} style={{ color: t.color, background: t.bg }}>
       {children}
     </span>
   )

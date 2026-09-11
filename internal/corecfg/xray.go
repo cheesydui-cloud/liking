@@ -90,9 +90,12 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 	}
 
 	return map[string]any{
-		"log":   map[string]any{"loglevel": "warning"},
+		"log": map[string]any{
+			"access":   "none",
+			"loglevel": "warning",
+		},
 		"stats": map[string]any{},
-		"api":  map[string]any{"tag": "api", "services": []string{"StatsService"}},
+		"api":   map[string]any{"tag": "api", "services": []string{"StatsService"}},
 		"policy": map[string]any{
 			"levels": map[string]any{"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true}},
 			"system": map[string]any{"statsInboundUplink": true, "statsInboundDownlink": true},
@@ -103,7 +106,7 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 	}, nil
 }
 
-func inboundTag(id int64) string { return fmt.Sprintf("in-%d", id) }
+func inboundTag(id int64) string  { return fmt.Sprintf("in-%d", id) }
 func outboundTag(id int64) string { return fmt.Sprintf("ob-%d", id) }
 func socksTag(id int64) string    { return fmt.Sprintf("socks-%d", id) }
 func socksPort(id int64) int      { return 20000 + int(id) }

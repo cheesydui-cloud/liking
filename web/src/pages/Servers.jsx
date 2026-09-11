@@ -36,8 +36,8 @@ export default function Servers() {
   }
 
   const sync = async (id) => {
-    try { await api.post(`/servers/${id}/sync`); toast('已下发') }
-    catch (e) { toast(e.message, 'error') }
+    try { await api.post(`/servers/${id}/sync`); toast('已下发'); load() }
+    catch (e) { toast(e.message, 'error'); load() }
   }
 
   const del = async (id) => {
@@ -75,7 +75,10 @@ export default function Servers() {
               <tbody>
                 {list.map(s => (
                   <tr key={s.id}>
-                    <td className="font-medium">{s.name}</td>
+                    <td>
+                      <div className="font-medium">{s.name}</div>
+                      {s.last_error ? <div className="text-[12px] mt-1" style={{ color: 'var(--color-danger)' }}>{s.last_error}</div> : null}
+                    </td>
                     <td className="font-mono text-[12px]">
                       {s.public_host || '—'}
                       <button type="button" className="linkish ml-2 text-[12px]" onClick={() => saveHost(s)}>改</button>
@@ -83,7 +86,8 @@ export default function Servers() {
                     <td>
                       <span className={`dot ${s.online ? 'dot-on' : 'dot-off'}`} />
                       <span className="ml-2">{s.online ? '在线' : '离线'}</span>
-                      {s.online ? <Badge tone="ok" className="ml-2">live</Badge> : null}
+                      {s.online && !s.last_error ? <Badge tone="ok" className="ml-2">live</Badge> : null}
+                      {s.last_error ? <Badge tone="danger" className="ml-2">下发失败</Badge> : null}
                     </td>
                     <td className="text-ink-mut text-[12px] font-mono">{s.agent_ver || '—'}</td>
                     <td className="whitespace-nowrap">

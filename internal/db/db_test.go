@@ -27,6 +27,23 @@ func TestOpenMigrateAndCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if s.LastError != "" || s.LastErrorAt != 0 {
+		t.Fatalf("last_error %+v", s)
+	}
+	if err := SetServerApplyError(d, s.ID, simpleErr("xray 未安装")); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = GetServer(d, s.ID)
+	if s.LastError != "xray 未安装" || s.LastErrorAt == 0 {
+		t.Fatalf("last_error set %+v", s)
+	}
+	if err := SetServerApplyError(d, s.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = GetServer(d, s.ID)
+	if s.LastError != "" {
+		t.Fatalf("last_error clear %q", s.LastError)
+	}
 	in := &Inbound{
 		ServerID: s.ID, Name: "a", Profile: "vless-reality", Protocol: "vless",
 		Network: "tcp", Security: "reality", Core: "xray", Listen: "0.0.0.0",
@@ -93,6 +110,10 @@ func TestListUsersDoesNotDeadlock(t *testing.T) {
 		t.Fatalf("got %d", len(list))
 	}
 }
+
+type simpleErr string
+
+func (e simpleErr) Error() string { return string(e) }
 
 func TestUserAccessExpired(t *testing.T) {
 	u := &User{Enabled: true, Role: "user", ExpiresAt: time.Now().Unix() - 10}

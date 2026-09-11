@@ -381,14 +381,15 @@ ExecStart=$INSTALL_DIR/liking-server --addr $(unit_quote "$PANEL_ADDR") --db $DA
 EOF
   fi
   systemctl daemon-reload
-  systemctl enable --now liking-server.service
+  systemctl enable liking-server.service
   if [[ -f "$SYSTEMD_DIR/liking-server.service.d/bootstrap.conf" ]]; then
     rm -f "$SYSTEMD_DIR/liking-server.service.d/bootstrap.conf"
     rmdir "$SYSTEMD_DIR/liking-server.service.d" 2>/dev/null || true
     write_server_unit "$PANEL_ADDR"
     systemctl daemon-reload
-    systemctl restart liking-server.service
   fi
+  # enable --now 不会重启已在跑的进程，升级必须 restart 才能载入新二进制
+  systemctl restart liking-server.service
   persist_script
   printf '%s\n' "$PANEL_ADDR" >"$ETC_DIR/addr"
   if command -v "$INSTALL_DIR/liking-server" >/dev/null 2>&1; then

@@ -7,7 +7,7 @@ set -euo pipefail
 INSTALL_DIR="/usr/local/sbin"
 SYSTEMD_DIR="/etc/systemd/system"
 ETC_DIR="/etc/liking"
-DATA_DIR="/var/lib/liking"
+DATA_DIR="/var/lib/liking/agent"
 LIKING_PANEL_URL_BAKED='__LIKING_PANEL_URL__'
 
 die() { echo "错误: $*" >&2; exit 1; }
@@ -107,6 +107,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 ExecStart=$INSTALL_DIR/liking-agent --connect $CONNECT --token-file $ETC_DIR/panel.token --dir $DATA_DIR $INSECURE_FLAG
 Restart=always
 RestartSec=3
@@ -117,7 +118,8 @@ WantedBy=multi-user.target
 UNIT
 
 systemctl daemon-reload
-systemctl enable --now liking-agent.service
+systemctl enable liking-agent.service
+systemctl restart liking-agent.service
 ok "liking-agent 已启动"
 note "请在节点安装 xray / sing-box / mita 到 PATH（按入站协议需要）"
 systemctl --no-pager --full status liking-agent.service || true

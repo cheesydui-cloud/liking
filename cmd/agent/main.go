@@ -23,7 +23,7 @@ func main() {
 	fs.StringVar(&connect, "connect", "", "panel WebSocket URL (ws:// or wss://…/v1/agents)")
 	fs.StringVar(&token, "token", "", "server token")
 	fs.StringVar(&tokenFile, "token-file", "/etc/liking/panel.token", "token file if --token is empty")
-	fs.StringVar(&dir, "dir", "/var/lib/liking", "config/data directory")
+	fs.StringVar(&dir, "dir", "/var/lib/liking/agent", "config/data directory")
 	fs.BoolVar(&insecure, "insecure-connect", false, "allow plaintext ws://")
 	showVer := fs.Bool("version", false, "print version")
 	_ = fs.Parse(os.Args[1:])

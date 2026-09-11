@@ -31,6 +31,11 @@ export default function Dashboard() {
           </Link>
         ))}
       </div>
+      {(d.server_list || []).some(s => s.last_error) && (
+        <div className="notice mb-5">
+          有节点配置下发失败，打开「服务器」查看原因。常见原因：端口被占用、内核未安装。
+        </div>
+      )}
       <div className="card overflow-hidden">
         <div className="px-5 py-4 flex items-center justify-between border-b" style={{ borderColor: 'var(--color-line-soft)' }}>
           <div className="font-display text-[22px]">服务器</div>
@@ -50,6 +55,7 @@ export default function Dashboard() {
                     <td>
                       <span className={`dot ${s.online ? 'dot-on' : 'dot-off'}`} />
                       <span className="ml-2">{s.online ? '在线' : '离线'}</span>
+                      {s.last_error ? <Badge tone="danger" className="ml-2">下发失败</Badge> : null}
                     </td>
                     <td className="text-ink-mut">{[s.os, s.arch].filter(Boolean).join(' / ') || '—'}</td>
                   </tr>

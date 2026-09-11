@@ -67,7 +67,7 @@ func buildMita(inbounds []*db.Inbound, clients map[int64][]*db.Client) (map[stri
 	cfg := map[string]any{
 		"portBindings": bindings,
 		"users":        users,
-		"loggingLevel": "INFO",
+		"loggingLevel": "ERROR",
 	}
 	if len(egressProxies) > 0 {
 		cfg["egress"] = map[string]any{

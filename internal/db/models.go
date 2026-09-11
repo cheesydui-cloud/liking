@@ -20,18 +20,20 @@ type User struct {
 }
 
 type Server struct {
-	ID         int64  `json:"id"`
-	Name       string `json:"name"`
-	PublicHost string `json:"public_host"`
-	Token      string `json:"token,omitempty"`
-	Online     int    `json:"online"`
-	LastSeen   int64  `json:"last_seen"`
-	AgentVer   string `json:"agent_ver"`
-	OS         string `json:"os"`
-	Arch       string `json:"arch"`
-	ConnectIP  string `json:"connect_ip"`
-	ConfigRev  string `json:"config_rev"`
-	CreatedAt  int64  `json:"created_at"`
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	PublicHost  string `json:"public_host"`
+	Token       string `json:"token,omitempty"`
+	Online      int    `json:"online"`
+	LastSeen    int64  `json:"last_seen"`
+	AgentVer    string `json:"agent_ver"`
+	OS          string `json:"os"`
+	Arch        string `json:"arch"`
+	ConnectIP   string `json:"connect_ip"`
+	ConfigRev   string `json:"config_rev"`
+	LastError   string `json:"last_error"`
+	LastErrorAt int64  `json:"last_error_at"`
+	CreatedAt   int64  `json:"created_at"`
 }
 
 type Certificate struct {
@@ -43,38 +45,38 @@ type Certificate struct {
 }
 
 type Package struct {
-	ID           int64    `json:"id"`
-	Name         string   `json:"name"`
-	TrafficBytes int64    `json:"traffic_bytes"`
-	CycleDays    int      `json:"cycle_days"`
-	ResetDay     int      `json:"reset_day"`
-	Direction    string   `json:"direction"`
-	CreatedAt    int64    `json:"created_at"`
-	InboundIDs   []int64  `json:"inbound_ids,omitempty"`
+	ID           int64     `json:"id"`
+	Name         string    `json:"name"`
+	TrafficBytes int64     `json:"traffic_bytes"`
+	CycleDays    int       `json:"cycle_days"`
+	ResetDay     int       `json:"reset_day"`
+	Direction    string    `json:"direction"`
+	CreatedAt    int64     `json:"created_at"`
+	InboundIDs   []int64   `json:"inbound_ids,omitempty"`
 	Multipliers  []float64 `json:"multipliers,omitempty"`
 }
 
 type Inbound struct {
-	ID            int64   `json:"id"`
-	ServerID      int64   `json:"server_id"`
-	Name          string  `json:"name"`
-	Profile       string  `json:"profile"`
-	Protocol      string  `json:"protocol"`
-	Network       string  `json:"network"`
-	Security      string  `json:"security"`
-	Core          string  `json:"core"`
-	Listen        string  `json:"listen"`
-	Port          int     `json:"port"`
-	Enabled       bool    `json:"enabled"`
-	Settings      string  `json:"settings"`
-	CertID        *int64  `json:"cert_id"`
-	LineKind      string  `json:"line_kind"`
-	ExitInboundID *int64  `json:"exit_inbound_id"`
-	ExitURI       string  `json:"exit_uri"`
-	CreatedAt     int64   `json:"created_at"`
-	ServerName    string  `json:"server_name,omitempty"`
-	ServerHost    string  `json:"server_host,omitempty"`
-	ServerOnline  int     `json:"server_online,omitempty"`
+	ID            int64  `json:"id"`
+	ServerID      int64  `json:"server_id"`
+	Name          string `json:"name"`
+	Profile       string `json:"profile"`
+	Protocol      string `json:"protocol"`
+	Network       string `json:"network"`
+	Security      string `json:"security"`
+	Core          string `json:"core"`
+	Listen        string `json:"listen"`
+	Port          int    `json:"port"`
+	Enabled       bool   `json:"enabled"`
+	Settings      string `json:"settings"`
+	CertID        *int64 `json:"cert_id"`
+	LineKind      string `json:"line_kind"`
+	ExitInboundID *int64 `json:"exit_inbound_id"`
+	ExitURI       string `json:"exit_uri"`
+	CreatedAt     int64  `json:"created_at"`
+	ServerName    string `json:"server_name,omitempty"`
+	ServerHost    string `json:"server_host,omitempty"`
+	ServerOnline  int    `json:"server_online,omitempty"`
 }
 
 type Client struct {

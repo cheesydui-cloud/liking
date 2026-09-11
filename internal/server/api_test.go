@@ -173,6 +173,9 @@ func TestLoginAndServerAndInbound(t *testing.T) {
 	if tok, _ := servers.Servers[0]["token"].(string); tok != "" {
 		t.Fatal("list should not leak token")
 	}
+	if errMsg, _ := servers.Servers[0]["last_error"].(string); errMsg != "" {
+		t.Fatalf("last_error %q", errMsg)
+	}
 
 	u, _ := url.Parse(ts.URL)
 	if len(jar.Cookies(u)) == 0 {

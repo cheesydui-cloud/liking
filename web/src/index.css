@@ -147,7 +147,9 @@ textarea.input-field { height: auto; min-height: 7rem; padding-top: 0.7rem; padd
   @apply rounded-2xl border;
   background: color-mix(in srgb, var(--color-surface) 86%, transparent);
   border-color: var(--color-line);
-  box-shadow: 0 1px 0 color-mix(in srgb, white 6%, transparent) inset;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, white 6%, transparent) inset,
+    0 24px 60px -48px color-mix(in srgb, var(--color-gold) 40%, transparent);
   backdrop-filter: blur(16px);
 }
 
@@ -217,4 +219,11 @@ table.data tbody tr:hover { background: var(--color-accent-soft); }
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--color-gold), transparent);
   opacity: 0.55;
+}
+
+.notice {
+  @apply text-[13px] rounded-xl px-3.5 py-2.5 leading-relaxed;
+  color: var(--color-gold);
+  background: var(--color-accent-soft);
+  border: 1px solid color-mix(in srgb, var(--color-gold) 28%, transparent);
 }

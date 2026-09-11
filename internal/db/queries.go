@@ -209,8 +209,8 @@ func CreateServer(d *sql.DB, name, publicHost, token string) (*Server, error) {
 
 func GetServer(d *sql.DB, id int64) (*Server, error) {
 	s := &Server{}
-	err := d.QueryRow(`SELECT id,name,public_host,token,online,last_seen,agent_ver,os,arch,connect_ip,config_rev,created_at FROM servers WHERE id=?`, id).
-		Scan(&s.ID, &s.Name, &s.PublicHost, &s.Token, &s.Online, &s.LastSeen, &s.AgentVer, &s.OS, &s.Arch, &s.ConnectIP, &s.ConfigRev, &s.CreatedAt)
+	err := d.QueryRow(`SELECT id,name,public_host,token,online,last_seen,agent_ver,os,arch,connect_ip,config_rev,last_error,last_error_at,created_at FROM servers WHERE id=?`, id).
+		Scan(&s.ID, &s.Name, &s.PublicHost, &s.Token, &s.Online, &s.LastSeen, &s.AgentVer, &s.OS, &s.Arch, &s.ConnectIP, &s.ConfigRev, &s.LastError, &s.LastErrorAt, &s.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -269,6 +269,19 @@ func MarkServerOffline(d *sql.DB, id int64) error {
 
 func SetServerRev(d *sql.DB, id int64, rev string) error {
 	_, err := d.Exec(`UPDATE servers SET config_rev=? WHERE id=?`, rev, id)
+	return err
+}
+
+func SetServerApplyError(d *sql.DB, id int64, applyErr error) error {
+	if applyErr == nil {
+		_, err := d.Exec(`UPDATE servers SET last_error='', last_error_at=0 WHERE id=?`, id)
+		return err
+	}
+	msg := applyErr.Error()
+	if len(msg) > 2000 {
+		msg = msg[:2000]
+	}
+	_, err := d.Exec(`UPDATE servers SET last_error=?, last_error_at=? WHERE id=?`, msg, now(), id)
 	return err
 }
 

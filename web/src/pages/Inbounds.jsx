@@ -59,9 +59,10 @@ export default function Inbounds() {
     if (f.line_kind === 'chain' && f.exit_inbound_id) body.exit_inbound_id = Number(f.exit_inbound_id)
     setBusy(true)
     try {
-      await api.post('/inbounds', body)
+      const d = await api.post('/inbounds', body)
       setF({ ...empty, server_id: f.server_id })
-      toast('已创建')
+      if (d.apply_error) toast(d.apply_error, 'error')
+      else toast('已创建')
       load()
     } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
@@ -75,7 +76,8 @@ export default function Inbounds() {
 
   const toggle = async (inb) => {
     try {
-      await api.put(`/inbounds/${inb.id}`, { enabled: !inb.enabled, name: inb.name, port: inb.port, settings: inb.settings, line_kind: inb.line_kind, exit_inbound_id: inb.exit_inbound_id, cert_id: inb.cert_id })
+      const d = await api.put(`/inbounds/${inb.id}`, { enabled: !inb.enabled, name: inb.name, port: inb.port, settings: inb.settings, line_kind: inb.line_kind, exit_inbound_id: inb.exit_inbound_id, cert_id: inb.cert_id })
+      if (d.apply_error) toast(d.apply_error, 'error')
       load()
     } catch (e) { toast(e.message, 'error') }
   }
@@ -102,7 +104,7 @@ export default function Inbounds() {
           <Field label="名称">
             <input className="input-field" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} required placeholder="HK-443" />
           </Field>
-          <Field label="端口">
+          <Field label="端口" hint="443 若已被 Nginx / 其他面板占用，请改 8443">
             <input className="input-field" type="number" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} required />
           </Field>
           {meta?.need_tls && (
@@ -160,6 +162,9 @@ export default function Inbounds() {
             </Field>
           )}
         </div>
+        {Number(f.port) === 443 && (
+          <div className="notice mt-4">443 是 REALITY 常用口。如果这台机器上已有别的服务占用 443，创建会失败并保留原配置。</div>
+        )}
         <div className="mt-4">
           <button className="btn-primary" disabled={busy}><Icon name="plus" size={16} /> 创建入站</button>
         </div>

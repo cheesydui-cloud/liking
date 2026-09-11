@@ -21,6 +21,10 @@ type Server struct {
 	loginLimiter *loginLimiter
 	stop         chan struct{}
 	stopOnce     sync.Once
+	pushMu       sync.Map // int64 -> *sync.Mutex
+	kickMu       sync.Mutex
+	kickWant     map[int64]bool
+	kickRun      map[int64]bool
 }
 
 func New(d *sql.DB) (*Server, error) {
@@ -33,6 +37,8 @@ func New(d *sql.DB) (*Server, error) {
 		Hub:          hub,
 		loginLimiter: newLoginLimiter(),
 		stop:         make(chan struct{}),
+		kickWant:     map[int64]bool{},
+		kickRun:      map[int64]bool{},
 	}
 	hub.OnTrafficUpdate = func(userID int64) {
 		u, err := db.GetUser(d, userID)

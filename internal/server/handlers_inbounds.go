@@ -104,15 +104,9 @@ func (s *Server) handleCreateInbound(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.syncServers(created.ServerID)
-	if created.ExitInboundID != nil {
-		if land, err := db.GetInbound(s.DB, *created.ExitInboundID); err == nil {
-			s.syncServers(land.ServerID)
-		}
-	}
 	u := userFromCtx(r.Context())
 	db.AddAudit(s.DB, &u.ID, "inbound.create", created.Name)
-	jsonOK(w, map[string]any{"inbound": inboundJSON(created)})
+	s.respondAfterApply(w, map[string]any{"inbound": inboundJSON(created)}, created.ServerID, exitServerID(s, created))
 }
 
 func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
@@ -168,14 +162,8 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.syncServers(in.ServerID)
-	if in.ExitInboundID != nil {
-		if land, err := db.GetInbound(s.DB, *in.ExitInboundID); err == nil {
-			s.syncServers(land.ServerID)
-		}
-	}
 	fresh, _ := db.GetInbound(s.DB, in.ID)
-	jsonOK(w, map[string]any{"inbound": inboundJSON(fresh)})
+	s.respondAfterApply(w, map[string]any{"inbound": inboundJSON(fresh)}, in.ServerID, exitServerID(s, in))
 }
 
 func (s *Server) handleDeleteInbound(w http.ResponseWriter, r *http.Request) {
@@ -199,8 +187,7 @@ func (s *Server) handleDeleteInbound(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.syncServers(sid)
-	jsonOK(w, map[string]any{"ok": true})
+	s.respondAfterApply(w, map[string]any{"ok": true}, sid)
 }
 
 func (s *Server) prepareInbound(in *db.Inbound) error {
@@ -238,3 +225,35 @@ const (
 	errNeedCert  simpleError = "该协议需要先上传 TLS 证书"
 	errPortTaken simpleError = "该服务器上端口已被占用"
 )
+
+func exitServerID(s *Server, in *db.Inbound) int64 {
+	if in == nil || in.ExitInboundID == nil || *in.ExitInboundID == 0 {
+		return 0
+	}
+	land, err := db.GetInbound(s.DB, *in.ExitInboundID)
+	if err != nil {
+		return 0
+	}
+	return land.ServerID
+}
+
+func (s *Server) respondAfterApply(w http.ResponseWriter, payload map[string]any, ids ...int64) {
+	var applyErr error
+	seen := map[int64]struct{}{}
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		if err := s.pushServer(id); err != nil && applyErr == nil {
+			applyErr = err
+		}
+	}
+	if applyErr != nil {
+		payload["apply_error"] = applyErr.Error()
+	}
+	jsonOK(w, payload)
+}

@@ -2,15 +2,26 @@ package server
 
 import (
 	"log"
+	"sync"
 	"time"
 
 	"liking/internal/corecfg"
 	"liking/internal/db"
 )
 
+func (s *Server) lockServer(id int64) *sync.Mutex {
+	v, _ := s.pushMu.LoadOrStore(id, &sync.Mutex{})
+	return v.(*sync.Mutex)
+}
+
 func (s *Server) pushServer(id int64) error {
+	mu := s.lockServer(id)
+	mu.Lock()
+	defer mu.Unlock()
+
 	b, err := corecfg.Build(s.DB, id)
 	if err != nil {
+		_ = db.SetServerApplyError(s.DB, id, err)
 		return err
 	}
 	if !s.Hub.IsOnline(id) {
@@ -18,14 +29,15 @@ func (s *Server) pushServer(id int64) error {
 		return nil
 	}
 	if err := s.Hub.SendApply(id, b.Apply); err != nil {
+		_ = db.SetServerApplyError(s.DB, id, err)
 		return err
 	}
+	_ = db.SetServerApplyError(s.DB, id, nil)
 	return db.SetServerRev(s.DB, id, b.Rev)
 }
 
 func (s *Server) syncServers(ids ...int64) {
 	seen := map[int64]struct{}{}
-	var uniq []int64
 	for _, id := range ids {
 		if id == 0 {
 			continue
@@ -34,18 +46,36 @@ func (s *Server) syncServers(ids ...int64) {
 			continue
 		}
 		seen[id] = struct{}{}
-		uniq = append(uniq, id)
+		s.kickSync(id)
 	}
-	if len(uniq) == 0 {
+}
+
+func (s *Server) kickSync(id int64) {
+	s.kickMu.Lock()
+	s.kickWant[id] = true
+	if s.kickRun[id] {
+		s.kickMu.Unlock()
 		return
 	}
-	go func() {
-		for _, id := range uniq {
-			if err := s.pushServer(id); err != nil {
-				log.Printf("sync server %d: %v", id, err)
-			}
+	s.kickRun[id] = true
+	s.kickMu.Unlock()
+	go s.syncLoop(id)
+}
+
+func (s *Server) syncLoop(id int64) {
+	for {
+		s.kickMu.Lock()
+		if !s.kickWant[id] {
+			s.kickRun[id] = false
+			s.kickMu.Unlock()
+			return
 		}
-	}()
+		s.kickWant[id] = false
+		s.kickMu.Unlock()
+		if err := s.pushServer(id); err != nil {
+			log.Printf("sync server %d: %v", id, err)
+		}
+	}
 }
 
 func (s *Server) syncAll() {
