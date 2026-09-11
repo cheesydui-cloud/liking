@@ -3,7 +3,12 @@ package agent
 import (
 	"encoding/json"
 	"net"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"liking/internal/wsproto"
 )
 
 func TestPublicListenSpecsSkipsLoopback(t *testing.T) {
@@ -62,5 +67,43 @@ func TestCheckPublicPortsBusy(t *testing.T) {
 	})
 	if err := checkPublicPorts(raw2); err == nil {
 		t.Fatal("expected busy")
+	}
+}
+
+func TestApplyMissingMitaStillStartsXray(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	if err := os.Mkdir(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fake := filepath.Join(binDir, "xray")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+"/usr/bin:/bin")
+
+	c := NewCores(filepath.Join(dir, "data"))
+	if err := os.MkdirAll(c.dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	defer c.StopAll()
+
+	xrayCfg, _ := json.Marshal(map[string]any{
+		"inbounds": []any{
+			map[string]any{"listen": "127.0.0.1", "port": 10085},
+		},
+	})
+	mitaCfg, _ := json.Marshal(map[string]any{
+		"portBindings": []any{
+			map[string]any{"port": 8444, "protocol": "TCP"},
+		},
+	})
+	err := c.Apply(wsproto.ApplyConfig{Xray: xrayCfg, Mita: mitaCfg})
+	if err == nil || !strings.Contains(err.Error(), "mita") {
+		t.Fatalf("want mita error, got %v", err)
+	}
+	run := c.Running()
+	if len(run) != 1 || run[0] != "xray" {
+		t.Fatalf("running %v", run)
 	}
 }

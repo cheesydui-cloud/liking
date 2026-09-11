@@ -41,32 +41,19 @@ func (c *Cores) Apply(cfg wsproto.ApplyConfig) error {
 	defer c.mu.Unlock()
 	c.xrayAPI = cfg.XrayAPI
 
-	if err := c.needBins(cfg); err != nil {
-		return err
+	var errs []string
+	take := func(err error) {
+		if err != nil {
+			errs = append(errs, err.Error())
+		}
 	}
-	if err := c.applyJSON("xray", "xray.json", cfg.Xray, lookBin("xray"), []string{"run", "-c"}); err != nil {
-		return err
+	take(c.applyJSON("xray", "xray.json", cfg.Xray, lookBin("xray"), []string{"run", "-c"}))
+	take(c.applyJSON("singbox", "singbox.json", cfg.Singbox, lookBin("sing-box", "singbox"), []string{"run", "-c"}))
+	take(c.applyMita(cfg.Mita))
+	if len(errs) == 0 {
+		return nil
 	}
-	if err := c.applyJSON("singbox", "singbox.json", cfg.Singbox, lookBin("sing-box", "singbox"), []string{"run", "-c"}); err != nil {
-		return err
-	}
-	if err := c.applyMita(cfg.Mita); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (c *Cores) needBins(cfg wsproto.ApplyConfig) error {
-	if hasCfg(cfg.Xray) && lookBin("xray") == "" {
-		return fmt.Errorf("xray 未安装：请将二进制放到 PATH（/usr/local/bin）")
-	}
-	if hasCfg(cfg.Singbox) && lookBin("sing-box", "singbox") == "" {
-		return fmt.Errorf("singbox 未安装：请将二进制放到 PATH（/usr/local/bin）")
-	}
-	if hasCfg(cfg.Mita) && lookBin("mita") == "" {
-		return fmt.Errorf("mita 未安装：Mieru 入站需要 mita")
-	}
-	return nil
+	return fmt.Errorf("%s", strings.Join(errs, "; "))
 }
 
 func hasCfg(raw json.RawMessage) bool {

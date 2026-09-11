@@ -18,7 +18,7 @@
 - 登录页与卡片质感加强；443 端口给出占用提示
 - Agent systemd 带完整 PATH；重装安装脚本会 restart 而不是只 enable
 - 面板 `install.sh` / `liking-upgrade` 替换二进制后会 `systemctl restart`（原先 `enable --now` 不会重启已在跑的进程）
-- 内核缺失（xray / sing-box / mita）在真正重启进程之前就会报错
+- 某一内核缺失时仍下发其它内核（例如没有 mita 时 VLESS 照常监听）
 
 ### 升级注意
 - 升到 v0.1.1 后请在节点上重新执行面板里的 Agent 安装命令，以更新二进制和数据目录
