@@ -9,7 +9,7 @@ const SUGGESTED_PORTS = [8443, 8444, 2053, 2083, 2087, 2096, 8880, 9443, 10443, 
 const emptyLine = {
   server_id: 0, name: '', profile: 'vless-reality-vision', port: 8443, listen: '0.0.0.0',
   line_kind: 'direct', exit_inbound_id: 0, cert_id: 0, enabled: true,
-  dest: 'www.cloudflare.com:443', sni: '', path: '', method: '2022-blake3-aes-128-gcm', transport: 'TCP',
+  dest: 'www.cloudflare.com:443', sni: '', path: '', method: '2022-blake3-aes-128-gcm', transport: 'BOTH',
 }
 
 function nextPort(serverId, list, excludeId = 0) {
@@ -89,7 +89,7 @@ function formFromInbound(inb) {
     sni: st.sni || '',
     path: st.path || '',
     method: st.method || '2022-blake3-aes-128-gcm',
-    transport: st.transport || 'TCP',
+    transport: st.transport || 'BOTH',
     settings: st,
   }
 }

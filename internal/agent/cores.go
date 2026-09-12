@@ -187,13 +187,19 @@ func (c *Cores) applyMita(raw json.RawMessage) error {
 func mitaApply(bin, path string) error {
 	var last error
 	for i := 0; i < 10; i++ {
+		_ = exec.Command(bin, "stop").Run()
 		out, err := exec.Command(bin, "apply", "config", path).CombinedOutput()
-		if err == nil {
-			_ = exec.Command(bin, "start").Run()
-			return nil
+		if err != nil {
+			last = fmt.Errorf("mita apply: %v (%s)", err, strings.TrimSpace(string(out)))
+			time.Sleep(300 * time.Millisecond)
+			continue
 		}
-		last = fmt.Errorf("mita apply: %v (%s)", err, strings.TrimSpace(string(out)))
-		time.Sleep(300 * time.Millisecond)
+		if out, err := exec.Command(bin, "start").CombinedOutput(); err != nil {
+			last = fmt.Errorf("mita start: %v (%s)", err, strings.TrimSpace(string(out)))
+			time.Sleep(300 * time.Millisecond)
+			continue
+		}
+		return nil
 	}
 	return last
 }

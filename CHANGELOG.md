@@ -2,6 +2,20 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.1.14 — 2026-09-12
+
+Mieru 改端口后配置写了新口，mita 进程还在听旧口，客户端连的是空端口。小火箭默认走 UDP，线路却只开了 TCP。
+
+### 修复
+- Agent 下发 mita 配置后先 `stop` 再 `start`，端口和传输立刻生效
+- 新建 Mieru 默认 TCP+UDP；分享链接在 UDP/BOTH 时为 `udp=1`（小火箭）
+- Clash 订阅里 BOTH 按 UDP 导出
+
+### 升级注意
+- **必须重新执行节点上的 Agent 安装命令**，否则改端口仍不会重绑
+- 已有 Mieru 线路请编辑一次传输为「BOTH」或「UDP」再保存
+- 回滚：`liking-upgrade --release v0.1.13`
+
 ## v0.1.13 — 2026-09-12
 
 线路「复制」被做成了订阅链接。小火箭认的是 `mierus://` 协议链接，例如 `mierus://user:pass@host?udp=1&port=39198&profile=default`。

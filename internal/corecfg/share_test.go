@@ -40,6 +40,16 @@ func TestMieruCannotLand(t *testing.T) {
 	}
 }
 
+func TestNormalizeMieruDefaultBoth(t *testing.T) {
+	in := &db.Inbound{Name: "m", Profile: ProfileMieru, Port: 8444, LineKind: "direct", Settings: "{}"}
+	if err := Normalize(in, nil); err != nil {
+		t.Fatal(err)
+	}
+	if ParseSettings(in.Settings).String("transport") != "BOTH" {
+		t.Fatalf("transport %s", ParseSettings(in.Settings).String("transport"))
+	}
+}
+
 func TestAnyTLSNeedTLS(t *testing.T) {
 	if !NeedTLS(ProfileAnyTLS) || CoreFor(ProfileAnyTLS) != CoreSingbox {
 		t.Fatal("anytls")
@@ -56,8 +66,14 @@ func TestClashAndSingboxSkipMieru(t *testing.T) {
 	}
 	c := &db.Client{Username: "u1", Password: "p"}
 	name, yaml, err := ClashProxyYAML(in, c)
-	if err != nil || name != "m" || !strings.Contains(yaml, "type: mieru") {
+	if err != nil || name != "m" || !strings.Contains(yaml, "type: mieru") || !strings.Contains(yaml, `transport: "TCP"`) {
 		t.Fatalf("clash %v %s", err, yaml)
+	}
+	inBoth := *in
+	inBoth.Settings = `{"transport":"BOTH"}`
+	_, yamlBoth, err := ClashProxyYAML(&inBoth, c)
+	if err != nil || !strings.Contains(yamlBoth, `transport: "UDP"`) {
+		t.Fatalf("clash both %v %s", err, yamlBoth)
 	}
 	_, err = SingboxOutbound(in, c)
 	if err != ErrSkip {
@@ -80,5 +96,10 @@ func TestClashAndSingboxSkipMieru(t *testing.T) {
 	uri, err = ShareURI(in, c)
 	if err != nil || !strings.Contains(uri, "udp=1") {
 		t.Fatalf("udp uri %s %v", uri, err)
+	}
+	in.Settings = `{"transport":"BOTH"}`
+	uri, err = ShareURI(in, c)
+	if err != nil || !strings.Contains(uri, "udp=1") {
+		t.Fatalf("both uri %s %v", uri, err)
 	}
 }

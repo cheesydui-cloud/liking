@@ -248,7 +248,7 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 	case ProfileMieru:
 		tr := strings.ToUpper(st.String("transport"))
 		if tr == "" {
-			tr = "TCP"
+			tr = "BOTH"
 		}
 		if tr != "TCP" && tr != "UDP" && tr != "BOTH" {
 			return fmt.Errorf("Mieru transport 必须是 TCP / UDP / BOTH")

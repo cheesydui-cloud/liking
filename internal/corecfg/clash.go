@@ -75,7 +75,7 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 		fmt.Fprintf(&b, "    password: %s\n", yq(c.Password))
 		tr := st.String("transport")
 		if tr == "" || tr == "BOTH" {
-			tr = "TCP"
+			tr = "UDP"
 		}
 		fmt.Fprintf(&b, "    transport: %s\n", yq(tr))
 	default:
