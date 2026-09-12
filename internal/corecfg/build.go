@@ -56,11 +56,12 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 	// already loaded them.
 
 	apiPort := pickAPIPort(ins, 10085)
+	sbPort := pickAPIPort(ins, 19090, apiPort)
 	xray, err := buildXray(ins, clients, certs, byID, apiPort)
 	if err != nil {
 		return nil, err
 	}
-	sb, err := buildSingbox(ins, clients, certs, byID)
+	sb, err := buildSingbox(ins, clients, certs, byID, sbPort)
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +85,7 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 			return nil, err
 		}
 		b.Apply.Singbox = raw
+		b.Apply.SingboxAPI = fmt.Sprintf("127.0.0.1:%d", sbPort)
 	}
 	if mita != nil {
 		raw, err := json.Marshal(mita)
@@ -101,10 +103,15 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 	return b, nil
 }
 
-func pickAPIPort(ins []*db.Inbound, start int) int {
+func pickAPIPort(ins []*db.Inbound, start int, extra ...int) int {
 	used := map[int]struct{}{}
 	for _, in := range ins {
 		used[in.Port] = struct{}{}
+	}
+	for _, p := range extra {
+		if p > 0 {
+			used[p] = struct{}{}
+		}
 	}
 	for p := start; p < start+100; p++ {
 		if _, ok := used[p]; !ok {

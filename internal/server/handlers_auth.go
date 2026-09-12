@@ -225,13 +225,22 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	pkgs, _ := db.ListPackages(s.DB)
-	var used int64
+	var used, raw int64
 	members := 0
 	for _, u := range users {
-		used += u.UsedUp + u.UsedDown
-		if u.Role != "admin" {
-			members++
+		if u.Role == "admin" {
+			continue
 		}
+		members++
+		raw += u.UsedUp + u.UsedDown
+		used += u.BilledBytes
+	}
+	from, to := dayRange(14)
+	days, _ := db.TrafficSeries(s.DB, from, to, 0, 0)
+	days = db.FillTrafficDays(from, to, days)
+	var today int64
+	if n := len(days); n > 0 {
+		today = days[n-1].Up + days[n-1].Down
 	}
 	jsonOK(w, map[string]any{
 		"version":     version.Version,
@@ -242,6 +251,9 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"inbounds":    len(ins),
 		"packages":    len(pkgs),
 		"used_bytes":  used,
+		"raw_bytes":   raw,
+		"today_bytes": today,
+		"days":        days,
 		"server_list": servers,
 	})
 }

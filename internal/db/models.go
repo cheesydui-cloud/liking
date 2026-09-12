@@ -18,6 +18,8 @@ type User struct {
 	PackageName  string `json:"package_name,omitempty"`
 	PkgExpires   int64  `json:"package_expires_at,omitempty"`
 	TrafficCap   int64  `json:"traffic_cap,omitempty"`
+	BilledBytes  int64  `json:"billed_bytes"`
+	Direction    string `json:"direction,omitempty"`
 }
 
 type Server struct {
@@ -91,6 +93,8 @@ type Inbound struct {
 	ServerHost    string `json:"server_host,omitempty"`
 	ConnectIP     string `json:"connect_ip,omitempty"`
 	ServerOnline  int    `json:"server_online,omitempty"`
+	UsedUp        int64  `json:"used_up,omitempty"`
+	UsedDown      int64  `json:"used_down,omitempty"`
 }
 
 type Client struct {

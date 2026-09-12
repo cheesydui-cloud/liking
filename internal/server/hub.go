@@ -384,7 +384,7 @@ func (h *Hub) applyStats(samples []wsproto.Sample) {
 		if s.Email == "" || strings.HasPrefix(s.Email, "relay.") {
 			continue
 		}
-		c, err := db.ClientByEmail(h.DB, s.Email)
+		c, err := db.ClientByIdentity(h.DB, s.Email)
 		if err != nil {
 			continue
 		}

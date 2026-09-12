@@ -163,6 +163,7 @@ export function Layout({ children }) {
       items: [
         { to: '/users', icon: 'users', label: '用户' },
         { to: '/packages', icon: 'package', label: '套餐' },
+        { to: '/traffic', icon: 'bars', label: '流量' },
       ],
     },
     {

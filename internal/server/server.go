@@ -85,11 +85,13 @@ func (s *Server) Router() http.Handler {
 		r.Post("/api/logout", s.handleLogout)
 		r.Get("/api/me", s.handleMe)
 		r.Put("/api/me", s.handleProfile)
+		r.Get("/api/me/traffic", s.handleMeTraffic)
 		r.Post("/api/password", s.handlePassword)
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAdmin)
 			r.Get("/api/dashboard", s.handleDashboard)
+			r.Get("/api/traffic", s.handleTraffic)
 			r.Get("/api/profiles", s.handleProfiles)
 
 			r.Get("/api/servers", s.handleListServers)
@@ -111,6 +113,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/api/users", s.handleCreateUser)
 			r.Put("/api/users/{id}", s.handleUpdateUser)
 			r.Delete("/api/users/{id}", s.handleDeleteUser)
+			r.Get("/api/users/{id}/traffic", s.handleUserTraffic)
 			r.Post("/api/users/{id}/reset-traffic", s.handleResetTraffic)
 			r.Post("/api/users/{id}/rotate-sub", s.handleRotateSub)
 			r.Post("/api/users/{id}/password", s.handleSetUserPassword)

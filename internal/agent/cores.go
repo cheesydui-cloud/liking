@@ -2,7 +2,6 @@ package agent
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,18 +25,24 @@ type proc struct {
 }
 
 type Cores struct {
-	dir       string
-	mu        sync.Mutex
-	collectMu sync.Mutex
-	procs     map[string]*proc
-	last      map[string]json.RawMessage
-	lastReq   map[string]json.RawMessage
-	xrayAPI   string
-	xrayBin   string
+	dir        string
+	mu         sync.Mutex
+	collectMu  sync.Mutex
+	procs      map[string]*proc
+	last       map[string]json.RawMessage
+	lastReq    map[string]json.RawMessage
+	xrayAPI    string
+	xrayBin    string
+	singboxAPI string
+	clashLast  map[string]clashSnap
+	mitaLast   map[string]bytePair
 }
 
 func NewCores(dir string) *Cores {
-	return &Cores{dir: dir, procs: map[string]*proc{}, last: map[string]json.RawMessage{}, lastReq: map[string]json.RawMessage{}}
+	return &Cores{
+		dir: dir, procs: map[string]*proc{}, last: map[string]json.RawMessage{}, lastReq: map[string]json.RawMessage{},
+		clashLast: map[string]clashSnap{}, mitaLast: map[string]bytePair{},
+	}
 }
 
 func detectedCores() []string {
@@ -58,6 +63,7 @@ func (c *Cores) Apply(cfg wsproto.ApplyConfig) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.xrayAPI = cfg.XrayAPI
+	c.singboxAPI = cfg.SingboxAPI
 
 	var errs []string
 	take := func(err error) {
@@ -387,67 +393,11 @@ func (c *Cores) Running() []string {
 	return out
 }
 
-func (c *Cores) Collect() []wsproto.Sample {
-	if !c.collectMu.TryLock() {
-		return nil
-	}
-	defer c.collectMu.Unlock()
-	c.mu.Lock()
-	bin, api := c.xrayBin, c.xrayAPI
-	c.mu.Unlock()
-	if bin == "" || api == "" {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "api", "statsquery", "--server="+api, "-reset")
-	out, err := cmd.Output()
-	if err != nil {
-		return nil
-	}
-	return parseXrayStats(out)
-}
-
 type xrayStats struct {
 	Stat []struct {
 		Name  string `json:"name"`
 		Value any    `json:"value"`
 	} `json:"stat"`
-}
-
-func parseXrayStats(raw []byte) []wsproto.Sample {
-	var st xrayStats
-	if err := json.Unmarshal(raw, &st); err != nil {
-		return nil
-	}
-	type acc struct{ up, down int64 }
-	m := map[string]*acc{}
-	for _, row := range st.Stat {
-		parts := strings.Split(row.Name, ">>>")
-		if len(parts) != 4 || parts[0] != "user" || parts[2] != "traffic" {
-			continue
-		}
-		email := parts[1]
-		a := m[email]
-		if a == nil {
-			a = &acc{}
-			m[email] = a
-		}
-		v := anyInt(row.Value)
-		if parts[3] == "uplink" {
-			a.up = v
-		} else if parts[3] == "downlink" {
-			a.down = v
-		}
-	}
-	var out []wsproto.Sample
-	for email, a := range m {
-		if a.up == 0 && a.down == 0 {
-			continue
-		}
-		out = append(out, wsproto.Sample{Email: email, Up: a.up, Down: a.down})
-	}
-	return out
 }
 
 func anyInt(v any) int64 {

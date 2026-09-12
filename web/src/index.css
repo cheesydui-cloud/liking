@@ -300,6 +300,41 @@ button.chip:hover { border-color: color-mix(in srgb, var(--color-ink) 28%, var(-
   transition: width 240ms ease;
 }
 
+.traffic-bars {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  height: 132px;
+}
+.traffic-bar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.traffic-bar-track {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.traffic-bar-fill {
+  width: 70%;
+  max-width: 22px;
+  min-height: 2px;
+  border-radius: 3px 3px 0 0;
+  background: var(--color-ink);
+}
+.traffic-bar-label {
+  margin-top: 6px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--color-ink-mut);
+  font-variant-numeric: tabular-nums;
+}
+
 .plan-card, .server-card {
   @apply p-4 flex flex-col gap-2.5 text-left;
 }

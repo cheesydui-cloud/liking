@@ -6,7 +6,7 @@ import (
 	"liking/internal/db"
 )
 
-func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound) (map[string]any, error) {
+func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound, apiPort int) (map[string]any, error) {
 	var ins []any
 	var outs []any
 	used := false
@@ -59,6 +59,13 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 		"inbounds":  ins,
 		"outbounds": outs,
 		"route":     map[string]any{"rules": routeRules, "final": final},
+	}
+	if apiPort > 0 {
+		cfg["experimental"] = map[string]any{
+			"clash_api": map[string]any{
+				"external_controller": fmt.Sprintf("127.0.0.1:%d", apiPort),
+			},
+		}
 	}
 	return cfg, nil
 }

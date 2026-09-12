@@ -91,14 +91,29 @@ func attachPackage(d *sql.DB, u *User) {
 	var pid int64
 	var name string
 	var exp int64
-	err := d.QueryRow(`SELECT p.id, p.name, up.expires_at FROM user_packages up JOIN packages p ON p.id=up.package_id WHERE up.user_id=?`, u.ID).
-		Scan(&pid, &name, &exp)
-	if err != nil {
+	var trafficBytes int64
+	var direction string
+	err := d.QueryRow(`SELECT p.id, p.name, p.traffic_bytes, p.direction, up.expires_at FROM user_packages up JOIN packages p ON p.id=up.package_id WHERE up.user_id=?`, u.ID).
+		Scan(&pid, &name, &trafficBytes, &direction, &exp)
+	var pkg *Package
+	if err == nil {
+		u.PackageID = &pid
+		u.PackageName = name
+		u.PkgExpires = exp
+		pkg = &Package{ID: pid, Name: name, TrafficBytes: trafficBytes, Direction: direction}
+	}
+	applyUserBilling(u, pkg)
+}
+
+func applyUserBilling(u *User, pkg *Package) {
+	if u == nil {
 		return
 	}
-	u.PackageID = &pid
-	u.PackageName = name
-	u.PkgExpires = exp
+	if pkg != nil {
+		u.Direction = pkg.Direction
+	}
+	u.TrafficCap = UserLimitBytes(u, pkg)
+	u.BilledBytes = UserBilledBytes(u, pkg)
 }
 
 func queryIDs(d *sql.DB, q string, args ...any) ([]int64, error) {
@@ -802,6 +817,163 @@ func ClientByEmail(d *sql.DB, email string) (*Client, error) {
 	}
 	c.Enabled = en == 1
 	return c, nil
+}
+
+func ClientByIdentity(d *sql.DB, id string) (*Client, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, sql.ErrNoRows
+	}
+	c, err := ClientByEmail(d, id)
+	if err == nil {
+		return c, nil
+	}
+	if err != sql.ErrNoRows {
+		return nil, err
+	}
+	c = &Client{}
+	var en int
+	err = d.QueryRow(`SELECT id,inbound_id,user_id,email,uuid,password,username,enabled FROM clients WHERE username=? ORDER BY id LIMIT 1`, id).
+		Scan(&c.ID, &c.InboundID, &c.UserID, &c.Email, &c.UUID, &c.Password, &c.Username, &en)
+	if err != nil {
+		return nil, err
+	}
+	c.Enabled = en == 1
+	return c, nil
+}
+
+type TrafficPoint struct {
+	Day  string `json:"day"`
+	Up   int64  `json:"up"`
+	Down int64  `json:"down"`
+}
+
+type NamedTraffic struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	Up   int64  `json:"up"`
+	Down int64  `json:"down"`
+}
+
+func TrafficSeries(d *sql.DB, from, to string, userID, inboundID int64) ([]TrafficPoint, error) {
+	q := `SELECT day, COALESCE(SUM(up),0), COALESCE(SUM(down),0) FROM traffic_daily WHERE day>=? AND day<=?`
+	args := []any{from, to}
+	if userID > 0 {
+		q += ` AND user_id=?`
+		args = append(args, userID)
+	}
+	if inboundID > 0 {
+		q += ` AND inbound_id=?`
+		args = append(args, inboundID)
+	}
+	q += ` GROUP BY day ORDER BY day`
+	rows, err := d.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TrafficPoint
+	for rows.Next() {
+		var p TrafficPoint
+		if err := rows.Scan(&p.Day, &p.Up, &p.Down); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	if out == nil {
+		out = []TrafficPoint{}
+	}
+	return out, rows.Err()
+}
+
+func FillTrafficDays(from, to string, got []TrafficPoint) []TrafficPoint {
+	start, err1 := time.ParseInLocation("2006-01-02", from, time.Local)
+	end, err2 := time.ParseInLocation("2006-01-02", to, time.Local)
+	if err1 != nil || err2 != nil || end.Before(start) {
+		if got == nil {
+			return []TrafficPoint{}
+		}
+		return got
+	}
+	idx := map[string]TrafficPoint{}
+	for _, p := range got {
+		idx[p.Day] = p
+	}
+	var out []TrafficPoint
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		key := d.Format("2006-01-02")
+		if p, ok := idx[key]; ok {
+			out = append(out, p)
+		} else {
+			out = append(out, TrafficPoint{Day: key})
+		}
+	}
+	return out
+}
+
+func TrafficByUser(d *sql.DB, from, to string) ([]NamedTraffic, error) {
+	rows, err := d.Query(`SELECT t.user_id, u.username, COALESCE(SUM(t.up),0), COALESCE(SUM(t.down),0)
+		FROM traffic_daily t JOIN users u ON u.id=t.user_id
+		WHERE t.day>=? AND t.day<=?
+		GROUP BY t.user_id
+		ORDER BY SUM(t.up)+SUM(t.down) DESC, t.user_id
+		LIMIT 100`, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanNamedTraffic(rows)
+}
+
+func TrafficByInbound(d *sql.DB, from, to string, userID int64) ([]NamedTraffic, error) {
+	q := `SELECT t.inbound_id, i.name, COALESCE(SUM(t.up),0), COALESCE(SUM(t.down),0)
+		FROM traffic_daily t JOIN inbounds i ON i.id=t.inbound_id
+		WHERE t.day>=? AND t.day<=?`
+	args := []any{from, to}
+	if userID > 0 {
+		q += ` AND t.user_id=?`
+		args = append(args, userID)
+	}
+	q += ` GROUP BY t.inbound_id ORDER BY SUM(t.up)+SUM(t.down) DESC, t.inbound_id LIMIT 100`
+	rows, err := d.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanNamedTraffic(rows)
+}
+
+func scanNamedTraffic(rows *sql.Rows) ([]NamedTraffic, error) {
+	var out []NamedTraffic
+	for rows.Next() {
+		var n NamedTraffic
+		if err := rows.Scan(&n.ID, &n.Name, &n.Up, &n.Down); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	if out == nil {
+		out = []NamedTraffic{}
+	}
+	return out, rows.Err()
+}
+
+func InboundTrafficTotals(d *sql.DB) (map[int64]TrafficSum, error) {
+	rows, err := d.Query(`SELECT inbound_id, COALESCE(SUM(up),0), COALESCE(SUM(down),0) FROM traffic_daily GROUP BY inbound_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]TrafficSum{}
+	for rows.Next() {
+		var id int64
+		var s TrafficSum
+		if err := rows.Scan(&id, &s.Up, &s.Down); err != nil {
+			return nil, err
+		}
+		out[id] = s
+	}
+	return out, rows.Err()
 }
 
 func UserBilledBytes(u *User, pkg *Package) int64 {

@@ -435,4 +435,80 @@ func TestServerTrafficTotals(t *testing.T) {
 	if s.TrafficLimit != 1024 {
 		t.Fatalf("limit %d", s.TrafficLimit)
 	}
+
+	inTot, err := InboundTrafficTotals(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inTot[in.ID].Up != 150 || inTot[in.ID].Down != 300 {
+		t.Fatalf("inbound %+v", inTot[in.ID])
+	}
+	series, err := TrafficSeries(d, "2026-09-13", "2026-09-13", 0, 0)
+	if err != nil || len(series) != 1 || series[0].Up != 150 {
+		t.Fatalf("series %+v %v", series, err)
+	}
+	filled := FillTrafficDays("2026-09-12", "2026-09-13", series)
+	if len(filled) != 2 || filled[0].Day != "2026-09-12" || filled[1].Up != 150 {
+		t.Fatalf("fill %+v", filled)
+	}
+	byUser, err := TrafficByUser(d, "2026-09-13", "2026-09-13")
+	if err != nil || len(byUser) != 1 || byUser[0].Name != "alice" {
+		t.Fatalf("by user %+v %v", byUser, err)
+	}
+}
+
+func TestClientByIdentityAndBilling(t *testing.T) {
+	d, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	tok, err := RandomHex(8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := CreateServer(d, "n1", "1.1.1.1", tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := CreateInbound(d, &Inbound{
+		ServerID: s.ID, Name: "m", Profile: "mieru", Protocol: "mieru",
+		Network: "tcp", Security: "none", Core: "mita", Listen: "0.0.0.0",
+		Port: 8964, Enabled: true, Settings: "{}", LineKind: "direct",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := CreateUser(d, "bob", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := CreatePackage(d, "two", 1024, 0, 0, "twoway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := BindUserPackage(d, u.ID, pkg.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertClient(d, &Client{
+		InboundID: in.ID, UserID: u.ID, Email: EmailFor(u.ID, in.ID),
+		Username: "u1", Password: "p", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := ClientByIdentity(d, "u1")
+	if err != nil || c.Email != EmailFor(u.ID, in.ID) {
+		t.Fatalf("username %+v %v", c, err)
+	}
+	c2, err := ClientByIdentity(d, EmailFor(u.ID, in.ID))
+	if err != nil || c2.ID != c.ID {
+		t.Fatalf("email %+v %v", c2, err)
+	}
+	if err := AddUserTraffic(d, u.ID, 10, 15); err != nil {
+		t.Fatal(err)
+	}
+	u, _ = GetUser(d, u.ID)
+	if u.BilledBytes != 50 || u.Direction != "twoway" || u.TrafficCap != 1024 {
+		t.Fatalf("billing %+v", u)
+	}
 }

@@ -11,7 +11,7 @@
 - 管理员登录、服务器管理（机器 + 节点，实时上下行和已用 / 剩余流量）、反向 WSS 纳管 Agent；公开地址可从 Cloudflare 拉取已托管域名
 - 设置分 Tab：面板、证书、备份、账号。证书：Cloudflare DNS 申请 Let's Encrypt（支持泛域名，域名不必指向面板）、自签、上传 PEM；到期前自动续期。账号可改用户名和密码。备份下载整份快照（含证书私钥和 Agent 令牌），恢复时覆盖本机数据，用来迁到新机器
 - 七组入站：VLESS+REALITY、VLESS+REALITY+Vision、VLESS+XHTTP+TLS、Trojan+TLS、SS2022、AnyTLS+TLS、Mieru；第一次下发时节点自动安装对应内核。增加节点按协议给 dest / SNI / 指纹 / TLS 1.3 等选项；REALITY dest 不能指向本机
-- 用户 / 套餐（一人一套餐；套餐勾选节点，不选表示全部）；到期或超量从内核配置摘掉客户端
+- 用户 / 套餐（一人一套餐；套餐勾选节点，不选表示全部）；到期或超量从内核配置摘掉客户端。Agent 采集 Xray / AnyTLS / Mieru 用户流量；管理端「流量」按日、用户、节点统计，计费按套餐方向和节点倍率
 - 开户随机密码、用户编辑（用户名 / 套餐 / 到期 / 流量 / 登录密码）、流量进度、订阅二维码 / Clash·sing-box 导入
 - 服务器管理「复制」给出协议链接（VLESS `vless://`，Mieru 为小火箭 `mierus://…?udp=&port=&profile=default#节点名`）。「参数」查看公钥 / short_id
 - 链式转发：入口 → 另一台落地。**Mieru / AnyTLS 不能当链式落地**；Mieru 可以直出，也可以当链式入口
@@ -56,7 +56,7 @@ liking-upgrade
 指定版本：
 
 ```bash
-liking-upgrade --release v0.1.30
+liking-upgrade --release v0.1.31
 ```
 
 只更新安装脚本本身：

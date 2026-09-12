@@ -35,6 +35,7 @@ export function Icon({ name, size = 18, className = '' }) {
     link: <><path d="M9 12a4 4 0 0 0 6 0l2-2a4 4 0 0 0-6-6l-1 1" /><path d="M15 12a4 4 0 0 0-6 0l-2 2a4 4 0 1 0 6 6l1-1" /></>,
     download: <><path d="M12 4v11" /><path d="M7 11l5 5 5-5" /><path d="M5 20h14" /></>,
     upload: <><path d="M12 20V9" /><path d="M7 13l5-5 5 5" /><path d="M5 4h14" /></>,
+    bars: <><path d="M4 19V10M10 19V5M16 19v-7M22 19H2" /></>,
   }
   return <svg {...common}>{p[name] || p.spark}</svg>
 }
@@ -82,6 +83,35 @@ export function fmtAgo(ts) {
   if (s < 86400) return `${Math.floor(s / 3600)} 小时前`
   if (s < 86400 * 10) return `${Math.floor(s / 86400)} 天前`
   return fmtDateShort(ts)
+}
+
+export function billedBytes(u) {
+  if (!u) return 0
+  if (u.billed_bytes != null) return Number(u.billed_bytes) || 0
+  return (Number(u.used_up) || 0) + (Number(u.used_down) || 0)
+}
+
+export function DayBars({ days = [], className = '' }) {
+  const rows = Array.isArray(days) ? days : []
+  const max = Math.max(1, ...rows.map(d => (Number(d.up) || 0) + (Number(d.down) || 0)))
+  if (!rows.length) return null
+  return (
+    <div className={`traffic-bars ${className}`}>
+      {rows.map(d => {
+        const tot = (Number(d.up) || 0) + (Number(d.down) || 0)
+        const pct = Math.max(tot ? 6 : 2, Math.round((tot / max) * 100))
+        const label = String(d.day || '').slice(5)
+        return (
+          <div key={d.day} className="traffic-bar" title={`${d.day}  ↑${fmtBytes(d.up || 0)}  ↓${fmtBytes(d.down || 0)}`}>
+            <div className="traffic-bar-track">
+              <div className="traffic-bar-fill" style={{ height: `${pct}%` }} />
+            </div>
+            <div className="traffic-bar-label">{label}</div>
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 export function Meter({ value = 0, max = 0, className = '' }) {

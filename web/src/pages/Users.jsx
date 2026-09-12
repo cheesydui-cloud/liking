@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Meter, Modal, PageHead, SearchInput, fmtBytes, fmtDateShort } from '../components/ui'
+import { Badge, DayBars, Empty, Field, Icon, Meter, Modal, PageHead, SearchInput, billedBytes, fmtBytes, fmtDateShort } from '../components/ui'
 import { SubPanel } from '../components/SubPanel'
 
 function randPassword() {
@@ -60,6 +60,8 @@ export default function Users() {
   const [formOpen, setFormOpen] = useState(false)
   const [editUser, setEditUser] = useState(null)
   const [subUser, setSubUser] = useState(null)
+  const [trafficUser, setTrafficUser] = useState(null)
+  const [trafficDetail, setTrafficDetail] = useState(null)
   const [q, setQ] = useState('')
   const [pkgFilter, setPkgFilter] = useState('')
 
@@ -182,6 +184,14 @@ export default function Users() {
     await act(() => api.del(`/users/${u.id}`))
   }
 
+  const openTraffic = async (u) => {
+    setTrafficUser(u)
+    setTrafficDetail(null)
+    try {
+      setTrafficDetail(await api.get(`/users/${u.id}/traffic?days=14`))
+    } catch (e) { toast(e.message, 'error') }
+  }
+
   const rotate = async (u) => {
     if (!(await dialog.confirm({ title: '重置订阅令牌', message: '旧订阅链接立刻失效。' }))) return
     try {
@@ -248,17 +258,22 @@ export default function Users() {
                     <td className="text-[13px]">{u.role === 'admin' ? '—' : (u.package_name || <span className="text-ink-mut">未绑定</span>)}</td>
                     <td className="min-w-[10rem]">
                       {u.role === 'admin' ? '—' : (
-                        <Meter value={(u.used_up || 0) + (u.used_down || 0)} max={trafficCap(u, pkgs)} />
+                        <button type="button" className="w-full text-left" onClick={() => openTraffic(u)}>
+                          <Meter value={billedBytes(u)} max={u.traffic_cap || trafficCap(u, pkgs)} />
+                          {u.direction === 'twoway' ? <div className="text-[11px] text-ink-mut mt-0.5">双向计费</div> : null}
+                        </button>
                       )}
                     </td>
                     <td className="text-[12px] whitespace-nowrap">{u.expires_at ? fmtDateShort(u.expires_at) : '—'}</td>
                     <td>
                       {u.expires_at && u.expires_at * 1000 < Date.now() ? <Badge tone="danger">到期</Badge>
+                        : (u.traffic_cap > 0 && billedBytes(u) >= u.traffic_cap) ? <Badge tone="danger">超量</Badge>
                         : u.enabled ? <Badge tone="ok">启用</Badge> : <Badge tone="muted">停用</Badge>}
                     </td>
                     <td className="whitespace-nowrap">
                       {u.role !== 'admin' && (
                         <div className="flex gap-2.5 justify-end">
+                          <button type="button" className="row-act" onClick={() => openTraffic(u)}>流量</button>
                           <button type="button" className="row-act" onClick={() => setSubUser(u)}>订阅</button>
                           <button type="button" className="row-act" onClick={() => openEdit(u)}>编辑</button>
                           <button type="button" className="row-act" onClick={() => act(() => api.put(`/users/${u.id}`, { enabled: !u.enabled }))}>{u.enabled ? '停用' : '启用'}</button>
@@ -333,8 +348,8 @@ export default function Users() {
             <div className="sm:col-span-2 rounded-md px-3 py-2.5" style={{ background: 'var(--color-fill)' }}>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <div className="text-[12px] text-ink-mut mb-1">已用流量</div>
-                  <Meter value={(editUser.used_up || 0) + (editUser.used_down || 0)} max={trafficCap({ ...editUser, traffic_limit: bytesFromGB(f.traffic_gb) ?? editUser.traffic_limit, package_id: f.package_id || editUser.package_id }, pkgs)} />
+                  <div className="text-[12px] text-ink-mut mb-1">已用流量{editUser.direction === 'twoway' || selectedPkg?.direction === 'twoway' ? '（双向）' : ''}</div>
+                  <Meter value={billedBytes(editUser)} max={trafficCap({ ...editUser, traffic_limit: bytesFromGB(f.traffic_gb) ?? editUser.traffic_limit, package_id: f.package_id || editUser.package_id }, pkgs)} />
                 </div>
                 <button type="button" className="btn-ghost shrink-0 h-8" onClick={resetTraffic}>清零</button>
               </div>
@@ -349,6 +364,38 @@ export default function Users() {
         </>
       }>
         {subUser && <SubPanel token={subUser.sub_token} onCopied={(msg, kind) => toast(msg, kind)} />}
+      </Modal>
+      <Modal open={!!trafficUser} title={trafficUser ? `${trafficUser.username} 的流量` : '流量'} onClose={() => { setTrafficUser(null); setTrafficDetail(null) }} size="lg" footer={
+        <button type="button" className="btn-ghost" onClick={() => { setTrafficUser(null); setTrafficDetail(null) }}>关闭</button>
+      }>
+        {trafficUser && (
+          <div>
+            <Meter className="mb-3" value={billedBytes(trafficUser)} max={trafficUser.traffic_cap || trafficCap(trafficUser, pkgs)} />
+            {trafficUser.direction === 'twoway' ? <div className="text-[12px] text-ink-mut mb-3">套餐双向计费，进度条已按上下行之和 × 2。</div> : null}
+            {trafficDetail ? (
+              <>
+                <div className="text-[13px] font-medium mb-2">近 14 日（原始）</div>
+                <DayBars days={trafficDetail.days} />
+                {(trafficDetail.inbounds || []).length > 0 && (
+                  <div className="table-wrap mt-4">
+                    <table className="data">
+                      <thead><tr><th>节点</th><th>上行</th><th>下行</th></tr></thead>
+                      <tbody>
+                        {trafficDetail.inbounds.map(inb => (
+                          <tr key={inb.id}>
+                            <td>{inb.name}</td>
+                            <td className="tabular-nums">{fmtBytes(inb.up)}</td>
+                            <td className="tabular-nums">{fmtBytes(inb.down)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            ) : <div className="text-[13px] text-ink-mut">加载中</div>}
+          </div>
+        )}
       </Modal>
     </div>
   )

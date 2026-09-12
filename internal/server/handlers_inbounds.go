@@ -57,9 +57,15 @@ func (s *Server) handleListInbounds(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	totals, _ := db.InboundTrafficTotals(s.DB)
 	out := make([]map[string]any, 0, len(list))
 	for _, in := range list {
-		out = append(out, inboundJSON(in))
+		m := inboundJSON(in)
+		if t, ok := totals[in.ID]; ok {
+			m["used_up"] = t.Up
+			m["used_down"] = t.Down
+		}
+		out = append(out, m)
 	}
 	jsonOK(w, map[string]any{"inbounds": out})
 }

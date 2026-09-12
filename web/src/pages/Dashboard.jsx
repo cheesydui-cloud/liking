@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
-import { Badge, Empty, PageHead, SkeletonRows, fmtAgo, fmtBps, fmtBytes } from '../components/ui'
+import { Badge, DayBars, Empty, PageHead, SkeletonRows, fmtAgo, fmtBps, fmtBytes } from '../components/ui'
 
 export default function Dashboard() {
   const [d, setD] = useState(null)
@@ -21,13 +21,14 @@ export default function Dashboard() {
     { label: '线路', value: d.inbounds, to: '/nodes', hint: '已配置线路' },
     { label: '用户', value: d.members ?? d.users, to: '/users', hint: '不含管理员' },
     { label: '套餐', value: d.packages || 0, to: '/packages', hint: '可绑定套餐' },
-    { label: '已用流量', value: fmtBytes(d.used_bytes || 0), to: '/users', hint: '用户合计' },
+    { label: '已用流量', value: fmtBytes(d.used_bytes || 0), to: '/traffic', hint: '计费合计' },
+    { label: '今日', value: fmtBytes(d.today_bytes || 0), to: '/traffic', hint: '节点原始' },
   ]
 
   return (
     <div>
-      <PageHead title="总览" desc="先加节点，在机器上挂线路，再把套餐绑给用户。流量按套餐方向和节点倍率计。" />
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-5">
+      <PageHead title="总览" desc="先加节点，在机器上挂线路，再把套餐绑给用户。已用流量按套餐方向和节点倍率计。" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         {cards.map(c => (
           <Link key={c.label} to={c.to} className="card p-4 hover:border-[var(--color-accent)] transition-colors">
             <div className="text-[12px] text-ink-mut">{c.label}</div>
@@ -39,6 +40,15 @@ export default function Dashboard() {
       {(d.server_list || []).some(s => s.last_error) && (
         <div className="notice mb-4">
           有服务器配置下发失败，打开「服务器管理」查看原因。常见原因：端口被占用、内核未安装。
+        </div>
+      )}
+      {(d.days || []).some(x => (x.up || 0) + (x.down || 0) > 0) && (
+        <div className="card p-4 mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-[14px] font-semibold">近 14 日</div>
+            <Link to="/traffic" className="row-act">明细</Link>
+          </div>
+          <DayBars days={d.days} />
         </div>
       )}
       <div className="card overflow-hidden">

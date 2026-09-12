@@ -1,13 +1,18 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useUser, useToast } from '../components/Layout'
-import { Meter, PageHead, fmtDate } from '../components/ui'
+import { api } from '../lib/api'
+import { DayBars, Meter, PageHead, billedBytes, fmtDate } from '../components/ui'
 import { SubPanel } from '../components/SubPanel'
 
 export default function My() {
   const { user, sub, refreshUser } = useUser()
   const toast = useToast()
+  const [traffic, setTraffic] = useState(null)
   useEffect(() => { refreshUser() }, [refreshUser])
-  const used = (user?.used_up || 0) + (user?.used_down || 0)
+  useEffect(() => {
+    api.get('/me/traffic?days=14').then(setTraffic).catch(() => {})
+  }, [])
+  const used = billedBytes(user)
 
   return (
     <div>
@@ -19,7 +24,7 @@ export default function My() {
           <div className="text-[13px] text-ink-mut mt-1">{user?.package_name || '未分配套餐'}</div>
         </div>
         <div className="card p-4">
-          <div className="kicker">流量</div>
+          <div className="kicker">流量{user?.direction === 'twoway' ? ' · 双向' : ''}</div>
           <Meter className="mt-2.5" value={used} max={user?.traffic_cap || 0} />
         </div>
         <div className="card p-4">
@@ -33,6 +38,12 @@ export default function My() {
       {!user?.package_id && (
         <div className="notice mb-4">还没有套餐，订阅里不会有节点。请联系管理员绑定。</div>
       )}
+      {traffic?.days?.length ? (
+        <div className="card p-4 mb-4">
+          <div className="text-[14px] font-semibold mb-3">近 14 日</div>
+          <DayBars days={traffic.days} />
+        </div>
+      ) : null}
       {sub && user?.sub_token ? (
         <div className="card p-5">
           <SubPanel token={user.sub_token} onCopied={(msg, kind) => toast(msg, kind)} />

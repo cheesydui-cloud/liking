@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"liking/internal/certs"
 	"liking/internal/db"
@@ -1645,5 +1646,210 @@ func TestPackageInboundIDs(t *testing.T) {
 	decodeRes(t, res, &pkg)
 	if len(pkg.Package.InboundIDs) != 2 {
 		t.Fatalf("updated %+v", pkg.Package.InboundIDs)
+	}
+}
+
+func TestTrafficAPI(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	body, _ := json.Marshal(map[string]string{"name": "n1", "public_host": "10.0.0.1"})
+	res, err = c.Post(ts.URL+"/api/servers", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		Server struct {
+			ID int64 `json:"id"`
+		} `json:"server"`
+	}
+	decodeRes(t, res, &created)
+	inBody, _ := json.Marshal(map[string]any{
+		"server_id": created.Server.ID, "name": "v1", "profile": "vless-reality-vision", "port": 8443,
+	})
+	res, err = c.Post(ts.URL+"/api/inbounds", "application/json", bytes.NewReader(inBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inb struct {
+		Inbound struct {
+			ID int64 `json:"id"`
+		} `json:"inbound"`
+	}
+	decodeRes(t, res, &inb)
+
+	pkgBody, _ := json.Marshal(map[string]any{
+		"name": "two", "traffic_bytes": 1024, "cycle_days": 0, "direction": "twoway",
+	})
+	res, err = c.Post(ts.URL+"/api/packages", "application/json", bytes.NewReader(pkgBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkg struct {
+		Package struct {
+			ID int64 `json:"id"`
+		} `json:"package"`
+	}
+	decodeRes(t, res, &pkg)
+
+	uBody, _ := json.Marshal(map[string]any{
+		"username": "carol", "password": "passpass", "package_id": pkg.Package.ID,
+	})
+	res, err = c.Post(ts.URL+"/api/users", "application/json", bytes.NewReader(uBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var createdU struct {
+		User struct {
+			ID int64 `json:"id"`
+		} `json:"user"`
+	}
+	decodeRes(t, res, &createdU)
+	if err := db.AddUserTraffic(d, createdU.User.ID, 10, 15); err != nil {
+		t.Fatal(err)
+	}
+	day := time.Now().Format("2006-01-02")
+	if err := db.AddDailyTraffic(d, day, createdU.User.ID, inb.Inbound.ID, 40, 60); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err = c.Get(ts.URL + "/api/users")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list struct {
+		Users []struct {
+			Username    string `json:"username"`
+			BilledBytes int64  `json:"billed_bytes"`
+			Direction   string `json:"direction"`
+			TrafficCap  int64  `json:"traffic_cap"`
+		} `json:"users"`
+	}
+	decodeRes(t, res, &list)
+	found := false
+	for _, u := range list.Users {
+		if u.Username == "carol" {
+			found = true
+			if u.BilledBytes != 50 || u.Direction != "twoway" || u.TrafficCap != 1024 {
+				t.Fatalf("user %+v", u)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("carol missing")
+	}
+
+	res, err = c.Get(ts.URL + "/api/traffic?days=7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tr struct {
+		Days []struct {
+			Day  string `json:"day"`
+			Up   int64  `json:"up"`
+			Down int64  `json:"down"`
+		} `json:"days"`
+		Users []struct {
+			Name string `json:"name"`
+			Up   int64  `json:"up"`
+			Down int64  `json:"down"`
+		} `json:"users"`
+		Inbounds []struct {
+			ID int64 `json:"id"`
+			Up int64 `json:"up"`
+		} `json:"inbounds"`
+		Billed int64 `json:"billed_bytes"`
+	}
+	decodeRes(t, res, &tr)
+	if len(tr.Days) != 7 {
+		t.Fatalf("days %d", len(tr.Days))
+	}
+	last := tr.Days[len(tr.Days)-1]
+	if last.Up != 40 || last.Down != 60 {
+		t.Fatalf("today %+v", last)
+	}
+	if len(tr.Users) != 1 || tr.Users[0].Name != "carol" {
+		t.Fatalf("users %+v", tr.Users)
+	}
+	if len(tr.Inbounds) != 1 || tr.Inbounds[0].ID != inb.Inbound.ID {
+		t.Fatalf("inbounds %+v", tr.Inbounds)
+	}
+	if tr.Billed != 50 {
+		t.Fatalf("billed %d", tr.Billed)
+	}
+
+	res, err = c.Get(ts.URL + "/api/users/" + strconv.FormatInt(createdU.User.ID, 10) + "/traffic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ut struct {
+		Days []struct {
+			Up   int64 `json:"up"`
+			Down int64 `json:"down"`
+		} `json:"days"`
+	}
+	decodeRes(t, res, &ut)
+	if len(ut.Days) == 0 || ut.Days[len(ut.Days)-1].Up != 40 {
+		t.Fatalf("user traffic %+v", ut)
+	}
+
+	res, err = c.Get(ts.URL + "/api/dashboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dash struct {
+		Used  int64 `json:"used_bytes"`
+		Today int64 `json:"today_bytes"`
+		Days  []any `json:"days"`
+	}
+	decodeRes(t, res, &dash)
+	if dash.Used != 50 || dash.Today != 100 || len(dash.Days) != 14 {
+		t.Fatalf("dash %+v", dash)
+	}
+
+	res, err = c.Get(ts.URL + "/api/inbounds")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ins struct {
+		Inbounds []struct {
+			ID     int64 `json:"id"`
+			UsedUp int64 `json:"used_up"`
+		} `json:"inbounds"`
+	}
+	decodeRes(t, res, &ins)
+	okIn := false
+	for _, in := range ins.Inbounds {
+		if in.ID == inb.Inbound.ID && in.UsedUp == 40 {
+			okIn = true
+		}
+	}
+	if !okIn {
+		t.Fatalf("inbound traffic %+v", ins.Inbounds)
 	}
 }

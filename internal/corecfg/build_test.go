@@ -303,3 +303,48 @@ func TestBuildSS2022TCPUDP(t *testing.T) {
 		t.Fatal("missing shadowsocks inbound")
 	}
 }
+
+func TestBuildSingboxClashAPI(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	srv, err := db.CreateServer(d, "n1", "10.0.0.1", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := db.CreateCert(d, &db.Certificate{
+		Name: "c1", CertPEM: "-----BEGIN CERTIFICATE-----\nA\n-----END CERTIFICATE-----",
+		KeyPEM: "-----BEGIN PRIVATE KEY-----\nB\n-----END PRIVATE KEY-----", Domains: "a.example",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &db.Inbound{
+		ServerID: srv.ID, Name: "a1", Profile: ProfileAnyTLS,
+		Port: 8443, Enabled: true, LineKind: "direct", Settings: "{}", CertID: &cert.ID,
+	}
+	if err := Normalize(in, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateInbound(d, in); err != nil {
+		t.Fatal(err)
+	}
+	b, err := Build(d, srv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.Apply.Singbox) == 0 || b.Apply.SingboxAPI == "" {
+		t.Fatalf("singbox api %q cfg %d", b.Apply.SingboxAPI, len(b.Apply.Singbox))
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(b.Apply.Singbox, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	exp, _ := cfg["experimental"].(map[string]any)
+	clash, _ := exp["clash_api"].(map[string]any)
+	if clash["external_controller"] != b.Apply.SingboxAPI {
+		t.Fatalf("controller %v api %s", clash["external_controller"], b.Apply.SingboxAPI)
+	}
+}

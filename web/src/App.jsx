@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard'
 import Nodes from './pages/Nodes'
 import Users from './pages/Users'
 import Packages from './pages/Packages'
+import Traffic from './pages/Traffic'
 import Settings from './pages/Settings'
 import My from './pages/My'
 import { BrandMark } from './components/ui'
@@ -57,6 +58,7 @@ export default function App() {
           <Route path="/inbounds" element={<Navigate to="/nodes" replace />} />
           <Route path="/users" element={<AdminRoute><Users /></AdminRoute>} />
           <Route path="/packages" element={<AdminRoute><Packages /></AdminRoute>} />
+          <Route path="/traffic" element={<AdminRoute><Traffic /></AdminRoute>} />
           <Route path="/certs" element={<Navigate to="/settings?tab=certs" replace />} />
           <Route path="/settings" element={<AdminRoute><Settings /></AdminRoute>} />
           <Route path="/password" element={<Navigate to="/settings?tab=account" replace />} />

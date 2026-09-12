@@ -564,7 +564,7 @@ export default function Nodes() {
                 ) : (
                   <div className="table-wrap">
                     <table className="data">
-                      <thead><tr><th>名称</th><th>协议</th><th>端口</th><th>类型</th><th>内核</th><th></th></tr></thead>
+                      <thead><tr><th>名称</th><th>协议</th><th>端口</th><th>类型</th><th>流量</th><th>内核</th><th></th></tr></thead>
                       <tbody>
                         {lines.map(inb => {
                           const dead = !serverHasCore(s, inb.core)
@@ -574,6 +574,7 @@ export default function Nodes() {
                               <td><Badge tone="gold">{inb.profile}</Badge></td>
                               <td className="tabular-nums">{inb.port}</td>
                               <td>{inb.line_kind === 'chain' ? '链式' : '直出'}</td>
+                              <td className="tabular-nums text-[12px] whitespace-nowrap">{fmtBytes((inb.used_up || 0) + (inb.used_down || 0))}</td>
                               <td className="text-ink-mut">{inb.core}{dead ? ' · 未安装' : ''}{!inb.enabled ? ' · 停用' : ''}</td>
                               <td className="whitespace-nowrap">
                                 <div className="flex gap-2.5 justify-end">

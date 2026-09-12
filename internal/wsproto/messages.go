@@ -36,11 +36,12 @@ type HelloAck struct {
 }
 
 type ApplyConfig struct {
-	Rev     string          `json:"rev"`
-	Xray    json.RawMessage `json:"xray,omitempty"`
-	Singbox json.RawMessage `json:"singbox,omitempty"`
-	Mita    json.RawMessage `json:"mita,omitempty"`
-	XrayAPI string          `json:"xray_api,omitempty"`
+	Rev        string          `json:"rev"`
+	Xray       json.RawMessage `json:"xray,omitempty"`
+	Singbox    json.RawMessage `json:"singbox,omitempty"`
+	Mita       json.RawMessage `json:"mita,omitempty"`
+	XrayAPI    string          `json:"xray_api,omitempty"`
+	SingboxAPI string          `json:"singbox_api,omitempty"`
 }
 
 type ApplyAck struct {
