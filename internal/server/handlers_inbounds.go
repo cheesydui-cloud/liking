@@ -168,6 +168,62 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 	s.respondAfterApply(w, map[string]any{"inbound": inboundJSON(fresh)}, in.ServerID, exitServerID(s, in))
 }
 
+func (s *Server) handleInboundShare(w http.ResponseWriter, r *http.Request) {
+	id, err := chiID(r, "id")
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	in, err := db.GetInbound(s.DB, id)
+	if err != nil {
+		jsonErr(w, http.StatusNotFound, "入站不存在")
+		return
+	}
+	if strings.TrimSpace(in.ServerHost) == "" {
+		jsonErr(w, http.StatusBadRequest, "节点未填写公开地址")
+		return
+	}
+	clients, err := db.ListClientsByInbound(s.DB, in.ID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var picked *db.Client
+	var pickedUser *db.User
+	for _, c := range clients {
+		if c == nil || !c.Enabled {
+			continue
+		}
+		u, err := db.GetUser(s.DB, c.UserID)
+		if err != nil || u == nil || u.Role == "admin" {
+			continue
+		}
+		var pkg *db.Package
+		if u.PackageID != nil {
+			pkg, _ = db.GetPackage(s.DB, *u.PackageID)
+		}
+		if !db.UserAccessOK(u, pkg) {
+			continue
+		}
+		picked, pickedUser = c, u
+		break
+	}
+	if picked == nil {
+		jsonErr(w, http.StatusBadRequest, "这条线路还没有可用用户。先给用户绑定包含此节点的套餐，再到用户页复制订阅。")
+		return
+	}
+	uri, err := corecfg.ShareURI(in, picked)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	jsonOK(w, map[string]any{
+		"uri":      uri,
+		"username": pickedUser.Username,
+		"profile":  in.Profile,
+	})
+}
+
 func (s *Server) handleDeleteInbound(w http.ResponseWriter, r *http.Request) {
 	id, err := chiID(r, "id")
 	if err != nil {

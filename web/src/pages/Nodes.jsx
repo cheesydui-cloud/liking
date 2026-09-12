@@ -110,6 +110,7 @@ export default function Nodes() {
   const [lineOpen, setLineOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [paramInb, setParamInb] = useState(null)
+  const [shareText, setShareText] = useState('')
 
   const load = async () => {
     try {
@@ -265,6 +266,22 @@ export default function Nodes() {
     }
   }
 
+  const copyShare = async (inb) => {
+    try {
+      const d = await api.get(`/inbounds/${inb.id}/share`)
+      try {
+        await copyText(d.uri)
+        if (d.profile === 'mieru') toast('已复制。Mieru 请到用户页复制 Clash 订阅，单条链接多数软件不认')
+        else toast(`已复制分享链接（${d.username}）`)
+      } catch {
+        setShareText(d.uri)
+        toast('浏览器不允许自动复制，请手动选中链接', 'error')
+      }
+    } catch (e) {
+      toast(e.message, 'error')
+    }
+  }
+
   const linesOf = (id) => list.filter(x => Number(x.server_id) === Number(id))
   const online = servers.filter(s => s.online).length
 
@@ -350,7 +367,7 @@ export default function Nodes() {
                               <td className="whitespace-nowrap">
                                 <div className="flex gap-2.5 justify-end">
                                   <button type="button" className="row-act" onClick={() => setParamInb(inb)}>参数</button>
-                                  <button type="button" className="row-act" onClick={() => copyParams(inb)}>复制</button>
+                                  <button type="button" className="row-act" onClick={() => copyShare(inb)}>复制</button>
                                   <button type="button" className="row-act" onClick={() => startEdit(inb)}>编辑</button>
                                   <button type="button" className="row-act" onClick={() => toggle(inb)}>{inb.enabled ? '停用' : '启用'}</button>
                                   <button type="button" className="row-act is-danger" onClick={() => delLine(inb.id)}>删除</button>
@@ -509,7 +526,22 @@ export default function Nodes() {
             }}><Icon name="copy" size={13} /></button>
           </div>
         ))}
-        <p className="text-[12px] text-ink-mut mt-3">私钥不展示。客户端 UUID / 密码在对应用户的订阅里。</p>
+        <p className="text-[12px] text-ink-mut mt-3">这些是服务端参数，不能直接导入客户端。分享链接请点线路上的「复制」；用户订阅在用户页。</p>
+      </Modal>
+
+      <Modal open={!!shareText} title="分享链接" onClose={() => setShareText('')} footer={
+        <>
+          <button type="button" className="btn-ghost" onClick={() => setShareText('')}>关闭</button>
+          <button type="button" className="btn-primary" onClick={async () => {
+            try { await copyText(shareText); toast('已复制分享链接') }
+            catch { toast('请手动选中复制', 'error') }
+          }}>
+            <Icon name="copy" size={15} /> 复制
+          </button>
+        </>
+      }>
+        <p className="text-[12px] text-ink-mut mb-2">粘贴到 v2rayN / Nekobox / Shadowrocket 等即可导入。Mieru 请用用户页的 Clash 订阅。</p>
+        <code className="block text-[12px] break-all font-mono p-3 rounded-md" style={{ background: 'var(--color-fill)' }}>{shareText}</code>
       </Modal>
     </div>
   )

@@ -12,7 +12,7 @@
 - 七组入站：VLESS+REALITY、VLESS+REALITY+Vision、VLESS+XHTTP+TLS、Trojan+TLS、SS2022、AnyTLS+TLS、Mieru；第一次下发时节点自动安装对应内核
 - 用户 / 套餐（一人一套餐；套餐勾选节点，不选表示全部）；到期或超量从内核配置摘掉客户端
 - 开户随机密码、一键续期、流量进度、订阅二维码 / Clash·sing-box 导入
-- 节点管理里可复制公钥、short_id 等参数；订阅：Clash Meta、sing-box JSON、URI（base64）
+- 节点管理「复制」给出可导入的分享链接；「参数」查看公钥 / short_id。订阅：Clash Meta、sing-box JSON、URI（base64）
 - 链式转发：入口 → 另一台落地。**Mieru / AnyTLS 不能当链式落地**；Mieru 可以直出，也可以当链式入口
 - 管理端：侧栏分组、列表优先、弹窗创建/编辑（对照妙妙屋的操作习惯，不搬偷自己 / Nginx / TG / 十二套模板）
 
@@ -55,7 +55,7 @@ liking-upgrade
 指定版本：
 
 ```bash
-liking-upgrade --release v0.1.10
+liking-upgrade --release v0.1.11
 ```
 
 只更新安装脚本本身：
