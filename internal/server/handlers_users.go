@@ -2,6 +2,8 @@ package server
 
 import (
 	"crypto/rand"
+	"database/sql"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -121,21 +123,53 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "用户不存在")
 		return
 	}
+	oldPkgID := int64(0)
+	hadPkg := u.PackageID != nil
+	if hadPkg {
+		oldPkgID = *u.PackageID
+	}
 	var req struct {
-		Remark       string `json:"remark"`
-		Enabled      *bool  `json:"enabled"`
-		ExpiresAt    *int64 `json:"expires_at"`
-		Days         *int   `json:"days"`
-		PackageID    *int64 `json:"package_id"`
-		Unbind       bool   `json:"unbind_package"`
-		TrafficLimit *int64 `json:"traffic_limit"`
-		ExtendDays   *int   `json:"extend_days"`
+		Username     *string         `json:"username"`
+		Remark       *string         `json:"remark"`
+		Enabled      *bool           `json:"enabled"`
+		ExpiresAt    *int64          `json:"expires_at"`
+		Days         *int            `json:"days"`
+		PackageID    *int64          `json:"package_id"`
+		Unbind       bool            `json:"unbind_package"`
+		TrafficLimit json.RawMessage `json:"traffic_limit"`
+		ExtendDays   *int            `json:"extend_days"`
+		Password     *string         `json:"password"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
 		return
 	}
-	u.Remark = req.Remark
+	if req.Username != nil {
+		name := strings.TrimSpace(*req.Username)
+		if name == "" {
+			jsonErr(w, http.StatusBadRequest, "用户名不能为空")
+			return
+		}
+		if name != u.Username {
+			if u.Role == "admin" {
+				jsonErr(w, http.StatusBadRequest, "不能修改管理员用户名")
+				return
+			}
+			other, err := db.GetUserByName(s.DB, name)
+			if err == nil && other != nil && other.ID != u.ID {
+				jsonErr(w, http.StatusConflict, "用户名已存在")
+				return
+			}
+			if err != nil && err != sql.ErrNoRows {
+				jsonErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			u.Username = name
+		}
+	}
+	if req.Remark != nil {
+		u.Remark = *req.Remark
+	}
 	if req.Enabled != nil {
 		u.Enabled = *req.Enabled
 	}
@@ -157,20 +191,65 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		}
 		u.ExpiresAt = base + int64(*req.ExtendDays)*24*3600
 	}
-	u.TrafficLimit = req.TrafficLimit
+	if len(req.TrafficLimit) > 0 && string(req.TrafficLimit) != "null" {
+		var n int64
+		if err := json.Unmarshal(req.TrafficLimit, &n); err != nil {
+			jsonErr(w, http.StatusBadRequest, "流量上限无效")
+			return
+		}
+		u.TrafficLimit = &n
+	} else if string(req.TrafficLimit) == "null" {
+		u.TrafficLimit = nil
+	}
 	if err := db.UpdateUser(s.DB, u); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			jsonErr(w, http.StatusConflict, "用户名已存在")
+			return
+		}
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if req.Password != nil {
+		pw := strings.TrimSpace(*req.Password)
+		if pw != "" {
+			if len(pw) < 6 {
+				jsonErr(w, http.StatusBadRequest, "密码至少 6 位")
+				return
+			}
+			hash, err := HashPassword(pw)
+			if err != nil {
+				jsonErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if err := db.SetUserPassword(s.DB, u.ID, hash); err != nil {
+				jsonErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+	}
 	if req.Unbind {
-		_ = db.UnbindUserPackage(s.DB, u.ID)
-	} else if req.PackageID != nil {
-		if err := db.BindUserPackage(s.DB, u.ID, *req.PackageID, u.ExpiresAt); err != nil {
-			jsonErr(w, http.StatusBadRequest, err.Error())
+		if err := db.UnbindUserPackage(s.DB, u.ID); err != nil {
+			jsonErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	} else if req.PackageID != nil {
+		same := hadPkg && oldPkgID == *req.PackageID
+		if !same {
+			if err := db.BindUserPackage(s.DB, u.ID, *req.PackageID, u.ExpiresAt); err != nil {
+				jsonErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		} else if req.ExpiresAt != nil || req.Days != nil || req.ExtendDays != nil {
+			if err := db.SetPackageExpiry(s.DB, u.ID, u.ExpiresAt); err != nil {
+				jsonErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
 	} else if req.ExtendDays != nil || req.Days != nil || req.ExpiresAt != nil {
-		_ = db.SetPackageExpiry(s.DB, u.ID, u.ExpiresAt)
+		if err := db.SetPackageExpiry(s.DB, u.ID, u.ExpiresAt); err != nil {
+			jsonErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	u, _ = db.GetUser(s.DB, u.ID)
 	s.provisionAndSyncUser(u)

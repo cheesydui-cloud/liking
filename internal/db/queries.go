@@ -142,8 +142,8 @@ func UpdateUser(d *sql.DB, u *User) error {
 	if u.Enabled {
 		en = 1
 	}
-	_, err := d.Exec(`UPDATE users SET remark=?, enabled=?, expires_at=?, traffic_limit=? WHERE id=?`,
-		u.Remark, en, u.ExpiresAt, u.TrafficLimit, u.ID)
+	_, err := d.Exec(`UPDATE users SET username=?, remark=?, enabled=?, expires_at=?, traffic_limit=? WHERE id=?`,
+		u.Username, u.Remark, en, u.ExpiresAt, u.TrafficLimit, u.ID)
 	return err
 }
 

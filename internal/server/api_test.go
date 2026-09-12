@@ -694,6 +694,109 @@ func TestUserPasswordAndExtend(t *testing.T) {
 		t.Fatalf("random password %q", rotated.Password)
 	}
 
+	if err := db.AddUserTraffic(d, created.User.ID, 111, 222); err != nil {
+		t.Fatal(err)
+	}
+
+	edit, _ := json.Marshal(map[string]any{
+		"username":      "robert",
+		"remark":        "vip",
+		"package_id":    pkg.ID,
+		"traffic_limit": int64(5 * 1024 * 1024 * 1024),
+		"password":      "newpass12",
+	})
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/users/"+strconv.FormatInt(created.User.ID, 10), bytes.NewReader(edit))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var edited struct {
+		User struct {
+			Username     string `json:"username"`
+			Remark       string `json:"remark"`
+			TrafficLimit *int64 `json:"traffic_limit"`
+			UsedUp       int64  `json:"used_up"`
+			UsedDown     int64  `json:"used_down"`
+			PackageID    *int64 `json:"package_id"`
+		} `json:"user"`
+	}
+	decodeRes(t, res, &edited)
+	if edited.User.Username != "robert" || edited.User.Remark != "vip" || edited.User.TrafficLimit == nil || *edited.User.TrafficLimit != 5*1024*1024*1024 {
+		t.Fatalf("edit %+v", edited.User)
+	}
+	if edited.User.UsedUp != 111 || edited.User.UsedDown != 222 {
+		t.Fatalf("same package wiped traffic %+v", edited.User)
+	}
+	keep, _ := json.Marshal(map[string]any{"enabled": true})
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/users/"+strconv.FormatInt(created.User.ID, 10), bytes.NewReader(keep))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, &edited)
+	if edited.User.Username != "robert" || edited.User.TrafficLimit == nil || *edited.User.TrafficLimit != 5*1024*1024*1024 {
+		t.Fatalf("partial %+v", edited.User)
+	}
+	clash, _ := json.Marshal(map[string]any{"username": "admin"})
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/users/"+strconv.FormatInt(created.User.ID, 10), bytes.NewReader(clash))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("username clash %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	clearLim, _ := json.Marshal(map[string]any{"traffic_limit": nil})
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/users/"+strconv.FormatInt(created.User.ID, 10), bytes.NewReader(clearLim))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, &edited)
+	if edited.User.TrafficLimit != nil {
+		t.Fatalf("clear limit %+v", edited.User)
+	}
+
+	pkg2, err := db.CreatePackage(d, "pro", 20*1024*1024*1024, 30, 0, "oneway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rebind, _ := json.Marshal(map[string]any{"package_id": pkg2.ID})
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/users/"+strconv.FormatInt(created.User.ID, 10), bytes.NewReader(rebind))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, &edited)
+	if edited.User.PackageID == nil || *edited.User.PackageID != pkg2.ID {
+		t.Fatalf("rebind %+v", edited.User)
+	}
+	if edited.User.UsedUp != 0 || edited.User.UsedDown != 0 {
+		t.Fatalf("new package should reset traffic %+v", edited.User)
+	}
+
 	res, err = c.Get(ts.URL + "/api/dashboard")
 	if err != nil {
 		t.Fatal(err)
@@ -710,7 +813,7 @@ func TestUserPasswordAndExtend(t *testing.T) {
 
 	jar2, _ := cookiejar.New(nil)
 	c2 := &http.Client{Jar: jar2}
-	login2, _ := json.Marshal(map[string]string{"username": "bob", "password": rotated.Password})
+	login2, _ := json.Marshal(map[string]string{"username": "robert", "password": "newpass12"})
 	res, err = c2.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login2))
 	if err != nil {
 		t.Fatal(err)
@@ -727,7 +830,7 @@ func TestUserPasswordAndExtend(t *testing.T) {
 		Sub map[string]string `json:"sub"`
 	}
 	decodeRes(t, res, &me)
-	if me.User.TrafficCap != 10*1024*1024*1024 || me.Sub["auto"] == "" || me.Sub["clash"] == "" {
+	if me.User.TrafficCap != 20*1024*1024*1024 || me.Sub["auto"] == "" || me.Sub["clash"] == "" {
 		t.Fatalf("me %+v", me)
 	}
 }
