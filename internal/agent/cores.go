@@ -167,7 +167,9 @@ func (c *Cores) applyMita(raw json.RawMessage) error {
 		}
 		bin = got
 	}
-	if bytes.Equal(raw, c.lastReq["mita"]) && mitaIsRunning(bin) && listenHeld(raw) {
+	// Skip without probing the live port. A raw TCP dial is not a mieru
+	// handshake; doing it on every periodic apply just opens junk sessions.
+	if bytes.Equal(raw, c.lastReq["mita"]) && mitaIsRunning(bin) {
 		return nil
 	}
 

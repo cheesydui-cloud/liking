@@ -45,6 +45,17 @@ func TestBuildXrayAndMita(t *testing.T) {
 	if len(b.Apply.Xray) == 0 || len(b.Apply.Mita) == 0 {
 		t.Fatalf("expected xray+mita, got xray=%d mita=%d singbox=%d", len(b.Apply.Xray), len(b.Apply.Mita), len(b.Apply.Singbox))
 	}
+	var mita map[string]any
+	if err := json.Unmarshal(b.Apply.Mita, &mita); err != nil {
+		t.Fatal(err)
+	}
+	if mita["mtu"] != float64(1400) {
+		t.Fatalf("mtu %v", mita["mtu"])
+	}
+	dns, _ := mita["dns"].(map[string]any)
+	if dns["dualStack"] != "PREFER_IPv4" {
+		t.Fatalf("dns %v", mita["dns"])
+	}
 	if b.Rev == "" {
 		t.Fatal("rev")
 	}

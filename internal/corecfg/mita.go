@@ -68,6 +68,10 @@ func buildMita(inbounds []*db.Inbound, clients map[int64][]*db.Client) (map[stri
 		"portBindings": bindings,
 		"users":        users,
 		"loggingLevel": "ERROR",
+		"mtu":          1400,
+		// Unset DualStack is USE_FIRST_IP. AAAA-first answers on a host
+		// without IPv6 make destinations fail until DNS order changes.
+		"dns": map[string]any{"dualStack": "PREFER_IPv4"},
 	}
 	if len(egressProxies) > 0 {
 		cfg["egress"] = map[string]any{

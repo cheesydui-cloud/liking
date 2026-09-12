@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -212,6 +213,17 @@ def write_status(s):
     os.makedirs(STATE, exist_ok=True)
     open(STATUS, "w").write(s)
 
+def bump_stops():
+    n = 0
+    path = os.path.join(STATE, "stops")
+    try:
+        n = int(open(path).read().strip() or "0")
+    except FileNotFoundError:
+        n = 0
+    except ValueError:
+        n = 0
+    open(path, "w").write(str(n + 1))
+
 def kill_listen():
     pid = 0
     try:
@@ -240,6 +252,7 @@ def kill_listen():
 
 cmd = sys.argv[1] if len(sys.argv) > 1 else ""
 if cmd == "stop":
+    bump_stops()
     kill_listen()
     sys.exit(0)
 if cmd == "apply":
@@ -336,6 +349,68 @@ func TestApplyMitaReusesOwnPort(t *testing.T) {
 	if !listenHeld(both) {
 		t.Fatal("mita should hold tcp+udp after second apply")
 	}
+}
+
+func TestApplyMitaSkipsIdenticalWithoutStop(t *testing.T) {
+	ln, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	stateDir := filepath.Join(dir, "mita-state")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFakeMita(t, binDir, stateDir)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	c := NewCores(filepath.Join(dir, "data"))
+	if err := os.MkdirAll(c.dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	defer c.StopAll()
+	t.Cleanup(func() {
+		if bin := lookBin("mita"); bin != "" {
+			_ = exec.Command(bin, "stop").Run()
+		}
+	})
+
+	cfg, _ := json.Marshal(map[string]any{
+		"portBindings": []any{
+			map[string]any{"port": port, "protocol": "TCP"},
+		},
+		"users": []any{map[string]any{"name": "u3", "password": "p"}},
+	})
+	if err := c.Apply(wsproto.ApplyConfig{Mita: cfg}); err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+	stops := fakeMitaStops(t, stateDir)
+	if stops == 0 {
+		t.Fatal("first apply should stop mita at least once")
+	}
+	if err := c.Apply(wsproto.ApplyConfig{Mita: cfg}); err != nil {
+		t.Fatalf("identical apply: %v", err)
+	}
+	if got := fakeMitaStops(t, stateDir); got != stops {
+		t.Fatalf("identical apply restarted mita, stops %d -> %d", stops, got)
+	}
+}
+
+func fakeMitaStops(t *testing.T, stateDir string) int {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(stateDir, "stops"))
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	return n
 }
 
 func TestCollectTimesOut(t *testing.T) {
