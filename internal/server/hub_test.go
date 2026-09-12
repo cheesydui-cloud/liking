@@ -71,3 +71,19 @@ func TestAgentHello(t *testing.T) {
 	}
 	t.Fatal("not online")
 }
+
+func TestNoteLive(t *testing.T) {
+	h := NewHub(nil)
+	ac := &agentConn{}
+	h.noteLive(ac, wsproto.Stats{HasNet: true, NetUp: 1200, NetDown: 3400})
+	if ac.upBps != 1200 || ac.downBps != 3400 || ac.lastStatsAt.IsZero() {
+		t.Fatalf("nic %+v", ac)
+	}
+	ac2 := &agentConn{}
+	h.noteLive(ac2, wsproto.Stats{Samples: []wsproto.Sample{{Up: 5000, Down: 9000}}})
+	ac2.lastStatsAt = time.Now().Add(-2 * time.Second)
+	h.noteLive(ac2, wsproto.Stats{Samples: []wsproto.Sample{{Up: 4000, Down: 8000}}})
+	if ac2.upBps < 1500 || ac2.downBps < 3000 {
+		t.Fatalf("sample bps up=%d down=%d", ac2.upBps, ac2.downBps)
+	}
+}

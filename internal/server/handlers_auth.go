@@ -122,14 +122,11 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	servers, _ := db.ListServers(s.DB)
 	users, _ := db.ListUsers(s.DB)
 	ins, _ := db.ListInbounds(s.DB)
+	s.decorateServers(servers)
 	online := 0
 	for _, x := range servers {
-		x.Token = ""
-		if s.Hub.IsOnline(x.ID) {
-			x.Online = 1
+		if x.Online == 1 {
 			online++
-		} else {
-			x.Online = 0
 		}
 	}
 	pkgs, _ := db.ListPackages(s.DB)

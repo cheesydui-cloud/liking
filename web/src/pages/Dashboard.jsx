@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
-import { Badge, Empty, PageHead, SkeletonRows, fmtAgo, fmtBytes } from '../components/ui'
+import { Badge, Empty, PageHead, SkeletonRows, fmtAgo, fmtBps, fmtBytes } from '../components/ui'
 
 export default function Dashboard() {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   useEffect(() => {
-    api.get('/dashboard').then(setD).catch(e => setErr(e.message))
+    const pull = () => api.get('/dashboard').then(setD).catch(e => setErr(e.message))
+    pull()
+    const t = setInterval(pull, 5000)
+    return () => clearInterval(t)
   }, [])
   if (err) return <div style={{ color: 'var(--color-danger)' }}>{err}</div>
   if (!d) return <div className="card"><SkeletonRows /></div>
@@ -48,7 +51,7 @@ export default function Dashboard() {
         ) : (
           <div className="table-wrap">
             <table className="data">
-              <thead><tr><th>名称</th><th>地址</th><th>状态</th><th>心跳</th><th>系统</th></tr></thead>
+              <thead><tr><th>名称</th><th>地址</th><th>状态</th><th>上行</th><th>下行</th><th>已用</th><th>心跳</th></tr></thead>
               <tbody>
                 {(d.server_list || []).map(s => (
                   <tr key={s.id}>
@@ -59,8 +62,13 @@ export default function Dashboard() {
                       <span className="ml-2">{s.online ? '在线' : '离线'}</span>
                       {s.last_error ? <Badge tone="danger" className="ml-2">下发失败</Badge> : null}
                     </td>
+                    <td className="tabular-nums text-[12px] whitespace-nowrap">{s.online ? fmtBps(s.net_up_bps) : '—'}</td>
+                    <td className="tabular-nums text-[12px] whitespace-nowrap">{s.online ? fmtBps(s.net_down_bps) : '—'}</td>
+                    <td className="tabular-nums text-[12px] whitespace-nowrap">
+                      {fmtBytes((s.used_up || 0) + (s.used_down || 0))}
+                      {s.traffic_limit ? ` / ${fmtBytes(s.traffic_limit)}` : ''}
+                    </td>
                     <td className="text-[12px] text-ink-mut whitespace-nowrap">{fmtAgo(s.last_seen)}</td>
-                    <td className="text-ink-mut">{[s.os, s.arch].filter(Boolean).join(' / ') || '—'}</td>
                   </tr>
                 ))}
               </tbody>

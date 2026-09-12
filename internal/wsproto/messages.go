@@ -54,6 +54,7 @@ type Stats struct {
 	Samples []Sample `json:"samples"`
 	NetUp   int64    `json:"net_up_bps,omitempty"`
 	NetDown int64    `json:"net_down_bps,omitempty"`
+	HasNet  bool     `json:"has_net,omitempty"`
 	Cores   []string `json:"cores,omitempty"`
 }
 

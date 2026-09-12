@@ -123,7 +123,7 @@ func (a *Agent) session(ctx context.Context) error {
 
 	ping := time.NewTicker(10 * time.Second)
 	defer ping.Stop()
-	stats := time.NewTicker(30 * time.Second)
+	stats := time.NewTicker(5 * time.Second)
 	defer stats.Stop()
 
 	envCh := make(chan wsproto.Envelope, 8)
@@ -168,7 +168,14 @@ func (a *Agent) session(ctx context.Context) error {
 			}
 		case <-stats.C:
 			samples := a.cores.Collect()
-			st, _ := json.Marshal(wsproto.Stats{Samples: samples, Cores: detectedCores()})
+			up, down, hasNet := snapshotNet()
+			st, _ := json.Marshal(wsproto.Stats{
+				Samples: samples,
+				NetUp:   up,
+				NetDown: down,
+				HasNet:  hasNet,
+				Cores:   detectedCores(),
+			})
 			if err := a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeStats, Payload: st}); err != nil {
 				return err
 			}

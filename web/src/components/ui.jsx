@@ -53,6 +53,15 @@ export function fmtBytes(n) {
   return (i ? x.toFixed(1) : String(Math.round(x))) + ' ' + u[i]
 }
 
+export function fmtBps(n) {
+  const x = Math.max(0, Number(n) || 0)
+  const u = ['B/s', 'KB/s', 'MB/s', 'GB/s']
+  let i = 0, v = x
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
+  const num = i === 0 ? String(Math.round(v)) : (v >= 10 ? v.toFixed(1) : v.toFixed(2))
+  return `${num} ${u[i]}`
+}
+
 export function fmtDate(ts) {
   if (!ts) return '—'
   try { return new Date(ts * 1000).toLocaleString() } catch { return '—' }

@@ -34,8 +34,13 @@ type Server struct {
 	ConfigRev   string `json:"config_rev"`
 	LastError   string `json:"last_error"`
 	LastErrorAt int64  `json:"last_error_at"`
-	Cores       string `json:"cores"`
-	CreatedAt   int64  `json:"created_at"`
+	Cores        string `json:"cores"`
+	CreatedAt    int64  `json:"created_at"`
+	TrafficLimit int64  `json:"traffic_limit"`
+	UsedUp       int64  `json:"used_up"`
+	UsedDown     int64  `json:"used_down"`
+	NetUpBps     int64  `json:"net_up_bps"`
+	NetDownBps   int64  `json:"net_down_bps"`
 }
 
 type Certificate struct {

@@ -835,6 +835,74 @@ func TestUserPasswordAndExtend(t *testing.T) {
 	}
 }
 
+func TestServerTrafficLimit(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	body, _ := json.Marshal(map[string]string{"name": "n1", "public_host": "10.0.0.1"})
+	res, err = c.Post(ts.URL+"/api/servers", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		Server struct {
+			ID           int64  `json:"id"`
+			PublicHost   string `json:"public_host"`
+			TrafficLimit int64  `json:"traffic_limit"`
+		} `json:"server"`
+	}
+	decodeRes(t, res, &created)
+	if created.Server.ID == 0 || created.Server.TrafficLimit != 0 {
+		t.Fatalf("%+v", created.Server)
+	}
+	lim := int64(2 * 1024 * 1024 * 1024)
+	upd, _ := json.Marshal(map[string]any{"traffic_limit": lim})
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/api/servers/"+strconv.FormatInt(created.Server.ID, 10), bytes.NewReader(upd))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var updated struct {
+		Server struct {
+			PublicHost   string `json:"public_host"`
+			TrafficLimit int64  `json:"traffic_limit"`
+		} `json:"server"`
+	}
+	decodeRes(t, res, &updated)
+	if updated.Server.TrafficLimit != lim || updated.Server.PublicHost != "10.0.0.1" {
+		t.Fatalf("partial %+v", updated.Server)
+	}
+}
+
 func TestHealthz(t *testing.T) {
 	d, err := db.Open(":memory:")
 	if err != nil {

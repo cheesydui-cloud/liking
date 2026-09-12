@@ -30,19 +30,32 @@ func (s *Server) reconcileOnline(list []*db.Server) {
 	}
 }
 
+func (s *Server) decorateServers(list []*db.Server) {
+	s.reconcileOnline(list)
+	totals, _ := db.ServerTrafficTotals(s.DB)
+	for _, x := range list {
+		x.Token = ""
+		if t, ok := totals[x.ID]; ok {
+			x.UsedUp = t.Up
+			x.UsedDown = t.Down
+		}
+		if up, down, ok := s.Hub.Live(x.ID); ok {
+			x.NetUpBps = up
+			x.NetDownBps = down
+		}
+	}
+}
+
 func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 	list, err := db.ListServers(s.DB)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.reconcileOnline(list)
 	if list == nil {
 		list = []*db.Server{}
 	}
-	for _, x := range list {
-		x.Token = ""
-	}
+	s.decorateServers(list)
 	jsonOK(w, map[string]any{"servers": list})
 }
 
@@ -82,17 +95,27 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name       string `json:"name"`
-		PublicHost string `json:"public_host"`
+		Name         *string `json:"name"`
+		PublicHost   *string `json:"public_host"`
+		TrafficLimit *int64  `json:"traffic_limit"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
 		return
 	}
-	if strings.TrimSpace(req.Name) != "" {
-		srv.Name = strings.TrimSpace(req.Name)
+	if req.Name != nil && strings.TrimSpace(*req.Name) != "" {
+		srv.Name = strings.TrimSpace(*req.Name)
 	}
-	srv.PublicHost = strings.TrimSpace(req.PublicHost)
+	if req.PublicHost != nil {
+		srv.PublicHost = strings.TrimSpace(*req.PublicHost)
+	}
+	if req.TrafficLimit != nil {
+		if *req.TrafficLimit < 0 {
+			jsonErr(w, http.StatusBadRequest, "流量上限无效")
+			return
+		}
+		srv.TrafficLimit = *req.TrafficLimit
+	}
 	if err := db.UpdateServer(s.DB, srv); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return

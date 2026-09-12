@@ -209,8 +209,8 @@ func CreateServer(d *sql.DB, name, publicHost, token string) (*Server, error) {
 
 func GetServer(d *sql.DB, id int64) (*Server, error) {
 	s := &Server{}
-	err := d.QueryRow(`SELECT id,name,public_host,token,online,last_seen,agent_ver,os,arch,connect_ip,config_rev,last_error,last_error_at,cores,created_at FROM servers WHERE id=?`, id).
-		Scan(&s.ID, &s.Name, &s.PublicHost, &s.Token, &s.Online, &s.LastSeen, &s.AgentVer, &s.OS, &s.Arch, &s.ConnectIP, &s.ConfigRev, &s.LastError, &s.LastErrorAt, &s.Cores, &s.CreatedAt)
+	err := d.QueryRow(`SELECT id,name,public_host,token,online,last_seen,agent_ver,os,arch,connect_ip,config_rev,last_error,last_error_at,cores,created_at,traffic_limit FROM servers WHERE id=?`, id).
+		Scan(&s.ID, &s.Name, &s.PublicHost, &s.Token, &s.Online, &s.LastSeen, &s.AgentVer, &s.OS, &s.Arch, &s.ConnectIP, &s.ConfigRev, &s.LastError, &s.LastErrorAt, &s.Cores, &s.CreatedAt, &s.TrafficLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -242,8 +242,34 @@ func ListServers(d *sql.DB) ([]*Server, error) {
 }
 
 func UpdateServer(d *sql.DB, s *Server) error {
-	_, err := d.Exec(`UPDATE servers SET name=?, public_host=? WHERE id=?`, s.Name, s.PublicHost, s.ID)
+	_, err := d.Exec(`UPDATE servers SET name=?, public_host=?, traffic_limit=? WHERE id=?`, s.Name, s.PublicHost, s.TrafficLimit, s.ID)
 	return err
+}
+
+type TrafficSum struct {
+	Up   int64
+	Down int64
+}
+
+func ServerTrafficTotals(d *sql.DB) (map[int64]TrafficSum, error) {
+	rows, err := d.Query(`SELECT i.server_id, COALESCE(SUM(t.up),0), COALESCE(SUM(t.down),0)
+		FROM inbounds i
+		LEFT JOIN traffic_daily t ON t.inbound_id = i.id
+		GROUP BY i.server_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]TrafficSum{}
+	for rows.Next() {
+		var id int64
+		var s TrafficSum
+		if err := rows.Scan(&id, &s.Up, &s.Down); err != nil {
+			return nil, err
+		}
+		out[id] = s
+	}
+	return out, rows.Err()
 }
 
 func DeleteServer(d *sql.DB, id int64) error {

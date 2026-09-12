@@ -8,7 +8,7 @@
 
 ## 能做什么
 
-- 管理员登录、服务器管理（机器 + 节点）、反向 WSS 纳管 Agent
+- 管理员登录、服务器管理（机器 + 节点，实时上下行和已用 / 剩余流量）、反向 WSS 纳管 Agent
 - 七组入站：VLESS+REALITY、VLESS+REALITY+Vision、VLESS+XHTTP+TLS、Trojan+TLS、SS2022、AnyTLS+TLS、Mieru；第一次下发时节点自动安装对应内核
 - 用户 / 套餐（一人一套餐；套餐勾选节点，不选表示全部）；到期或超量从内核配置摘掉客户端
 - 开户随机密码、用户编辑（用户名 / 套餐 / 到期 / 流量 / 登录密码）、流量进度、订阅二维码 / Clash·sing-box 导入
@@ -55,7 +55,7 @@ liking-upgrade
 指定版本：
 
 ```bash
-liking-upgrade --release v0.1.19
+liking-upgrade --release v0.1.20
 ```
 
 只更新安装脚本本身：

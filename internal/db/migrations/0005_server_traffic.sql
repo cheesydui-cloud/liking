@@ -1,0 +1,1 @@
+ALTER TABLE servers ADD COLUMN traffic_limit INTEGER NOT NULL DEFAULT 0;

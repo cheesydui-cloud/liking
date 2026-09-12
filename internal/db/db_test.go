@@ -309,3 +309,53 @@ func TestMarkServerOnlineFillsEmptyPublicHost(t *testing.T) {
 		t.Fatalf("named host overwritten %q", named.PublicHost)
 	}
 }
+
+func TestServerTrafficTotals(t *testing.T) {
+	d, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	tok, err := RandomHex(8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := CreateServer(d, "n1", "1.1.1.1", tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := CreateInbound(d, &Inbound{
+		ServerID: s.ID, Name: "a", Profile: "ss2022", Protocol: "shadowsocks",
+		Network: "tcp", Security: "none", Core: "xray", Listen: "0.0.0.0",
+		Port: 8789, Enabled: true, Settings: "{}", LineKind: "direct",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := CreateUser(d, "alice", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AddDailyTraffic(d, "2026-09-13", u.ID, in.ID, 100, 250); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddDailyTraffic(d, "2026-09-13", u.ID, in.ID, 50, 50); err != nil {
+		t.Fatal(err)
+	}
+	totals, err := ServerTrafficTotals(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := totals[s.ID]
+	if got.Up != 150 || got.Down != 300 {
+		t.Fatalf("%+v", got)
+	}
+	s.TrafficLimit = 1024
+	if err := UpdateServer(d, s); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = GetServer(d, s.ID)
+	if s.TrafficLimit != 1024 {
+		t.Fatalf("limit %d", s.TrafficLimit)
+	}
+}

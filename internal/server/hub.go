@@ -61,6 +61,11 @@ type agentConn struct {
 	pendMu    sync.Mutex
 	pending   map[string]chan json.RawMessage
 	idSeq     atomic.Uint64
+
+	liveMu      sync.Mutex
+	upBps       int64
+	downBps     int64
+	lastStatsAt time.Time
 }
 
 func (a *agentConn) nextID() string {
@@ -240,6 +245,7 @@ func (h *Hub) readerLoop(parent context.Context, ac *agentConn) {
 			if len(st.Cores) > 0 {
 				_ = db.SetServerCores(h.DB, ac.serverID, st.Cores)
 			}
+			h.noteLive(ac, st)
 			h.applyStats(st.Samples)
 		case wsproto.TypeApplyAck, wsproto.TypeHelloAck:
 			ac.dispatchAck(env)
@@ -315,6 +321,46 @@ func (h *Hub) SendApply(serverID int64, cfg wsproto.ApplyConfig) error {
 	case <-ac.closed:
 		return errors.New("connection closed before ack")
 	}
+}
+
+func (h *Hub) Live(id int64) (up, down int64, ok bool) {
+	h.mu.RLock()
+	ac, exists := h.conns[id]
+	h.mu.RUnlock()
+	if !exists {
+		return 0, 0, false
+	}
+	ac.liveMu.Lock()
+	defer ac.liveMu.Unlock()
+	if ac.lastStatsAt.IsZero() || time.Since(ac.lastStatsAt) > 90*time.Second {
+		return 0, 0, false
+	}
+	return ac.upBps, ac.downBps, true
+}
+
+func (h *Hub) noteLive(ac *agentConn, st wsproto.Stats) {
+	now := time.Now()
+	ac.liveMu.Lock()
+	defer ac.liveMu.Unlock()
+	if st.HasNet {
+		ac.upBps = st.NetUp
+		ac.downBps = st.NetDown
+		ac.lastStatsAt = now
+		return
+	}
+	var up, down int64
+	for _, s := range st.Samples {
+		up += s.Up
+		down += s.Down
+	}
+	if !ac.lastStatsAt.IsZero() {
+		dt := now.Sub(ac.lastStatsAt).Seconds()
+		if dt > 0.2 {
+			ac.upBps = int64(float64(up) / dt)
+			ac.downBps = int64(float64(down) / dt)
+		}
+	}
+	ac.lastStatsAt = now
 }
 
 func (h *Hub) applyStats(samples []wsproto.Sample) {

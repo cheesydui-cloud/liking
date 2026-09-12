@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Modal, PageHead, fmtAgo } from '../components/ui'
+import { Badge, Empty, Field, Icon, Meter, Modal, PageHead, fmtAgo, fmtBps, fmtBytes } from '../components/ui'
 
 const emptyLine = {
   server_id: 0, name: '', profile: 'vless-reality-vision', port: '', listen: '0.0.0.0',
@@ -58,6 +58,39 @@ function inboundParamLines(inb) {
   return inboundParamRows(inb).map(([k, v]) => `${k} ${v}`).join('\n')
 }
 
+function gbFromLimit(n) {
+  if (!n) return ''
+  const gb = Number(n) / (1024 ** 3)
+  if (!Number.isFinite(gb) || gb <= 0) return ''
+  return String(Math.round(gb * 1000) / 1000)
+}
+
+function ServerTraffic({ s, onSetLimit }) {
+  const used = (s.used_up || 0) + (s.used_down || 0)
+  const cap = Number(s.traffic_limit) || 0
+  const left = cap > 0 ? Math.max(0, cap - used) : null
+  return (
+    <div className="mt-3 rounded-md px-3 py-2.5" style={{ background: 'var(--color-fill, var(--color-raised))' }}>
+      <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 tabular-nums">
+        <span className="text-[13px] font-medium" style={{ color: 'var(--color-accent)' }}>↑ {s.online ? fmtBps(s.net_up_bps) : '—'}</span>
+        <span className="text-[13px] font-medium" style={{ color: 'var(--color-ok)' }}>↓ {s.online ? fmtBps(s.net_down_bps) : '—'}</span>
+        <span className="text-[12px] text-ink-mut">
+          {s.online ? '实时' : '离线'}
+        </span>
+      </div>
+      <div className="mt-2">
+        <Meter value={used} max={cap} />
+        <div className="flex items-center justify-between gap-2 mt-1">
+          <span className="text-[11.5px] text-ink-mut">
+            {cap > 0 ? `剩余 ${fmtBytes(left)}` : '未设上限'}
+          </span>
+          <button type="button" className="row-act" onClick={() => onSetLimit(s)}>上限</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function formFromInbound(inb) {
   const st = inboundSettings(inb)
   return {
@@ -108,7 +141,13 @@ export default function Nodes() {
       setProfiles(d.profiles || [])
     } catch (e) { toast(e.message, 'error') }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    const t = setInterval(() => {
+      api.get('/servers').then(a => setServers(a.servers || [])).catch(() => {})
+    }, 5000)
+    return () => clearInterval(t)
+  }, [])
 
   const meta = profiles.find(p => p.id === f.profile)
   const selectedServer = servers.find(s => Number(s.id) === Number(f.server_id))
@@ -158,6 +197,30 @@ export default function Nodes() {
     if (v == null) return
     try { await api.put(`/servers/${s.id}`, { name: s.name, public_host: v }); load() }
     catch (e) { toast(e.message, 'error') }
+  }
+
+  const saveLimit = async (s) => {
+    const v = await dialog.prompt({
+      title: `${s.name} 流量上限`,
+      message: '单位 GB。留空表示不限。已用流量按这台机器上的线路累计。',
+      defaultValue: gbFromLimit(s.traffic_limit),
+      okText: '保存',
+    })
+    if (v == null) return
+    const n = String(v).trim()
+    let bytes = 0
+    if (n !== '') {
+      const gb = Number(n)
+      if (!Number.isFinite(gb) || gb < 0) {
+        toast('上限无效', 'error')
+        return
+      }
+      bytes = Math.round(gb * 1024 * 1024 * 1024)
+    }
+    try {
+      await api.put(`/servers/${s.id}`, { traffic_limit: bytes })
+      load()
+    } catch (e) { toast(e.message, 'error') }
   }
 
   const openCreateLine = (serverId) => {
@@ -304,33 +367,36 @@ export default function Nodes() {
             const cores = String(s.cores || '').split(',').map(x => x.trim()).filter(Boolean)
             return (
               <div key={s.id} className="card overflow-hidden">
-                <div className="p-4 flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[15px] font-semibold truncate">{s.name}</span>
-                      <span className={`dot ${s.online ? 'dot-on' : 'dot-off'}`} />
-                      {s.online ? <Badge tone="ok">在线</Badge> : <Badge tone="muted">离线</Badge>}
+                <div className="p-4">
+                  <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[15px] font-semibold truncate">{s.name}</span>
+                        <span className={`dot ${s.online ? 'dot-on' : 'dot-off'}`} />
+                        {s.online ? <Badge tone="ok">在线</Badge> : <Badge tone="muted">离线</Badge>}
+                      </div>
+                      <div className="text-[12px] font-mono text-ink-mut mt-1 truncate">
+                        {s.public_host || '未填公开地址'}
+                        <button type="button" className="row-act ml-2 font-sans" onClick={() => saveHost(s)}>改</button>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {cores.length ? cores.map(c => <span key={c} className="chip">{c}</span>) : <span className="chip">未上报内核</span>}
+                      </div>
+                      <div className="text-[12px] text-ink-mut mt-1.5">
+                        Agent {s.agent_ver || '—'} · 心跳 {fmtAgo(s.last_seen)}
+                        {s.os ? ` · ${[s.os, s.arch].filter(Boolean).join('/')}` : ''}
+                      </div>
+                      {s.last_error ? (
+                        <div className="text-[12px] mt-1" style={{ color: 'var(--color-danger)' }}>{s.last_error}</div>
+                      ) : null}
                     </div>
-                    <div className="text-[12px] font-mono text-ink-mut mt-1 truncate">
-                      {s.public_host || '未填公开地址'}
-                      <button type="button" className="row-act ml-2 font-sans" onClick={() => saveHost(s)}>改</button>
+                    <div className="flex flex-wrap gap-2.5 shrink-0">
+                      <button type="button" className="row-act" onClick={() => showInstall(s.id)}>安装命令</button>
+                      <button type="button" className="row-act" onClick={() => sync(s.id)}>同步</button>
+                      <button type="button" className="row-act is-danger" onClick={() => delNode(s.id)}>删除服务器</button>
                     </div>
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {cores.length ? cores.map(c => <span key={c} className="chip">{c}</span>) : <span className="chip">未上报内核</span>}
-                    </div>
-                    <div className="text-[12px] text-ink-mut mt-1.5">
-                      Agent {s.agent_ver || '—'} · 心跳 {fmtAgo(s.last_seen)}
-                      {s.os ? ` · ${[s.os, s.arch].filter(Boolean).join('/')}` : ''}
-                    </div>
-                    {s.last_error ? (
-                      <div className="text-[12px] mt-1" style={{ color: 'var(--color-danger)' }}>{s.last_error}</div>
-                    ) : null}
                   </div>
-                  <div className="flex flex-wrap gap-2.5 shrink-0">
-                    <button type="button" className="row-act" onClick={() => showInstall(s.id)}>安装命令</button>
-                    <button type="button" className="row-act" onClick={() => sync(s.id)}>同步</button>
-                    <button type="button" className="row-act is-danger" onClick={() => delNode(s.id)}>删除服务器</button>
-                  </div>
+                  <ServerTraffic s={s} onSetLimit={saveLimit} />
                 </div>
                 <div className="px-4 py-2 flex items-center justify-between border-t" style={{ borderColor: 'var(--color-line-soft)' }}>
                   <span className="text-[12px] font-medium text-ink-mut">节点 · {lines.length}</span>
