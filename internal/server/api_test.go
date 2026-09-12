@@ -972,6 +972,27 @@ func TestCertsAndSettings(t *testing.T) {
 		t.Fatal("token leaked after save")
 	}
 
+	onlyPanel, _ := json.Marshal(map[string]string{"panel_name": "liking-x"})
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/settings", bytes.NewReader(onlyPanel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+	res, err = c.Get(ts.URL + "/api/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st = map[string]any{}
+	decodeRes(t, res, &st)
+	if st["panel_name"] != "liking-x" || st["acme_email"] != "a@b.com" || st["cf_api_token_set"] != true {
+		t.Fatalf("partial settings %+v", st)
+	}
+
 	body, _ := json.Marshal(map[string]string{"name": "self", "domains": "self.example.com"})
 	res, err = c.Post(ts.URL+"/api/certs/selfsign", "application/json", bytes.NewReader(body))
 	if err != nil {
@@ -1034,6 +1055,159 @@ func TestCertsAndSettings(t *testing.T) {
 		t.Fatalf("acme %d %s", res.StatusCode, b)
 	}
 	res.Body.Close()
+}
+
+func TestSelfProfile(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := db.CreateUser(d, "admin", hash, "admin", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	badOld, _ := json.Marshal(map[string]string{"username": "owner", "old_password": "wrong"})
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/api/me", bytes.NewReader(badOld))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 400 {
+		t.Fatalf("wrong password %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	block, _ := json.Marshal(map[string]string{"username": "root"})
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/users/"+strconv.FormatInt(admin.ID, 10), bytes.NewReader(block))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 400 {
+		t.Fatalf("admin rename via users %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	okBody, _ := json.Marshal(map[string]string{"username": "owner", "old_password": "secret12"})
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/me", bytes.NewReader(okBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var me struct {
+		User struct {
+			Username string `json:"username"`
+			Role     string `json:"role"`
+		} `json:"user"`
+	}
+	decodeRes(t, res, &me)
+	if me.User.Username != "owner" || me.User.Role != "admin" {
+		t.Fatalf("rename %+v", me.User)
+	}
+
+	oldLogin, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err = http.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(oldLogin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 401 {
+		t.Fatalf("old username still works %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	pwBody, _ := json.Marshal(map[string]string{"old": "secret12", "new": "secret99"})
+	res, err = c.Post(ts.URL+"/api/password", "application/json", bytes.NewReader(pwBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	create, _ := json.Marshal(map[string]string{"username": "bob", "password": "bobpass"})
+	res, err = c.Post(ts.URL+"/api/users", "application/json", bytes.NewReader(create))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	clash, _ := json.Marshal(map[string]string{"username": "bob", "old_password": "secret99"})
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/me", bytes.NewReader(clash))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 409 {
+		t.Fatalf("username clash %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	jar2, _ := cookiejar.New(nil)
+	c2 := &http.Client{Jar: jar2}
+	login2, _ := json.Marshal(map[string]string{"username": "bob", "password": "bobpass"})
+	res, err = c2.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+	userBody, _ := json.Marshal(map[string]string{"username": "bobby", "old_password": "bobpass", "new_password": "bobpass2"})
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/me", bytes.NewReader(userBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c2.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, &me)
+	if me.User.Username != "bobby" {
+		t.Fatalf("user rename %+v", me.User)
+	}
+
+	jar3, _ := cookiejar.New(nil)
+	c3 := &http.Client{Jar: jar3}
+	login3, _ := json.Marshal(map[string]string{"username": "bobby", "password": "bobpass2"})
+	res, err = c3.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
 }
 
 func TestHealthz(t *testing.T) {

@@ -125,6 +125,37 @@ textarea.input-field { height: auto; min-height: 7rem; padding-top: 0.55rem; pad
   box-shadow: none;
 }
 
+.lk-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  border-bottom: 1px solid var(--color-line);
+  margin-bottom: 1.25rem;
+}
+.lk-tab {
+  height: 40px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink-mut);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.lk-tab:hover { color: var(--color-ink); }
+.lk-tab.is-active {
+  color: var(--color-ink);
+  border-bottom-color: var(--color-ink);
+}
+.lk-tab:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+  border-radius: 4px 4px 0 0;
+}
+
 .table-wrap { @apply overflow-x-auto; }
 table.data { @apply w-full text-[13px]; border-collapse: collapse; }
 table.data th {

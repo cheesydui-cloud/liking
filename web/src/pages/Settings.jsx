@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useToast, useDialog, useUser } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Modal, PageHead, fmtDateShort } from '../components/ui'
+import { Badge, Empty, Field, Icon, Modal, PageHead, Tabs, fmtDateShort } from '../components/ui'
 
 const emptyIssue = { channel: 'acme-cf', name: '', domains: '', cert_pem: '', key_pem: '' }
 
@@ -33,10 +34,67 @@ function expiryText(ts) {
   return fmtDateShort(ts)
 }
 
-export default function Settings() {
+function AccountForm() {
+  const toast = useToast()
+  const { user, applySession, refreshUser } = useUser()
+  const [username, setUsername] = useState(user?.username || '')
+  const [oldP, setOld] = useState('')
+  const [n, setN] = useState('')
+  const [n2, setN2] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => { setUsername(user?.username || '') }, [user?.username])
+
+  const submit = async (e) => {
+    e.preventDefault()
+    if (!oldP) { toast('请填写当前密码', 'error'); return }
+    if (n && n.length < 6) { toast('新密码至少 6 位', 'error'); return }
+    if (n && n !== n2) { toast('两次新密码不一致', 'error'); return }
+    setBusy(true)
+    try {
+      const body = { username: username.trim(), old_password: oldP }
+      if (n) body.new_password = n
+      const data = await api.put('/me', body)
+      if (data) applySession(data)
+      else await refreshUser()
+      toast('已保存')
+      setOld(''); setN(''); setN2('')
+    } catch (err) { toast(err.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <form onSubmit={submit} className="card p-5 max-w-md space-y-4">
+      <Field label="用户名">
+        <input className="input-field" value={username} onChange={e => setUsername(e.target.value)} required autoComplete="username" />
+      </Field>
+      <Field label="当前密码" hint="改用户名或密码都要填写。改完后当前会话仍然有效。">
+        <input className="input-field" type="password" value={oldP} onChange={e => setOld(e.target.value)} required autoComplete="current-password" />
+      </Field>
+      <Field label="新密码" hint="留空表示不改密码。至少 6 位。">
+        <input className="input-field" type="password" value={n} onChange={e => setN(e.target.value)} autoComplete="new-password" />
+      </Field>
+      <Field label="确认新密码">
+        <input className="input-field" type="password" value={n2} onChange={e => setN2(e.target.value)} autoComplete="new-password" disabled={!n} />
+      </Field>
+      <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
+    </form>
+  )
+}
+
+const settingTabs = [
+  { id: 'panel', label: '面板' },
+  { id: 'certs', label: '证书' },
+  { id: 'account', label: '账号' },
+]
+
+export default function Settings({ accountOnly = false }) {
   const toast = useToast()
   const dialog = useDialog()
   const { refreshUser, version } = useUser()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requested = searchParams.get('tab')
+  const tab = accountOnly ? 'account' : (settingTabs.some(t => t.id === requested) ? requested : 'panel')
   const [f, setF] = useState({ panel_name: '', panel_url: '', acme_email: '', cf_api_token: '' })
   const [tokenSet, setTokenSet] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -59,20 +117,34 @@ export default function Settings() {
   const loadCerts = () => api.get('/certs').then(d => setCerts(d.certs || [])).catch(e => toast(e.message, 'error'))
 
   useEffect(() => {
+    if (accountOnly) return
     loadSettings()
     loadCerts()
-  }, [])
+  }, [accountOnly])
 
-  const save = async (e) => {
+  const goTab = (id) => setSearchParams(id === 'panel' ? {} : { tab: id }, { replace: true })
+
+  const savePanel = async (e) => {
     e.preventDefault()
     setBusy(true)
     try {
-      const body = { panel_name: f.panel_name, panel_url: f.panel_url, acme_email: f.acme_email }
+      await api.put('/settings', { panel_name: f.panel_name, panel_url: f.panel_url })
+      toast('已保存')
+      refreshUser()
+      loadSettings()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  const saveCF = async (e) => {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      const body = { acme_email: f.acme_email }
       if (f.cf_api_token.trim()) body.cf_api_token = f.cf_api_token.trim()
       await api.put('/settings', body)
       toast('已保存')
       setF(x => ({ ...x, cf_api_token: '' }))
-      refreshUser()
       loadSettings()
     } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
@@ -124,12 +196,17 @@ export default function Settings() {
     ? (issueBusy ? '正在向 Let\'s Encrypt 申请，大约 1–2 分钟…' : '申请')
     : (issueBusy ? '保存中…' : '保存')
 
+  const desc = accountOnly
+    ? '改用户名或登录密码。改完后当前会话仍然有效。'
+    : `当前版本 ${version || '—'}。VLESS+XHTTP、Trojan、AnyTLS 需要证书；REALITY 不需要。`
+
   return (
     <div>
-      <PageHead title="设置" desc={`当前版本 ${version || '—'}。VLESS+XHTTP、Trojan、AnyTLS 需要证书；REALITY 不需要。`} />
+      <PageHead title="设置" desc={desc} />
+      {!accountOnly && <Tabs value={tab} onChange={goTab} items={settingTabs} />}
 
-      <form onSubmit={save} className="card p-5 max-w-3xl space-y-4">
-        <div className="text-[15px] font-medium">面板</div>
+      {tab === 'panel' && (
+      <form onSubmit={savePanel} className="card p-5 max-w-3xl space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="面板名称">
             <input className="input-field" value={f.panel_name} onChange={e => setF({ ...f, panel_name: e.target.value })} />
@@ -138,21 +215,26 @@ export default function Settings() {
             <input className="input-field" value={f.panel_url} onChange={e => setF({ ...f, panel_url: e.target.value })} placeholder="https://panel.example.com" />
           </Field>
         </div>
-        <div className="pt-2 border-t border-[var(--color-line-soft)]">
-          <div className="text-[15px] font-medium">Cloudflare / Let's Encrypt</div>
-          <p className="text-[12.5px] text-ink-mut mt-1 mb-3 leading-relaxed">
-            Token 权限：Zone · Zone · Read，Zone · DNS · Edit。域名不必指向本面板，也不用开放 80 端口。
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="ACME 邮箱">
-              <input className="input-field" type="email" autoComplete="off" value={f.acme_email} onChange={e => setF({ ...f, acme_email: e.target.value })} placeholder="you@example.com" />
-            </Field>
-            <Field label="Cloudflare API Token" hint={tokenSet ? '已保存。留空则不改。' : '在 Cloudflare 控制台创建自定义 Token。'}>
-              <input className="input-field font-mono" type="password" autoComplete="new-password" value={f.cf_api_token} onChange={e => setF({ ...f, cf_api_token: e.target.value })} placeholder={tokenSet ? '••••••••' : ''} />
-            </Field>
-          </div>
+        <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
+      </form>
+      )}
+
+      {tab === 'certs' && (
+      <>
+      <form onSubmit={saveCF} className="card p-5 max-w-3xl space-y-4">
+        <div className="text-[15px] font-medium">Cloudflare / Let&apos;s Encrypt</div>
+        <p className="text-[12.5px] text-ink-mut leading-relaxed">
+          Token 权限：Zone · Zone · Read，Zone · DNS · Edit。域名不必指向本面板，也不用开放 80 端口。
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="ACME 邮箱">
+            <input className="input-field" type="email" autoComplete="off" value={f.acme_email} onChange={e => setF({ ...f, acme_email: e.target.value })} placeholder="you@example.com" />
+          </Field>
+          <Field label="Cloudflare API Token" hint={tokenSet ? '已保存。留空则不改。' : '在 Cloudflare 控制台创建自定义 Token。'}>
+            <input className="input-field font-mono" type="password" autoComplete="new-password" value={f.cf_api_token} onChange={e => setF({ ...f, cf_api_token: e.target.value })} placeholder={tokenSet ? '••••••••' : ''} />
+          </Field>
         </div>
-        <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存设置'}</button>
+        <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
       </form>
 
       <div className="card overflow-hidden max-w-3xl mt-5">
@@ -202,6 +284,10 @@ export default function Settings() {
       <div className="mt-5 text-[13px] text-ink-mut max-w-3xl leading-relaxed">
         第一次下发对应线路时，节点会自行从 GitHub 安装内核到 PATH：Xray（默认）、sing-box（AnyTLS，≥ 1.12）、mita（Mieru）。Agent 只在有对应入站时才拉起该内核。访问不了 GitHub 时可在节点设置环境变量 LIKING_GITHUB_PROXY。
       </div>
+      </>
+      )}
+
+      {tab === 'account' && <AccountForm />}
 
       <Modal open={formOpen} title="签发证书" onClose={() => !issueBusy && setFormOpen(false)} size="lg" footer={
         <>

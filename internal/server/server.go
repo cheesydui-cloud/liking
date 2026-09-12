@@ -82,6 +82,7 @@ func (s *Server) Router() http.Handler {
 		r.Use(s.requireAPIAuth)
 		r.Post("/api/logout", s.handleLogout)
 		r.Get("/api/me", s.handleMe)
+		r.Put("/api/me", s.handleProfile)
 		r.Post("/api/password", s.handlePassword)
 
 		r.Group(func(r chi.Router) {

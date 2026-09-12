@@ -1,13 +1,30 @@
 package server
 
 import (
+	"database/sql"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"liking/internal/db"
 	"liking/internal/version"
 )
+
+func normalizeUsername(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", fmt.Errorf("用户名不能为空")
+	}
+	if strings.ContainsAny(s, " \t\n\r") {
+		return "", fmt.Errorf("用户名不能含空格")
+	}
+	if utf8.RuneCountInString(s) > 32 {
+		return "", fmt.Errorf("用户名最多 32 个字")
+	}
+	return s, nil
+}
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
@@ -87,6 +104,84 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, map[string]any{"ok": true})
+}
+
+func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
+	ctxUser := userFromCtx(r.Context())
+	u, err := db.GetUser(s.DB, ctxUser.ID)
+	if err != nil {
+		jsonErr(w, http.StatusUnauthorized, "登录已过期")
+		return
+	}
+	var req struct {
+		Username    *string `json:"username"`
+		OldPassword string  `json:"old_password"`
+		NewPassword string  `json:"new_password"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效请求")
+		return
+	}
+	if strings.TrimSpace(req.OldPassword) == "" {
+		jsonErr(w, http.StatusBadRequest, "请填写当前密码")
+		return
+	}
+	if !checkPassword(u.PasswordHash, req.OldPassword) {
+		jsonErr(w, http.StatusBadRequest, "当前密码错误")
+		return
+	}
+	changed := false
+	if req.Username != nil {
+		name, err := normalizeUsername(*req.Username)
+		if err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if name != u.Username {
+			other, err := db.GetUserByName(s.DB, name)
+			if err == nil && other != nil && other.ID != u.ID {
+				jsonErr(w, http.StatusConflict, "用户名已存在")
+				return
+			}
+			if err != nil && err != sql.ErrNoRows {
+				jsonErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			u.Username = name
+			if err := db.UpdateUser(s.DB, u); err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "unique") {
+					jsonErr(w, http.StatusConflict, "用户名已存在")
+					return
+				}
+				jsonErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			changed = true
+		}
+	}
+	if req.NewPassword != "" {
+		if len(req.NewPassword) < 6 {
+			jsonErr(w, http.StatusBadRequest, "新密码至少 6 位")
+			return
+		}
+		hash, err := HashPassword(req.NewPassword)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "内部错误")
+			return
+		}
+		if err := db.SetUserPassword(s.DB, u.ID, hash); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "内部错误")
+			return
+		}
+		changed = true
+	}
+	if !changed {
+		jsonErr(w, http.StatusBadRequest, "没有要保存的更改")
+		return
+	}
+	u, _ = db.GetUser(s.DB, u.ID)
+	db.AddAudit(s.DB, &u.ID, "profile.update", u.Username)
+	jsonOK(w, s.sessionPayload(u, r))
 }
 
 func (s *Server) sessionPayload(u *db.User, r *http.Request) map[string]any {

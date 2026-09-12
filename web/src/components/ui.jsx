@@ -116,6 +116,25 @@ export function PageHead({ title, desc, actions }) {
   )
 }
 
+export function Tabs({ value, onChange, items }) {
+  return (
+    <div className="lk-tabs" role="tablist">
+      {items.map(it => (
+        <button
+          key={it.id}
+          type="button"
+          role="tab"
+          aria-selected={value === it.id}
+          className={`lk-tab${value === it.id ? ' is-active' : ''}`}
+          onClick={() => onChange(it.id)}
+        >
+          {it.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export function Empty({ title, hint, action }) {
   return (
     <div className="py-12 px-6 text-center">

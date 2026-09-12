@@ -358,20 +358,26 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		PanelName string `json:"panel_name"`
-		PanelURL  string `json:"panel_url"`
-		AcmeEmail string `json:"acme_email"`
-		CFToken   string `json:"cf_api_token"`
+		PanelName *string `json:"panel_name"`
+		PanelURL  *string `json:"panel_url"`
+		AcmeEmail *string `json:"acme_email"`
+		CFToken   *string `json:"cf_api_token"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
 		return
 	}
-	_ = db.SetSetting(s.DB, "panel_name", strings.TrimSpace(req.PanelName))
-	_ = db.SetSetting(s.DB, "panel_url", strings.TrimSpace(req.PanelURL))
-	_ = db.SetSetting(s.DB, "acme_email", strings.TrimSpace(req.AcmeEmail))
-	if strings.TrimSpace(req.CFToken) != "" {
-		_ = db.SetSetting(s.DB, "cf_api_token", strings.TrimSpace(req.CFToken))
+	if req.PanelName != nil {
+		_ = db.SetSetting(s.DB, "panel_name", strings.TrimSpace(*req.PanelName))
+	}
+	if req.PanelURL != nil {
+		_ = db.SetSetting(s.DB, "panel_url", strings.TrimSpace(*req.PanelURL))
+	}
+	if req.AcmeEmail != nil {
+		_ = db.SetSetting(s.DB, "acme_email", strings.TrimSpace(*req.AcmeEmail))
+	}
+	if req.CFToken != nil && strings.TrimSpace(*req.CFToken) != "" {
+		_ = db.SetSetting(s.DB, "cf_api_token", strings.TrimSpace(*req.CFToken))
 	}
 	jsonOK(w, map[string]any{"ok": true})
 }

@@ -145,14 +145,14 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Username != nil {
-		name := strings.TrimSpace(*req.Username)
-		if name == "" {
-			jsonErr(w, http.StatusBadRequest, "用户名不能为空")
+		name, err := normalizeUsername(*req.Username)
+		if err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if name != u.Username {
 			if u.Role == "admin" {
-				jsonErr(w, http.StatusBadRequest, "不能修改管理员用户名")
+				jsonErr(w, http.StatusBadRequest, "请在设置里修改管理员用户名")
 				return
 			}
 			other, err := db.GetUserByName(s.DB, name)

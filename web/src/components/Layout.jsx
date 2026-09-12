@@ -169,12 +169,11 @@ export function Layout({ children }) {
       label: '系统',
       items: [
         { to: '/settings', icon: 'gear', label: '设置' },
-        { to: '/password', icon: 'key', label: '密码' },
       ],
     },
   ] : [
     { items: [{ to: '/my', icon: 'spark', label: '我的订阅' }] },
-    { label: '账号', items: [{ to: '/my/password', icon: 'key', label: '修改密码' }] },
+    { label: '账号', items: [{ to: '/my/settings', icon: 'gear', label: '设置' }] },
   ]
 
   return (

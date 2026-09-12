@@ -7,7 +7,6 @@ import Users from './pages/Users'
 import Packages from './pages/Packages'
 import Settings from './pages/Settings'
 import My from './pages/My'
-import Password from './pages/Password'
 import { BrandMark } from './components/ui'
 
 function Loading() {
@@ -58,11 +57,12 @@ export default function App() {
           <Route path="/inbounds" element={<Navigate to="/nodes" replace />} />
           <Route path="/users" element={<AdminRoute><Users /></AdminRoute>} />
           <Route path="/packages" element={<AdminRoute><Packages /></AdminRoute>} />
-          <Route path="/certs" element={<Navigate to="/settings" replace />} />
+          <Route path="/certs" element={<Navigate to="/settings?tab=certs" replace />} />
           <Route path="/settings" element={<AdminRoute><Settings /></AdminRoute>} />
-          <Route path="/password" element={<AdminRoute><Password /></AdminRoute>} />
+          <Route path="/password" element={<Navigate to="/settings?tab=account" replace />} />
           <Route path="/my" element={<UserRoute><My /></UserRoute>} />
-          <Route path="/my/password" element={<UserRoute><Password /></UserRoute>} />
+          <Route path="/my/settings" element={<UserRoute><Settings accountOnly /></UserRoute>} />
+          <Route path="/my/password" element={<Navigate to="/my/settings" replace />} />
           <Route path="*" element={
             <div className="min-h-dvh grid place-items-center">
               <div className="text-center">
