@@ -218,7 +218,7 @@ func xrayStream(in *db.Inbound, st Settings, certs map[int64]*db.Certificate) (m
 			"realitySettings": map[string]any{
 				"show":        false,
 				"dest":        st.String("dest"),
-				"xver":        0,
+				"xver":        st.Int("xver", 0),
 				"serverNames": sni,
 				"privateKey":  st.String("private_key"),
 				"shortIds":    st.Strings("short_ids"),
@@ -230,13 +230,10 @@ func xrayStream(in *db.Inbound, st Settings, certs map[int64]*db.Certificate) (m
 			return nil, err
 		}
 		return map[string]any{
-			"network":     "xhttp",
-			"security":    "tls",
-			"tlsSettings": tls,
-			"xhttpSettings": map[string]any{
-				"path": st.String("path"),
-				"mode": st.String("mode"),
-			},
+			"network":       "xhttp",
+			"security":      "tls",
+			"tlsSettings":   tls,
+			"xhttpSettings": xrayXHTTPSettings(st),
 		}, nil
 	case ProfileTrojanTLS:
 		tls, err := xrayTLS(in, st, certs)
@@ -268,11 +265,34 @@ func xrayTLS(in *db.Inbound, st Settings, certs map[int64]*db.Certificate) (map[
 				"key":         pemLines(c.KeyPEM),
 			},
 		},
+		"minVersion":       nz(st.String("min_version"), "1.3"),
+		"alpn":             st.ALPN(),
+		"rejectUnknownSni": st.Bool("reject_unknown_sni", true),
 	}
 	if sni := st.String("sni"); sni != "" {
 		tls["serverName"] = sni
 	}
 	return tls, nil
+}
+
+func xrayClientTLS(st Settings, sni string) map[string]any {
+	return map[string]any{
+		"serverName":    sni,
+		"allowInsecure": false,
+		"fingerprint":   nz(st.String("fingerprint"), "chrome"),
+		"alpn":          st.ALPN(),
+	}
+}
+
+func xrayXHTTPSettings(st Settings) map[string]any {
+	xh := map[string]any{
+		"path": st.String("path"),
+		"mode": st.String("mode"),
+	}
+	if host := strings.TrimSpace(st.String("host")); host != "" {
+		xh["host"] = host
+	}
+	return xh
 }
 
 func xrayChainOutbound(entry *db.Inbound, byID map[int64]*db.Inbound) (map[string]any, string, error) {
@@ -304,29 +324,27 @@ func xrayChainOutbound(entry *db.Inbound, byID map[int64]*db.Inbound) (map[strin
 				sni = host
 			}
 			stream = map[string]any{
-				"network":  "xhttp",
-				"security": "tls",
-				"tlsSettings": map[string]any{
-					"serverName":    sni,
-					"allowInsecure": false,
-				},
-				"xhttpSettings": map[string]any{
-					"path": lst.String("path"),
-					"mode": lst.String("mode"),
-				},
+				"network":       "xhttp",
+				"security":      "tls",
+				"tlsSettings":   xrayClientTLS(lst, sni),
+				"xhttpSettings": xrayXHTTPSettings(lst),
 			}
 		} else {
 			sni := first(lst.Strings("server_names"))
 			sid := first(lst.Strings("short_ids"))
+			rs := map[string]any{
+				"serverName":  sni,
+				"fingerprint": nz(lst.String("fingerprint"), "chrome"),
+				"publicKey":   lst.String("public_key"),
+				"shortId":     sid,
+			}
+			if spx := lst.String("spider_x"); spx != "" {
+				rs["spiderX"] = spx
+			}
 			stream = map[string]any{
-				"network":  "tcp",
-				"security": "reality",
-				"realitySettings": map[string]any{
-					"serverName":  sni,
-					"fingerprint": lst.String("fingerprint"),
-					"publicKey":   lst.String("public_key"),
-					"shortId":     sid,
-				},
+				"network":         "tcp",
+				"security":        "reality",
+				"realitySettings": rs,
 			}
 		}
 		return map[string]any{
@@ -357,12 +375,9 @@ func xrayChainOutbound(entry *db.Inbound, byID map[int64]*db.Inbound) (map[strin
 				}},
 			},
 			"streamSettings": map[string]any{
-				"network":  "tcp",
-				"security": "tls",
-				"tlsSettings": map[string]any{
-					"serverName":    sni,
-					"allowInsecure": false,
-				},
+				"network":     "tcp",
+				"security":    "tls",
+				"tlsSettings": xrayClientTLS(lst, sni),
 			},
 		}, tag, nil
 	case ProfileSS2022:

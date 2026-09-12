@@ -47,10 +47,7 @@ func SingboxOutbound(in *db.Inbound, c *db.Client) (map[string]any, error) {
 			"server":      host,
 			"server_port": in.Port,
 			"uuid":        c.UUID,
-			"tls": map[string]any{
-				"enabled":     true,
-				"server_name": sni,
-			},
+			"tls":         singClientTLS(st, sni),
 			"transport": map[string]any{
 				"type": "httpupgrade",
 				"path": st.String("path"),
@@ -67,10 +64,7 @@ func SingboxOutbound(in *db.Inbound, c *db.Client) (map[string]any, error) {
 			"server":      host,
 			"server_port": in.Port,
 			"password":    c.Password,
-			"tls": map[string]any{
-				"enabled":     true,
-				"server_name": sni,
-			},
+			"tls":         singClientTLS(st, sni),
 		}, nil
 	case ProfileSS2022:
 		return map[string]any{
@@ -92,10 +86,7 @@ func SingboxOutbound(in *db.Inbound, c *db.Client) (map[string]any, error) {
 			"server":      host,
 			"server_port": in.Port,
 			"password":    c.Password,
-			"tls": map[string]any{
-				"enabled":     true,
-				"server_name": sni,
-			},
+			"tls":         singClientTLS(st, sni),
 		}, nil
 	case ProfileMieru:
 		return nil, ErrSkip

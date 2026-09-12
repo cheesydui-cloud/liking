@@ -2,6 +2,23 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.1.26 — 2026-09-13
+
+增加节点只有一个协议下拉和 dest，各协议该填的安全项看不到，REALITY 还默认伪装 Cloudflare，容易填成自己的域名。
+
+### 改进
+- 增加节点改成协议卡片：Vision 推荐，TLS 协议标需证书，Mieru / AnyTLS 标仅入口
+- REALITY 可改 dest（微软 / 苹果等预设）、SNI、指纹、shortId、xver、spiderX，编辑时可轮换密钥。dest 不能指向本机
+- XHTTP / Trojan / AnyTLS 可改 SNI、指纹、TLS 1.3、ALPN、拒绝未知 SNI；XHTTP 还有 path / mode / host
+- SS2022 新建默认 256；Mieru 传输说明只当入口
+- 内核配置写入 minVersion 1.3、ALPN、rejectUnknownSni；订阅带上指纹和 ALPN
+- 默认 REALITY dest 改为 `www.microsoft.com:443`
+
+### 升级注意
+- 升面板后到服务器管理点一次同步，已有 TLS 节点会吃到 1.3 / 拒绝未知 SNI
+- 已有 REALITY 节点的 dest 不变
+- 回滚：`liking-upgrade --release v0.1.25`
+
 ## v0.1.25 — 2026-09-13
 
 没有普通用户时，用户页直接显示空状态，管理员账号看不见。

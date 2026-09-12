@@ -86,6 +86,25 @@ func TestBuildXrayAndMita(t *testing.T) {
 			t.Fatal("freedom api-out loops the stats API onto itself")
 		}
 	}
+	foundDest := ""
+	for _, raw := range xray["inbounds"].([]any) {
+		m, _ := raw.(map[string]any)
+		ss, _ := m["streamSettings"].(map[string]any)
+		if ss == nil {
+			continue
+		}
+		rs, _ := ss["realitySettings"].(map[string]any)
+		if rs == nil {
+			continue
+		}
+		foundDest, _ = rs["dest"].(string)
+		if xver, ok := rs["xver"].(float64); !ok || xver != 0 {
+			t.Fatalf("xver %v", rs["xver"])
+		}
+	}
+	if foundDest != DefaultRealityDest {
+		t.Fatalf("reality dest %s", foundDest)
+	}
 }
 
 func TestProvisionKeepsMieruPasswordWhenDisabled(t *testing.T) {

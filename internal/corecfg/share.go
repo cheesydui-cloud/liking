@@ -42,6 +42,9 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 		q.Set("fp", nz(st.String("fingerprint"), "chrome"))
 		q.Set("pbk", st.String("public_key"))
 		q.Set("sid", first(st.Strings("short_ids")))
+		if spx := st.String("spider_x"); spx != "" {
+			q.Set("spx", spx)
+		}
 		if Vision(in.Profile) {
 			q.Set("flow", "xtls-rprx-vision")
 		}
@@ -58,6 +61,11 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 			sni = host
 		}
 		q.Set("sni", sni)
+		q.Set("fp", nz(st.String("fingerprint"), "chrome"))
+		q.Set("alpn", strings.Join(st.ALPN(), ","))
+		if h := st.String("host"); h != "" {
+			q.Set("host", h)
+		}
 		return fmt.Sprintf("vless://%s@%s?%s#%s", c.UUID, hp, q.Encode(), name), nil
 	case ProfileTrojanTLS:
 		q := url.Values{}
@@ -68,6 +76,8 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 			sni = host
 		}
 		q.Set("sni", sni)
+		q.Set("fp", nz(st.String("fingerprint"), "chrome"))
+		q.Set("alpn", strings.Join(st.ALPN(), ","))
 		return fmt.Sprintf("trojan://%s@%s?%s#%s", url.QueryEscape(c.Password), hp, q.Encode(), name), nil
 	case ProfileSS2022:
 		method := st.String("method")
@@ -81,6 +91,8 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 			sni = host
 		}
 		q.Set("sni", sni)
+		q.Set("fp", nz(st.String("fingerprint"), "chrome"))
+		q.Set("alpn", strings.Join(st.ALPN(), ","))
 		return fmt.Sprintf("anytls://%s@%s?%s#%s", url.QueryEscape(c.Password), hp, q.Encode(), name), nil
 	case ProfileMieru:
 		// Shadowrocket: mierus://user:pass@host?udp=1&port=39198&profile=default

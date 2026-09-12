@@ -100,6 +100,8 @@ func singInbound(in *db.Inbound, clients []*db.Client, certs map[int64]*db.Certi
 		"enabled":     true,
 		"certificate": pemBlock(c.CertPEM),
 		"key":         pemBlock(c.KeyPEM),
+		"min_version": nz(st.String("min_version"), "1.3"),
+		"alpn":        st.ALPN(),
 	}
 	if sni != "" {
 		tls["server_name"] = sni
@@ -138,7 +140,7 @@ func singChainOutbound(entry *db.Inbound, byID map[int64]*db.Inbound) (map[strin
 			"tls": map[string]any{
 				"enabled":     true,
 				"server_name": sni,
-				"utls":        map[string]any{"enabled": true, "fingerprint": lst.String("fingerprint")},
+				"utls":        map[string]any{"enabled": true, "fingerprint": nz(lst.String("fingerprint"), "chrome")},
 				"reality": map[string]any{
 					"enabled":    true,
 					"public_key": lst.String("public_key"),
@@ -161,10 +163,7 @@ func singChainOutbound(entry *db.Inbound, byID map[int64]*db.Inbound) (map[strin
 			"server":      host,
 			"server_port": land.Port,
 			"uuid":        st.String("relay_uuid"),
-			"tls": map[string]any{
-				"enabled":     true,
-				"server_name": sni,
-			},
+			"tls":         singClientTLS(lst, sni),
 			"transport": map[string]any{
 				"type": "httpupgrade",
 				"path": lst.String("path"),
@@ -181,10 +180,7 @@ func singChainOutbound(entry *db.Inbound, byID map[int64]*db.Inbound) (map[strin
 			"server":      host,
 			"server_port": land.Port,
 			"password":    st.String("relay_password"),
-			"tls": map[string]any{
-				"enabled":     true,
-				"server_name": sni,
-			},
+			"tls":         singClientTLS(lst, sni),
 		}, nil
 	case ProfileSS2022:
 		return map[string]any{
@@ -197,5 +193,15 @@ func singChainOutbound(entry *db.Inbound, byID map[int64]*db.Inbound) (map[strin
 		}, nil
 	default:
 		return nil, fmt.Errorf("不支持的落地协议 %s", land.Profile)
+	}
+}
+
+func singClientTLS(st Settings, sni string) map[string]any {
+	return map[string]any{
+		"enabled":     true,
+		"server_name": sni,
+		"min_version": nz(st.String("min_version"), "1.3"),
+		"alpn":        st.ALPN(),
+		"utls":        map[string]any{"enabled": true, "fingerprint": nz(st.String("fingerprint"), "chrome")},
 	}
 }

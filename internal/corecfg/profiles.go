@@ -3,6 +3,7 @@ package corecfg
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"liking/internal/db"
@@ -21,13 +22,14 @@ const (
 	CoreSingbox = "singbox"
 	CoreMita    = "mita"
 
-	DefaultRealityDest = "www.cloudflare.com:443"
+	DefaultRealityDest = "www.microsoft.com:443"
 )
 
 type Meta struct {
 	ID      string `json:"id"`
 	Title   string `json:"title"`
 	Core    string `json:"core"`
+	Desc    string `json:"desc"`
 	NeedTLS bool   `json:"need_tls"`
 	Direct  bool   `json:"direct"`
 	Landing bool   `json:"landing"` // can be a chain next-hop in v1
@@ -35,13 +37,13 @@ type Meta struct {
 
 func Catalog() []Meta {
 	return []Meta{
-		{ID: ProfileVLESSReality, Title: "VLESS + REALITY", Core: CoreXray, Landing: true, Direct: true},
-		{ID: ProfileVLESSRealityVision, Title: "VLESS + REALITY + Vision", Core: CoreXray, Landing: true, Direct: true},
-		{ID: ProfileVLESSXHTTP, Title: "VLESS + XHTTP + TLS", Core: CoreXray, NeedTLS: true, Landing: true, Direct: true},
-		{ID: ProfileTrojanTLS, Title: "Trojan + TLS", Core: CoreXray, NeedTLS: true, Landing: true, Direct: true},
-		{ID: ProfileSS2022, Title: "Shadowsocks 2022", Core: CoreXray, Landing: true, Direct: true},
-		{ID: ProfileAnyTLS, Title: "AnyTLS + TCP + TLS", Core: CoreSingbox, NeedTLS: true, Direct: true},
-		{ID: ProfileMieru, Title: "Mieru", Core: CoreMita, Direct: true},
+		{ID: ProfileVLESSRealityVision, Title: "VLESS + REALITY + Vision", Core: CoreXray, Landing: true, Direct: true, Desc: "伪装成访问真实网站，不需要证书。Vision 再包一层流量，抗主动探测更好。"},
+		{ID: ProfileVLESSReality, Title: "VLESS + REALITY", Core: CoreXray, Landing: true, Direct: true, Desc: "伪装成访问真实网站，不需要证书。适合没有域名的机器。"},
+		{ID: ProfileVLESSXHTTP, Title: "VLESS + XHTTP + TLS", Core: CoreXray, NeedTLS: true, Landing: true, Direct: true, Desc: "走 HTTPS 外观，需要证书。路径和 SNI 可自定义。"},
+		{ID: ProfileTrojanTLS, Title: "Trojan + TLS", Core: CoreXray, NeedTLS: true, Landing: true, Direct: true, Desc: "经典 TLS 隧道，需要证书。实现简单，客户端支持广。"},
+		{ID: ProfileSS2022, Title: "Shadowsocks 2022", Core: CoreXray, Landing: true, Direct: true, Desc: "2022-blake3 AEAD。没有 TLS 指纹，实现干净。"},
+		{ID: ProfileAnyTLS, Title: "AnyTLS + TCP + TLS", Core: CoreSingbox, NeedTLS: true, Direct: true, Desc: "sing-box 实现，需要证书。不能当链式落地。"},
+		{ID: ProfileMieru, Title: "Mieru", Core: CoreMita, Direct: true, Desc: "只当入口，不能当链式落地。可同时开 TCP / UDP。"},
 	}
 }
 
@@ -101,6 +103,10 @@ func Vision(profile string) bool {
 	return profile == ProfileVLESSRealityVision
 }
 
+func Reality(profile string) bool {
+	return profile == ProfileVLESSReality || profile == ProfileVLESSRealityVision
+}
+
 type Settings map[string]any
 
 func ParseSettings(raw string) Settings {
@@ -152,6 +158,72 @@ func (s Settings) Strings(key string) []string {
 	return nil
 }
 
+func (s Settings) Bool(key string, def bool) bool {
+	v, ok := s[key]
+	if !ok || v == nil {
+		return def
+	}
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		switch strings.ToLower(strings.TrimSpace(t)) {
+		case "1", "true", "yes", "on":
+			return true
+		case "0", "false", "no", "off":
+			return false
+		}
+	case float64:
+		return t != 0
+	}
+	return def
+}
+
+func (s Settings) Int(key string, def int) int {
+	v, ok := s[key]
+	if !ok || v == nil {
+		return def
+	}
+	switch t := v.(type) {
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case float64:
+		return int(t)
+	case json.Number:
+		n, err := t.Int64()
+		if err != nil {
+			return def
+		}
+		return int(n)
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(t))
+		if err != nil {
+			return def
+		}
+		return n
+	}
+	return def
+}
+
+func (s Settings) ALPN() []string {
+	raw := s.Strings("alpn")
+	var out []string
+	for _, x := range raw {
+		for _, p := range strings.Split(x, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				out = append(out, p)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return []string{"h2", "http/1.1"}
+	}
+	return out
+}
+
 func (s Settings) Marshal() (string, error) {
 	if s == nil {
 		return "{}", nil
@@ -185,12 +257,19 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 
 	switch in.Profile {
 	case ProfileVLESSReality, ProfileVLESSRealityVision:
-		if st.String("dest") == "" {
-			st["dest"] = DefaultRealityDest
+		dest := strings.TrimSpace(st.String("dest"))
+		if dest == "" {
+			dest = DefaultRealityDest
+		}
+		if !strings.Contains(dest, ":") {
+			dest += ":443"
+		}
+		st["dest"] = dest
+		if err := rejectLocalDest(dest); err != nil {
+			return err
 		}
 		if len(st.Strings("server_names")) == 0 {
-			host := destHost(st.String("dest"))
-			st["server_names"] = []string{host}
+			st["server_names"] = []string{destHost(dest)}
 		}
 		if st.String("private_key") == "" {
 			priv, pub, err := GenerateRealityKeyPair()
@@ -206,15 +285,35 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 			}
 			st["public_key"] = pub
 		}
-		if len(st.Strings("short_ids")) == 0 {
+		ids, err := normalizeShortIDs(st.Strings("short_ids"))
+		if err != nil {
+			return err
+		}
+		if len(ids) == 0 {
 			sid, err := RandomHex(4)
 			if err != nil {
 				return err
 			}
-			st["short_ids"] = []string{sid}
+			ids = []string{sid}
 		}
-		if st.String("fingerprint") == "" {
-			st["fingerprint"] = "chrome"
+		st["short_ids"] = ids
+		fp := strings.ToLower(strings.TrimSpace(st.String("fingerprint")))
+		if !validFingerprint(fp) {
+			fp = "chrome"
+		}
+		st["fingerprint"] = fp
+		xver := st.Int("xver", 0)
+		if xver < 0 || xver > 2 {
+			return fmt.Errorf("xver 只能是 0 / 1 / 2")
+		}
+		st["xver"] = xver
+		if spx := strings.TrimSpace(st.String("spider_x")); spx != "" {
+			if !strings.HasPrefix(spx, "/") {
+				spx = "/" + spx
+			}
+			st["spider_x"] = spx
+		} else {
+			delete(st, "spider_x")
 		}
 	case ProfileVLESSXHTTP:
 		if st.String("path") == "" {
@@ -227,8 +326,26 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 		if !strings.HasPrefix(st.String("path"), "/") {
 			st["path"] = "/" + st.String("path")
 		}
-		if st.String("mode") == "" {
+		mode := st.String("mode")
+		switch mode {
+		case "", "auto":
 			st["mode"] = "auto"
+		case "packet-up", "stream-up", "stream-one":
+		default:
+			return fmt.Errorf("XHTTP mode 无效")
+		}
+		fillTLSDefaults(st)
+		if fp := strings.ToLower(strings.TrimSpace(st.String("fingerprint"))); validFingerprint(fp) {
+			st["fingerprint"] = fp
+		} else if st.String("fingerprint") == "" {
+			st["fingerprint"] = "chrome"
+		}
+	case ProfileTrojanTLS, ProfileAnyTLS:
+		fillTLSDefaults(st)
+		if fp := strings.ToLower(strings.TrimSpace(st.String("fingerprint"))); validFingerprint(fp) {
+			st["fingerprint"] = fp
+		} else if st.String("fingerprint") == "" {
+			st["fingerprint"] = "chrome"
 		}
 	case ProfileSS2022:
 		if st.String("method") == "" {
@@ -317,12 +434,90 @@ func ensureRelay(st Settings, landingProfile string) error {
 	return nil
 }
 
+func fillTLSDefaults(st Settings) {
+	mv := st.String("min_version")
+	if mv != "1.2" && mv != "1.3" {
+		st["min_version"] = "1.3"
+	}
+	if _, ok := st["reject_unknown_sni"]; !ok {
+		st["reject_unknown_sni"] = true
+	}
+	if len(st.Strings("alpn")) == 0 {
+		st["alpn"] = []string{"h2", "http/1.1"}
+	}
+}
+
+func validFingerprint(s string) bool {
+	switch s {
+	case "chrome", "firefox", "safari", "ios", "android", "edge", "qq", "random", "randomized":
+		return true
+	}
+	return false
+}
+
+func normalizeShortIDs(ids []string) ([]string, error) {
+	var out []string
+	seen := map[string]struct{}{}
+	for _, id := range ids {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id == "" {
+			continue
+		}
+		if len(id)%2 != 0 || len(id) > 16 {
+			return nil, fmt.Errorf("short_id 须为偶数位十六进制，最长 16 位")
+		}
+		for _, c := range id {
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+				return nil, fmt.Errorf("short_id 须为十六进制")
+			}
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
 func destHost(dest string) string {
 	host, _, ok := strings.Cut(dest, ":")
 	if !ok {
 		return dest
 	}
 	return host
+}
+
+func rejectLocalDest(dest string) error {
+	switch strings.ToLower(strings.TrimSpace(destHost(dest))) {
+	case "", "localhost", "127.0.0.1", "0.0.0.0", "::1":
+		return fmt.Errorf("REALITY dest 必须是可公开访问的网站，不能指向本机")
+	}
+	return nil
+}
+
+// DestIsSelf reports whether dest's host is this machine's public address
+// (steal-self). REALITY must masquerade as someone else.
+func DestIsSelf(dest string, addrs ...string) bool {
+	h := strings.ToLower(strings.TrimSpace(destHost(dest)))
+	if h == "" {
+		return false
+	}
+	for _, a := range addrs {
+		a = strings.ToLower(strings.TrimSpace(a))
+		if a == "" {
+			continue
+		}
+		if strings.Contains(a, ":") && !strings.HasPrefix(a, "[") {
+			if host, _, ok := strings.Cut(a, ":"); ok {
+				a = host
+			}
+		}
+		if a == h {
+			return true
+		}
+	}
+	return false
 }
 
 func SSKeyLen(method string) int {

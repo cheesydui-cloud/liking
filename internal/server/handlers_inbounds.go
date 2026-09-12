@@ -281,6 +281,16 @@ func (s *Server) prepareInbound(in *db.Inbound) error {
 	if corecfg.NeedTLS(in.Profile) && in.CertID == nil {
 		return errNeedCert
 	}
+	if corecfg.Reality(in.Profile) {
+		srv, err := db.GetServer(s.DB, in.ServerID)
+		if err != nil {
+			return err
+		}
+		dest := corecfg.ParseSettings(in.Settings).String("dest")
+		if corecfg.DestIsSelf(dest, srv.PublicHost, srv.ConnectIP) {
+			return errRealitySelf
+		}
+	}
 	return nil
 }
 
@@ -292,6 +302,7 @@ const (
 	errNeedCert    simpleError = "该协议需要先上传 TLS 证书"
 	errPortTaken   simpleError = "该服务器上端口已被占用"
 	errPortInvalid simpleError = "端口范围 1–65535，或不填则随机"
+	errRealitySelf simpleError = "REALITY dest 不能指向本机，否则无法伪装成真实网站"
 )
 
 func exitServerID(s *Server, in *db.Inbound) int64 {

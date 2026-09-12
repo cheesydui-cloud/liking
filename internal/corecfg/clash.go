@@ -40,6 +40,8 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 			sni = host
 		}
 		fmt.Fprintf(&b, "    servername: %s\n", yq(sni))
+		fmt.Fprintf(&b, "    client-fingerprint: %s\n", yq(nz(st.String("fingerprint"), "chrome")))
+		writeClashALPN(&b, st)
 		b.WriteString("    xhttp-opts:\n")
 		fmt.Fprintf(&b, "      path: %s\n", yq(st.String("path")))
 	case ProfileTrojanTLS:
@@ -51,6 +53,8 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 			sni = host
 		}
 		fmt.Fprintf(&b, "    sni: %s\n", yq(sni))
+		fmt.Fprintf(&b, "    client-fingerprint: %s\n", yq(nz(st.String("fingerprint"), "chrome")))
+		writeClashALPN(&b, st)
 	case ProfileSS2022:
 		b.WriteString("    type: ss\n")
 		fmt.Fprintf(&b, "    cipher: %s\n", yq(st.String("method")))
@@ -64,6 +68,8 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 			sni = host
 		}
 		fmt.Fprintf(&b, "    sni: %s\n", yq(sni))
+		fmt.Fprintf(&b, "    client-fingerprint: %s\n", yq(nz(st.String("fingerprint"), "chrome")))
+		writeClashALPN(&b, st)
 		b.WriteString("    udp: true\n")
 	case ProfileMieru:
 		b.WriteString("    type: mieru\n")
@@ -103,4 +109,15 @@ func ClashDocument(names []string, proxiesYAML string) string {
 
 func yq(s string) string {
 	return strconv.Quote(s)
+}
+
+func writeClashALPN(b *strings.Builder, st Settings) {
+	alpn := st.ALPN()
+	if len(alpn) == 0 {
+		return
+	}
+	b.WriteString("    alpn:\n")
+	for _, a := range alpn {
+		fmt.Fprintf(b, "      - %s\n", yq(a))
+	}
 }

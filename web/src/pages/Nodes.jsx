@@ -4,10 +4,36 @@ import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, Icon, Meter, Modal, PageHead, fmtAgo, fmtBps, fmtBytes, fmtDateShort } from '../components/ui'
 
+const DEST_PRESETS = [
+  'www.microsoft.com:443',
+  'www.apple.com:443',
+  'dl.google.com:443',
+  'www.cloudflare.com:443',
+  'www.samsung.com:443',
+]
+
+const FINGERPRINTS = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'qq', 'random', 'randomized']
+
 const emptyLine = {
   server_id: 0, name: '', profile: 'vless-reality-vision', port: '', listen: '0.0.0.0',
   line_kind: 'direct', exit_inbound_id: 0, cert_id: 0, enabled: true,
-  dest: 'www.cloudflare.com:443', sni: '', path: '', method: '2022-blake3-aes-128-gcm', transport: 'BOTH',
+  dest: 'www.microsoft.com:443', sni: '', path: '', host: '', mode: 'auto',
+  method: '2022-blake3-aes-256-gcm', transport: 'BOTH',
+  fingerprint: 'chrome', short_ids: '', xver: 0, spider_x: '',
+  min_version: '1.3', alpn: 'h2,http/1.1', reject_unknown_sni: true,
+  rotate_keys: false, settings: {},
+}
+
+function csv(s) {
+  return String(s || '').split(/[,\s]+/).map(x => x.trim()).filter(Boolean)
+}
+
+function isReality(profile) {
+  return String(profile).startsWith('vless-reality')
+}
+
+function needsTLS(profile) {
+  return profile === 'vless-xhttp-tls' || profile === 'trojan-tls' || profile === 'anytls'
 }
 
 function usedPortsText(serverId, list, excludeId = 0) {
@@ -38,20 +64,46 @@ function inboundSettings(inb) {
 function inboundParamRows(inb) {
   const st = inboundSettings(inb)
   const short = Array.isArray(st.short_ids) ? st.short_ids.filter(Boolean).join(',') : (st.short_id || '')
+  const names = Array.isArray(st.server_names) ? st.server_names.filter(Boolean).join(',') : ''
+  const alpn = Array.isArray(st.alpn) ? st.alpn.filter(Boolean).join(',') : st.alpn
   return [
     ['名称', inb.name],
     ['节点', [inb.server_name, inb.server_host].filter(Boolean).join(' ')],
     ['协议', inb.profile],
     ['端口', String(inb.port || '')],
     ['dest', st.dest],
+    ['server_names', names],
     ['sni', st.sni],
     ['path', st.path],
+    ['host', st.host],
+    ['mode', st.mode],
     ['public_key', st.public_key],
     ['short_id', short],
     ['fingerprint', st.fingerprint],
+    ['spider_x', st.spider_x],
+    ['xver', st.xver === 0 || st.xver ? String(st.xver) : ''],
+    ['min_version', st.min_version],
+    ['alpn', alpn],
+    ['reject_unknown_sni', st.reject_unknown_sni === false ? '否' : (st.reject_unknown_sni ? '是' : '')],
     ['method', st.method],
     ['server_password', st.server_password],
+    ['transport', st.transport],
   ].filter(([, v]) => v)
+}
+
+function hasAdvanced(st) {
+  if (!st) return false
+  if (st.fingerprint && st.fingerprint !== 'chrome') return true
+  if (Array.isArray(st.short_ids) && st.short_ids.length > 1) return true
+  if (st.min_version && st.min_version !== '1.3') return true
+  if (st.reject_unknown_sni === false) return true
+  if (Number(st.xver) > 0) return true
+  if (st.spider_x) return true
+  if (st.host) return true
+  if (st.mode && st.mode !== 'auto') return true
+  const alpn = Array.isArray(st.alpn) ? st.alpn.join(',') : String(st.alpn || '')
+  if (alpn && alpn !== 'h2,http/1.1') return true
+  return false
 }
 
 function inboundParamLines(inb) {
@@ -93,6 +145,9 @@ function ServerTraffic({ s, onSetLimit }) {
 
 function formFromInbound(inb) {
   const st = inboundSettings(inb)
+  const names = Array.isArray(st.server_names) ? st.server_names.filter(Boolean).join(',') : ''
+  const alpn = Array.isArray(st.alpn) ? st.alpn.filter(Boolean).join(',') : (st.alpn || 'h2,http/1.1')
+  const short = Array.isArray(st.short_ids) ? st.short_ids.filter(Boolean).join(',') : (st.short_id || '')
   return {
     server_id: inb.server_id,
     name: inb.name || '',
@@ -103,11 +158,21 @@ function formFromInbound(inb) {
     exit_inbound_id: inb.exit_inbound_id || 0,
     cert_id: inb.cert_id || 0,
     enabled: inb.enabled !== false,
-    dest: st.dest || 'www.cloudflare.com:443',
-    sni: st.sni || '',
+    dest: st.dest || 'www.microsoft.com:443',
+    sni: names || st.sni || '',
     path: st.path || '',
-    method: st.method || '2022-blake3-aes-128-gcm',
+    host: st.host || '',
+    mode: st.mode || 'auto',
+    method: st.method || '2022-blake3-aes-256-gcm',
     transport: st.transport || 'BOTH',
+    fingerprint: st.fingerprint || 'chrome',
+    short_ids: short,
+    xver: st.xver ?? 0,
+    spider_x: st.spider_x || '',
+    min_version: st.min_version || '1.3',
+    alpn: alpn || 'h2,http/1.1',
+    reject_unknown_sni: st.reject_unknown_sni !== false,
+    rotate_keys: false,
     settings: st,
   }
 }
@@ -129,6 +194,7 @@ export default function Nodes() {
   const [busy, setBusy] = useState(false)
   const [paramInb, setParamInb] = useState(null)
   const [shareText, setShareText] = useState('')
+  const [showAdv, setShowAdv] = useState(false)
 
   const load = async () => {
     try {
@@ -153,6 +219,11 @@ export default function Nodes() {
   const selectedServer = servers.find(s => Number(s.id) === Number(f.server_id))
   const missingCore = selectedServer && meta && !serverHasCore(selectedServer, meta.core)
   const landings = list.filter(x => x.line_kind === 'direct' && ['vless-reality', 'vless-reality-vision', 'vless-xhttp-tls', 'trojan-tls', 'ss2022'].includes(x.profile))
+  const protoList = profiles.length ? profiles : [{ id: f.profile, title: f.profile, desc: '' }]
+  const destHostName = String(f.dest || '').split(':')[0].trim().toLowerCase()
+  const destIsSelf = isReality(f.profile) && destHostName && [selectedServer?.public_host, selectedServer?.connect_ip]
+    .filter(Boolean)
+    .some(h => String(h).split(':')[0].trim().toLowerCase() === destHostName)
 
   const openCreateNode = () => {
     setName('')
@@ -226,6 +297,7 @@ export default function Nodes() {
   const openCreateLine = (serverId) => {
     const sid = Number(serverId)
     setEditId(0)
+    setShowAdv(false)
     setF({ ...emptyLine, server_id: sid })
     setLineOpen(true)
   }
@@ -233,30 +305,60 @@ export default function Nodes() {
   const startEdit = (inb) => {
     setEditId(inb.id)
     setF(formFromInbound(inb))
+    setShowAdv(hasAdvanced(inboundSettings(inb)))
     setLineOpen(true)
   }
 
   const closeLine = () => {
     setLineOpen(false)
     setEditId(0)
+    setShowAdv(false)
     setF(emptyLine)
   }
 
   const bodyFromForm = () => {
     const settings = { ...(f.settings || {}) }
-    if (String(f.profile).startsWith('vless-reality')) {
+    const profile = f.profile
+    if (isReality(profile)) {
       settings.dest = f.dest
-      const hostName = (f.dest || '').split(':')[0]
-      if (hostName) settings.server_names = [hostName]
+      const names = csv(f.sni)
+      if (names.length) settings.server_names = names
+      else delete settings.server_names
+      settings.fingerprint = f.fingerprint || 'chrome'
+      const ids = csv(f.short_ids)
+      if (ids.length) settings.short_ids = ids
+      else delete settings.short_ids
+      settings.xver = Number(f.xver) || 0
+      if (String(f.spider_x || '').trim()) settings.spider_x = f.spider_x.trim()
+      else delete settings.spider_x
+      if (f.rotate_keys) {
+        delete settings.private_key
+        delete settings.public_key
+      }
     }
-    if (f.sni) settings.sni = f.sni
-    if (f.path) settings.path = f.path
-    if (f.profile === 'ss2022') settings.method = f.method
-    if (f.profile === 'mieru') settings.transport = f.transport
+    if (needsTLS(profile)) {
+      if (String(f.sni || '').trim()) settings.sni = f.sni.trim()
+      else delete settings.sni
+      settings.fingerprint = f.fingerprint || 'chrome'
+      settings.min_version = f.min_version || '1.3'
+      const alpn = csv(f.alpn)
+      if (alpn.length) settings.alpn = alpn
+      else delete settings.alpn
+      settings.reject_unknown_sni = f.reject_unknown_sni !== false
+    }
+    if (profile === 'vless-xhttp-tls') {
+      if (String(f.path || '').trim()) settings.path = f.path.trim()
+      else delete settings.path
+      settings.mode = f.mode || 'auto'
+      if (String(f.host || '').trim()) settings.host = f.host.trim()
+      else delete settings.host
+    }
+    if (profile === 'ss2022') settings.method = f.method
+    if (profile === 'mieru') settings.transport = f.transport
     const body = {
       server_id: Number(f.server_id),
       name: f.name,
-      profile: f.profile,
+      profile,
       port: Number(f.port) || 0,
       listen: f.listen || '0.0.0.0',
       line_kind: f.line_kind,
@@ -473,10 +575,10 @@ export default function Nodes() {
         <pre className="text-[12px] font-mono bg-raised p-3 rounded-lg overflow-x-auto whitespace-pre-wrap">{cmd}</pre>
       </Modal>
 
-      <Modal open={lineOpen} title={editId ? '编辑节点' : '增加节点'} onClose={closeLine} size="lg" footer={
+      <Modal open={lineOpen} title={editId ? '编辑节点' : '增加节点'} onClose={closeLine} size="xl" footer={
         <>
           <button type="button" className="btn-ghost" onClick={closeLine}>取消</button>
-          <button type="submit" form="line-form" className="btn-primary" disabled={busy}>{busy ? '保存中…' : (editId ? '保存' : '创建')}</button>
+          <button type="submit" form="line-form" className="btn-primary" disabled={busy || destIsSelf}>{busy ? '保存中…' : (editId ? '保存' : '创建')}</button>
         </>
       }>
         <form id="line-form" onSubmit={submitLine} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -485,19 +587,40 @@ export default function Nodes() {
               {servers.map(s => <option key={s.id} value={s.id}>{s.name}{s.cores ? ` · ${s.cores}` : ''}</option>)}
             </select>
           </Field>
-          <Field label="协议">
-            <select className="input-field" value={f.profile} onChange={e => setF({ ...f, profile: e.target.value })} disabled={!!editId}>
-              {(profiles.length ? profiles : [{ id: f.profile, title: f.profile }]).map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
-            </select>
-          </Field>
+          <div className="sm:col-span-2">
+            <div className="text-[12px] font-medium text-ink-soft mb-1.5">协议</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {protoList.map(p => {
+                const on = f.profile === p.id
+                return (
+                  <button
+                    type="button"
+                    key={p.id}
+                    className={`node-pick ${on ? 'is-on' : ''}`}
+                    disabled={!!editId}
+                    aria-pressed={on}
+                    onClick={() => setF({ ...f, profile: p.id })}
+                  >
+                    <span className="min-w-0 flex-1 text-left">
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[13px] font-medium">{p.title}</span>
+                        {p.id === 'vless-reality-vision' ? <Badge tone="ok">推荐</Badge> : null}
+                        {p.need_tls ? <Badge tone="muted">需证书</Badge> : null}
+                        {p.landing === false ? <Badge tone="muted">仅入口</Badge> : null}
+                      </span>
+                      {p.desc ? <span className="block text-[12px] text-ink-mut mt-0.5 leading-snug">{p.desc}</span> : null}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-[11.5px] text-ink-mut mt-1.5">选协议后只显示这一路需要的项。REALITY 不用证书；TLS 协议要先在设置里签发。</p>
+          </div>
           <Field label="名称" hint="可留空，保存时按协议和端口生成">
             <input className="input-field" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="" autoFocus />
           </Field>
           <Field label="端口" hint={f.server_id ? usedPortsText(f.server_id, list, editId) : '不填则随机，避开已用端口'}>
             <input className="input-field" type="number" min="1" max="65535" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} placeholder="" />
-          </Field>
-          <Field label="监听地址" hint="一般保持 0.0.0.0">
-            <input className="input-field" value={f.listen} onChange={e => setF({ ...f, listen: e.target.value })} />
           </Field>
           {meta?.need_tls && (
             <Field label="TLS 证书" hint="在设置里签发或上传">
@@ -507,35 +630,52 @@ export default function Nodes() {
               </select>
             </Field>
           )}
-          {String(f.profile).startsWith('vless-reality') && (
-            <Field label="REALITY dest">
-              <input className="input-field" value={f.dest} onChange={e => setF({ ...f, dest: e.target.value })} />
-            </Field>
+          {isReality(f.profile) && (
+            <>
+              <div>
+                <Field label="伪装目标 dest" hint="探测时会看到这个网站。必须是别人的站点，不能填本机。">
+                  <input className="input-field" value={f.dest} onChange={e => setF({ ...f, dest: e.target.value })} placeholder="www.microsoft.com:443" />
+                </Field>
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {DEST_PRESETS.map(d => (
+                    <button
+                      type="button"
+                      key={d}
+                      className={`chip ${f.dest === d ? 'is-on' : ''}`}
+                      onClick={() => setF({ ...f, dest: d })}
+                    >{d.split(':')[0]}</button>
+                  ))}
+                </div>
+              </div>
+              <Field label="SNI / serverNames" hint="客户端校验用。留空则用 dest 的域名。可逗号分隔多个。">
+                <input className="input-field" value={f.sni} onChange={e => setF({ ...f, sni: e.target.value })} placeholder={destHostName || 'www.microsoft.com'} />
+              </Field>
+            </>
           )}
-          {(f.profile === 'vless-xhttp-tls' || f.profile === 'trojan-tls' || f.profile === 'anytls') && (
-            <Field label="SNI">
-              <input className="input-field" value={f.sni} onChange={e => setF({ ...f, sni: e.target.value })} />
+          {needsTLS(f.profile) && (
+            <Field label="SNI" hint="客户端校验的域名。留空则用服务器公开地址。">
+              <input className="input-field" value={f.sni} onChange={e => setF({ ...f, sni: e.target.value })} placeholder={selectedServer?.public_host || ''} />
             </Field>
           )}
           {f.profile === 'vless-xhttp-tls' && (
-            <Field label="Path" hint="可留空自动生成">
-              <input className="input-field" value={f.path} onChange={e => setF({ ...f, path: e.target.value })} />
+            <Field label="Path" hint="可留空自动生成。建议随机路径，不要用 /">
+              <input className="input-field" value={f.path} onChange={e => setF({ ...f, path: e.target.value })} placeholder="/随机" />
             </Field>
           )}
           {f.profile === 'ss2022' && (
-            <Field label="方法">
+            <Field label="加密" hint="256 更稳妥。已有节点改方法会让旧订阅失效。">
               <select className="input-field" value={f.method} onChange={e => setF({ ...f, method: e.target.value })}>
-                <option>2022-blake3-aes-128-gcm</option>
-                <option>2022-blake3-aes-256-gcm</option>
+                <option value="2022-blake3-aes-256-gcm">2022-blake3-aes-256-gcm</option>
+                <option value="2022-blake3-aes-128-gcm">2022-blake3-aes-128-gcm</option>
               </select>
             </Field>
           )}
           {f.profile === 'mieru' && (
-            <Field label="传输">
+            <Field label="传输" hint="BOTH 同时开 TCP 和 UDP。只当入口，不能当链式落地。">
               <select className="input-field" value={f.transport} onChange={e => setF({ ...f, transport: e.target.value })}>
-                <option>TCP</option>
-                <option>UDP</option>
-                <option>BOTH</option>
+                <option value="BOTH">BOTH（TCP + UDP）</option>
+                <option value="TCP">仅 TCP</option>
+                <option value="UDP">仅 UDP</option>
               </select>
             </Field>
           )}
@@ -552,6 +692,101 @@ export default function Nodes() {
                 {landings.map(x => <option key={x.id} value={x.id}>{x.server_name} / {x.name}</option>)}
               </select>
             </Field>
+          )}
+          {f.profile === 'anytls' && (
+            <div className="notice sm:col-span-2">AnyTLS 走 sing-box，需要证书。不能当链式落地。</div>
+          )}
+          {f.profile === 'mieru' && (
+            <div className="notice sm:col-span-2">Mieru 只当入口。链式转发时请把它放在入口机，落地用 VLESS / Trojan / SS2022。</div>
+          )}
+          {destIsSelf && (
+            <div className="notice sm:col-span-2">dest 指向了这台机器自己，伪装会失效，也无法保存。请改成 microsoft / apple 这类真实网站。</div>
+          )}
+          <div className="sm:col-span-2">
+            <button type="button" className="row-act" onClick={() => setShowAdv(v => !v)} aria-expanded={showAdv}>
+              {showAdv ? '收起高级选项' : '高级选项 · 指纹 / 密钥 / TLS'}
+            </button>
+          </div>
+          {showAdv && (
+            <>
+              <Field label="监听地址" hint="一般保持 0.0.0.0">
+                <input className="input-field" value={f.listen} onChange={e => setF({ ...f, listen: e.target.value })} />
+              </Field>
+              {(isReality(f.profile) || needsTLS(f.profile)) && (
+                <Field label="uTLS 指纹" hint="客户端伪装成这种浏览器的 TLS 握手。">
+                  <select className="input-field" value={f.fingerprint} onChange={e => setF({ ...f, fingerprint: e.target.value })}>
+                    {FINGERPRINTS.map(x => <option key={x} value={x}>{x}</option>)}
+                  </select>
+                </Field>
+              )}
+              {isReality(f.profile) && (
+                <>
+                  <Field label="shortId" hint="偶数位十六进制，最长 16 位。可逗号分隔多个。留空则自动生成。">
+                    <input className="input-field font-mono" value={f.short_ids} onChange={e => setF({ ...f, short_ids: e.target.value })} placeholder="自动" />
+                  </Field>
+                  <Field label="xver" hint="PROXY protocol 版本。0 关闭，1 / 2 仅在 dest 支持时打开。">
+                    <select className="input-field" value={f.xver} onChange={e => setF({ ...f, xver: Number(e.target.value) })}>
+                      <option value={0}>0 关闭</option>
+                      <option value={1}>1</option>
+                      <option value={2}>2</option>
+                    </select>
+                  </Field>
+                  <Field label="spiderX" hint="客户端爬虫路径，写入订阅。可留空。">
+                    <input className="input-field font-mono" value={f.spider_x} onChange={e => setF({ ...f, spider_x: e.target.value })} placeholder="/" />
+                  </Field>
+                  {editId ? (
+                    <div className="sm:col-span-2">
+                      <button
+                        type="button"
+                        className={`row-act ${f.rotate_keys ? 'is-danger' : ''}`}
+                        onClick={() => setF({ ...f, rotate_keys: !f.rotate_keys })}
+                      >
+                        {f.rotate_keys ? '将在保存时重新生成密钥（旧订阅会失效）' : '重新生成 REALITY 密钥'}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-[12px] text-ink-mut sm:col-span-2">公私钥在创建时自动生成，可在节点「参数」里查看公钥。</p>
+                  )}
+                </>
+              )}
+              {needsTLS(f.profile) && (
+                <>
+                  <Field label="最低 TLS" hint="1.3 更安全。只有老客户端连不上时才降到 1.2。">
+                    <select className="input-field" value={f.min_version} onChange={e => setF({ ...f, min_version: e.target.value })}>
+                      <option value="1.3">TLS 1.3</option>
+                      <option value="1.2">TLS 1.2（兼容）</option>
+                    </select>
+                  </Field>
+                  <Field label="ALPN" hint="逗号分隔。默认 h2,http/1.1。">
+                    <input className="input-field font-mono" value={f.alpn} onChange={e => setF({ ...f, alpn: e.target.value })} />
+                  </Field>
+                  <label className="flex items-start gap-2 sm:col-span-2 text-[13px] text-ink-soft">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={f.reject_unknown_sni !== false}
+                      onChange={e => setF({ ...f, reject_unknown_sni: e.target.checked })}
+                    />
+                    <span>拒绝未知 SNI。客户端给的域名必须对得上证书，可挡住乱扫。</span>
+                  </label>
+                </>
+              )}
+              {f.profile === 'vless-xhttp-tls' && (
+                <>
+                  <Field label="XHTTP mode" hint="auto 即可。stream-up 适合大流量，老客户端可能不认。">
+                    <select className="input-field" value={f.mode} onChange={e => setF({ ...f, mode: e.target.value })}>
+                      <option value="auto">auto</option>
+                      <option value="packet-up">packet-up</option>
+                      <option value="stream-up">stream-up</option>
+                      <option value="stream-one">stream-one</option>
+                    </select>
+                  </Field>
+                  <Field label="Host" hint="可选。HTTP Host，一般留空。">
+                    <input className="input-field" value={f.host} onChange={e => setF({ ...f, host: e.target.value })} />
+                  </Field>
+                </>
+              )}
+            </>
           )}
           {Number(f.port) === 443 && (
             <div className="notice sm:col-span-2">443 很容易被 Nginx / 其它面板占用。建议改成 8443 或其它空闲端口。</div>
