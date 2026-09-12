@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { BrandMark, Icon, Modal } from './ui'
 
@@ -135,12 +135,33 @@ function SideLink({ to, end, icon, children }) {
   )
 }
 
+const PAGE_TITLES = {
+  '/': '总览',
+  '/nodes': '服务器',
+  '/users': '用户',
+  '/packages': '套餐',
+  '/traffic': '流量',
+  '/settings': '设置',
+  '/my': '订阅',
+  '/my/settings': '设置',
+}
+
+function pageTitleOf(path) {
+  if (PAGE_TITLES[path]) return PAGE_TITLES[path]
+  const hit = Object.keys(PAGE_TITLES).sort((a, b) => b.length - a.length).find(p => p !== '/' && path.startsWith(p))
+  return hit ? PAGE_TITLES[hit] : ''
+}
+
 export function Layout({ children }) {
   const { user, panelName, version, announce, setUser } = useUser()
   const navigate = useNavigate()
+  const loc = useLocation()
   const [open, setOpen] = useState(false)
   const isAdmin = user?.role === 'admin'
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
+  const pageTitle = pageTitleOf(loc.pathname)
+  const announceText = (announce || '').trim()
+  const announceLong = announceText.length > 80
 
   const logout = async () => {
     try { await api.post('/logout') } catch {}
@@ -225,16 +246,17 @@ export function Layout({ children }) {
           <button type="button" className="lg:hidden btn-ghost h-9 w-9 px-0" onClick={() => setOpen(true)} aria-label="打开菜单">
             <Icon name="menu" size={16} />
           </button>
-          <div className="flex-1" />
+          {pageTitle ? <div className="lg:hidden text-[14px] font-medium truncate">{pageTitle}</div> : null}
+          {announceText ? (
+            <div className="flex-1 min-w-0 text-[13px] text-ink-soft truncate" title={announceText}>{announceText}</div>
+          ) : <div className="flex-1" />}
           <button type="button" className="btn-ghost h-9 w-9 px-0" onClick={toggleTheme} aria-label={dark ? '切换浅色' : '切换深色'}>
             <Icon name={dark ? 'sun' : 'moon'} size={15} />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 sm:py-5">
+        <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 sm:py-5 pb-24 sm:pb-5">
           <div className="max-w-[1280px] mx-auto">
-            {(announce || '').trim() ? (
-              <div className="notice mb-4">{announce}</div>
-            ) : null}
+            {announceLong ? <div className="notice mb-4">{announceText}</div> : null}
             {children}
           </div>
         </div>

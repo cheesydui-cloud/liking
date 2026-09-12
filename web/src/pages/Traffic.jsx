@@ -41,7 +41,7 @@ export default function Traffic() {
         }
       />
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
-        <div className="card p-4">
+        <div className="card card-emphasis p-4">
           <div className="kicker">计费合计</div>
           <div className="text-[20px] font-semibold mt-1.5 tabular-nums">{fmtBytes(d.billed_bytes || 0)}</div>
           <div className="text-[12px] text-ink-mut mt-1">用户已用，含双向和倍率</div>
@@ -128,8 +128,8 @@ export default function Traffic() {
         </div>
       </div>
       <div className="mt-4 text-[12px] text-ink-mut">
-        <Badge tone="gold">说明</Badge>
-        <span className="ml-2">三行数字：计费（含双向和倍率）、原始（内核按用户累计）、网卡（Agent 实时）。链式线路只计入口，不重复计落地。单位 GiB = 1024³ 字节。</span>
+        <Badge>说明</Badge>
+        <span className="ml-2">1 GiB = 1024³ 字节。链式只计入站，不重复计落地。计费含双向和节点倍率，原始是内核累计，网卡是 Agent 实时。</span>
       </div>
     </div>
   )

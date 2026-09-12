@@ -64,6 +64,7 @@ export function SubPanel({ token, onCopied }) {
           </div>
         ))}
         <div className="flex flex-wrap gap-2 pt-1">
+          <button type="button" className="btn-primary h-8" onClick={() => copy(subURL(token, 'clash'), '已复制 Clash 订阅')}>复制 Clash 订阅</button>
           <a className="btn-ghost h-8" href={clashImportURL(token)}>打开 Clash</a>
           <a className="btn-ghost h-8" href={singboxImportURL(token)}>打开 sing-box</a>
           <button type="button" className="btn-ghost h-8" onClick={() => copy(auto, '已复制自动识别链接')}><Icon name="link" size={14} /> 复制自动识别</button>

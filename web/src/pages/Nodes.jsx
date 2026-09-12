@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Meter, Modal, PageHead, SearchInput, fmtAgo, fmtBps, fmtBytes, fmtDateShort } from '../components/ui'
+import { Badge, Empty, Field, Icon, Meter, Modal, MoreMenu, PageHead, SearchInput, fmtAgo, fmtBps, fmtBytes, fmtDateShort } from '../components/ui'
 
 const DEST_PRESETS = [
   'www.microsoft.com:443',
@@ -202,6 +202,8 @@ export default function Nodes() {
   const [cfErr, setCfErr] = useState('')
   const [cfPick, setCfPick] = useState('')
   const [cfFilter, setCfFilter] = useState('')
+  const [q, setQ] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
 
   const load = async () => {
     try {
@@ -347,6 +349,11 @@ export default function Nodes() {
   }
 
   const upgradeAgent = async (s) => {
+    if (s.needs_reinstall) {
+      toast('该 Agent 版本太旧，不支持远程升级。请用安装命令重装一次', 'error')
+      showInstall(s.id)
+      return
+    }
     if (!(await dialog.confirm({
       title: '升级 Agent',
       message: `将 ${s.name} 的 Agent 升到面板版本。机器必须在线，大约几十秒。升级后会自动重启 Agent。`,
@@ -357,11 +364,17 @@ export default function Nodes() {
       const d = await api.post(`/servers/${s.id}/upgrade-agent`)
       toast(`已升级到 ${d.version || '当前版本'}，Agent 正在重启`)
       setTimeout(load, 2500)
-    } catch (e) { toast(e.message, 'error') }
-    finally { setBusy(false) }
+    } catch (e) {
+      toast(e.message, 'error')
+      if (e.code === 'agent_too_old') showInstall(s.id)
+    } finally { setBusy(false) }
   }
 
   const uninstallAgent = async (s) => {
+    if (s.needs_reinstall) {
+      toast('该 Agent 版本太旧，不支持远程卸载。请用安装命令重装或在机器上手动停服务', 'error')
+      return
+    }
     if (!(await dialog.confirm({
       title: '卸载 Agent',
       message: `停掉 ${s.name} 上的内核和 Agent。若与面板同机，不会删除面板程序和数据库。离线机器无法远程卸载。`,
@@ -537,6 +550,17 @@ export default function Nodes() {
 
   const linesOf = (id) => list.filter(x => Number(x.server_id) === Number(id))
   const online = servers.filter(s => s.online).length
+  const visibleServers = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return servers.filter(s => {
+      if (statusFilter === 'online' && !s.online) return false
+      if (statusFilter === 'upgrade' && !(s.needs_upgrade || s.needs_reinstall)) return false
+      if (!needle) return true
+      const names = linesOf(s.id).map(x => x.name).join(' ')
+      const hay = [s.name, s.public_host, s.agent_ver, names]
+      return hay.some(x => String(x || '').toLowerCase().includes(needle))
+    })
+  }, [servers, list, q, statusFilter])
 
   return (
     <div>
@@ -550,6 +574,16 @@ export default function Nodes() {
         }
       />
       {servers.length > 0 && (
+        <div className="flex flex-col sm:flex-row gap-2 mb-3">
+          <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索服务器 / 节点 / 地址" />
+          <div className="flex gap-1 shrink-0">
+            {[['','全部'],['online','在线'],['upgrade','可升级']].map(([id, lab]) => (
+              <button key={id || 'all'} type="button" className={`chip ${statusFilter === id ? 'is-on' : ''}`} onClick={() => setStatusFilter(id)}>{lab}</button>
+            ))}
+          </div>
+        </div>
+      )}
+      {servers.length > 0 && (
         <div className="text-[12px] text-ink-mut mb-3">
           {online} 在线 · {servers.length - online} 离线 · {list.length} 个节点
         </div>
@@ -562,7 +596,12 @@ export default function Nodes() {
         </div>
       ) : (
         <div className="space-y-3">
-          {servers.map(s => {
+          {visibleServers.length === 0 ? (
+            <div className="card overflow-hidden">
+              <Empty title="没有匹配的服务器" hint="换个关键词或筛选。" />
+            </div>
+          ) : null}
+          {visibleServers.map(s => {
             const lines = linesOf(s.id)
             const cores = String(s.cores || '').split(',').map(x => x.trim()).filter(Boolean)
             return (
@@ -574,7 +613,8 @@ export default function Nodes() {
                         <span className="text-[15px] font-semibold truncate">{s.name}</span>
                         <span className={`dot ${s.online ? 'dot-on' : 'dot-off'}`} />
                         {s.online ? <Badge tone="ok">在线</Badge> : <Badge tone="muted">离线</Badge>}
-                        {s.needs_upgrade ? <Badge tone="gold">可升级</Badge> : null}
+                        {s.needs_reinstall ? <Badge tone="warn">需重装</Badge>
+                          : s.needs_upgrade ? <Badge tone="warn">可升级</Badge> : null}
                         {s.over_quota ? <Badge tone="danger">流量已满</Badge> : null}
                       </div>
                       <div className="text-[12px] font-mono text-ink-mut mt-1 truncate">
@@ -602,13 +642,21 @@ export default function Nodes() {
                         <div className="text-[12px] mt-1" style={{ color: 'var(--color-danger)' }}>{s.last_error}</div>
                       ) : null}
                     </div>
-                    <div className="flex flex-wrap gap-2.5 shrink-0">
-                      <button type="button" className="row-act" onClick={() => showInstall(s.id)}>安装命令</button>
-                      <button type="button" className="row-act" disabled={!s.online || busy} onClick={() => upgradeAgent(s)}>一键升级</button>
+                    <div className="flex flex-wrap gap-2.5 shrink-0 items-center">
                       <button type="button" className="row-act" onClick={() => sync(s.id)}>同步</button>
-                      <button type="button" className="row-act" onClick={() => rotateToken(s)}>轮换令牌</button>
-                      <button type="button" className="row-act is-danger" disabled={!s.online || busy} onClick={() => uninstallAgent(s)}>一键卸载</button>
-                      <button type="button" className="row-act is-danger" onClick={() => delNode(s.id)}>删除服务器</button>
+                      <button type="button" className="row-act" onClick={() => showInstall(s.id)}>安装命令</button>
+                      <MoreMenu items={[
+                        {
+                          label: '一键升级',
+                          hint: s.needs_reinstall ? '版本太旧，将打开安装命令' : (s.online ? '升到面板版本并重启' : '需在线'),
+                          disabled: !s.online || busy,
+                          onSelect: () => upgradeAgent(s),
+                        },
+                        { label: '轮换令牌', onSelect: () => rotateToken(s) },
+                        { sep: true },
+                        { label: '一键卸载', danger: true, disabled: !s.online || busy, hint: s.needs_reinstall ? '版本太旧，无法远程卸载' : '同机不删面板', onSelect: () => uninstallAgent(s) },
+                        { label: '删除服务器', danger: true, onSelect: () => delNode(s.id) },
+                      ]} />
                     </div>
                   </div>
                   <ServerTraffic s={s} onSetLimit={saveLimit} />
@@ -622,7 +670,8 @@ export default function Nodes() {
                 {lines.length === 0 ? (
                   <div className="px-4 pb-4 text-[13px] text-ink-mut">还没有节点。选协议即可，名称和端口都可以留空。</div>
                 ) : (
-                  <div className="table-wrap">
+                  <>
+                  <div className="hidden md:block table-wrap">
                     <table className="data">
                       <thead><tr><th>名称</th><th>协议</th><th>端口</th><th>类型</th><th>流量</th><th>内核</th><th></th></tr></thead>
                       <tbody>
@@ -637,12 +686,15 @@ export default function Nodes() {
                               <td className="tabular-nums text-[12px] whitespace-nowrap">{fmtBytes((inb.used_up || 0) + (inb.used_down || 0))}</td>
                               <td className="text-ink-mut">{inb.core}{dead ? ' · 未安装' : ''}{!inb.enabled ? ' · 停用' : ''}</td>
                               <td className="whitespace-nowrap">
-                                <div className="flex gap-2.5 justify-end">
-                                  <button type="button" className="row-act" onClick={() => setParamInb(inb)}>参数</button>
+                                <div className="flex gap-2.5 justify-end items-center">
                                   <button type="button" className="row-act" onClick={() => copyShare(inb)}>复制</button>
                                   <button type="button" className="row-act" onClick={() => startEdit(inb)}>编辑</button>
-                                  <button type="button" className="row-act" onClick={() => toggle(inb)}>{inb.enabled ? '停用' : '启用'}</button>
-                                  <button type="button" className="row-act is-danger" onClick={() => delLine(inb.id)}>删除</button>
+                                  <MoreMenu items={[
+                                    { label: '参数', onSelect: () => setParamInb(inb) },
+                                    { label: inb.enabled ? '停用' : '启用', onSelect: () => toggle(inb) },
+                                    { sep: true },
+                                    { label: '删除', danger: true, onSelect: () => delLine(inb.id) },
+                                  ]} />
                                 </div>
                               </td>
                             </tr>
@@ -651,6 +703,36 @@ export default function Nodes() {
                       </tbody>
                     </table>
                   </div>
+                  <div className="md:hidden divide-y" style={{ borderColor: 'var(--color-line-soft)' }}>
+                    {lines.map(inb => {
+                      const dead = !serverHasCore(s, inb.core)
+                      return (
+                        <div key={inb.id} className={`px-4 py-3 ${!inb.enabled ? 'opacity-50' : ''}`}>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="font-medium truncate">{inb.name}</div>
+                              <div className="text-[12px] text-ink-mut mt-0.5">
+                                {inb.profile} · {inb.port} · {inb.line_kind === 'chain' ? '链式' : '直出'}
+                                {dead ? ' · 未安装' : ''}
+                              </div>
+                              <div className="text-[12px] text-ink-mut tabular-nums mt-0.5">{fmtBytes((inb.used_up || 0) + (inb.used_down || 0))}</div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button type="button" className="row-act" onClick={() => copyShare(inb)}>复制</button>
+                              <MoreMenu items={[
+                                { label: '编辑', onSelect: () => startEdit(inb) },
+                                { label: '参数', onSelect: () => setParamInb(inb) },
+                                { label: inb.enabled ? '停用' : '启用', onSelect: () => toggle(inb) },
+                                { sep: true },
+                                { label: '删除', danger: true, onSelect: () => delLine(inb.id) },
+                              ]} />
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  </>
                 )}
               </div>
             )

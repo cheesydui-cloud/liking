@@ -34,7 +34,11 @@ async function request(method, path, body) {
     throw err
   }
   if (res.status === 204) return null
-  if (!res.ok) throw new Error((data && data.error) || httpErrorMessage(res.status))
+  if (!res.ok) {
+    const err = new Error((data && data.error) || httpErrorMessage(res.status))
+    if (data && data.code) err.code = data.code
+    throw err
+  }
   return data
 }
 

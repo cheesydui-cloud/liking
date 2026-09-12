@@ -1,50 +1,50 @@
 package db
 
 type User struct {
-	ID           int64  `json:"id"`
-	Username     string `json:"username"`
-	PasswordHash string `json:"-"`
-	Role         string `json:"role"`
-	Remark       string `json:"remark"`
-	Enabled      bool   `json:"enabled"`
-	ExpiresAt    int64  `json:"expires_at"`
-	TrafficLimit *int64 `json:"traffic_limit"`
-	UsedUp       int64  `json:"used_up"`
-	UsedDown     int64  `json:"used_down"`
-	CycleStart   int64  `json:"cycle_start"`
-	SubToken     string `json:"sub_token"`
-	CreatedAt    int64  `json:"created_at"`
-	PackageID    *int64 `json:"package_id,omitempty"`
-	PackageName  string `json:"package_name,omitempty"`
-	PkgExpires   int64  `json:"package_expires_at,omitempty"`
-	TrafficCap   int64  `json:"traffic_cap,omitempty"`
-	BilledBytes      int64  `json:"billed_bytes"`
-	Direction        string `json:"direction,omitempty"`
-	TOTPEnabled      bool   `json:"totp_enabled"`
-	TOTPSecret       string `json:"-"`
-	TrafficResetDay  int    `json:"traffic_reset_day"`
-	QuotaRatio       int    `json:"quota_ratio,omitempty"`
+	ID              int64  `json:"id"`
+	Username        string `json:"username"`
+	PasswordHash    string `json:"-"`
+	Role            string `json:"role"`
+	Remark          string `json:"remark"`
+	Enabled         bool   `json:"enabled"`
+	ExpiresAt       int64  `json:"expires_at"`
+	TrafficLimit    *int64 `json:"traffic_limit"`
+	UsedUp          int64  `json:"used_up"`
+	UsedDown        int64  `json:"used_down"`
+	CycleStart      int64  `json:"cycle_start"`
+	SubToken        string `json:"sub_token"`
+	CreatedAt       int64  `json:"created_at"`
+	PackageID       *int64 `json:"package_id,omitempty"`
+	PackageName     string `json:"package_name,omitempty"`
+	PkgExpires      int64  `json:"package_expires_at,omitempty"`
+	TrafficCap      int64  `json:"traffic_cap,omitempty"`
+	BilledBytes     int64  `json:"billed_bytes"`
+	Direction       string `json:"direction,omitempty"`
+	TOTPEnabled     bool   `json:"totp_enabled"`
+	TOTPSecret      string `json:"-"`
+	TrafficResetDay int    `json:"traffic_reset_day"`
+	QuotaRatio      int    `json:"quota_ratio,omitempty"`
 }
 
 type Server struct {
-	ID           int64  `json:"id"`
-	Name         string `json:"name"`
-	PublicHost   string `json:"public_host"`
-	Token        string `json:"token,omitempty"`
-	Online       int    `json:"online"`
-	LastSeen     int64  `json:"last_seen"`
-	AgentVer     string `json:"agent_ver"`
-	OS           string `json:"os"`
-	Arch         string `json:"arch"`
-	ConnectIP    string `json:"connect_ip"`
-	ConfigRev    string `json:"config_rev"`
-	LastError    string `json:"last_error"`
-	LastErrorAt  int64  `json:"last_error_at"`
-	Cores        string `json:"cores"`
-	CreatedAt    int64  `json:"created_at"`
-	TrafficLimit int64  `json:"traffic_limit"`
-	UsedUp       int64  `json:"used_up"`
-	UsedDown     int64  `json:"used_down"`
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	PublicHost     string `json:"public_host"`
+	Token          string `json:"token,omitempty"`
+	Online         int    `json:"online"`
+	LastSeen       int64  `json:"last_seen"`
+	AgentVer       string `json:"agent_ver"`
+	OS             string `json:"os"`
+	Arch           string `json:"arch"`
+	ConnectIP      string `json:"connect_ip"`
+	ConfigRev      string `json:"config_rev"`
+	LastError      string `json:"last_error"`
+	LastErrorAt    int64  `json:"last_error_at"`
+	Cores          string `json:"cores"`
+	CreatedAt      int64  `json:"created_at"`
+	TrafficLimit   int64  `json:"traffic_limit"`
+	UsedUp         int64  `json:"used_up"`
+	UsedDown       int64  `json:"used_down"`
 	NetUpBps       int64  `json:"net_up_bps"`
 	NetDownBps     int64  `json:"net_down_bps"`
 	DiskFree       int64  `json:"disk_free,omitempty"`
@@ -56,6 +56,7 @@ type Server struct {
 	CoresRunning   string `json:"cores_running,omitempty"`
 	OverQuota      bool   `json:"over_quota,omitempty"`
 	NeedsUpgrade   bool   `json:"needs_upgrade,omitempty"`
+	NeedsReinstall bool   `json:"needs_reinstall,omitempty"`
 }
 
 type Certificate struct {

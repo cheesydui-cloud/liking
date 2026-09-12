@@ -232,8 +232,8 @@ export default function Packages() {
                       <span className="chip">全部节点</span>
                     ) : (
                       <>
-                        {names.slice(0, 4).map((name, i) => <span key={i} className="chip">{name}</span>)}
-                        {names.length > 4 ? <span className="chip">+{names.length - 4}</span> : null}
+                        {names.slice(0, 6).map((name, i) => <span key={i} className="chip">{name}</span>)}
+                        {names.length > 6 ? <span className="chip">+{names.length - 6}</span> : null}
                       </>
                     )}
                   </div>

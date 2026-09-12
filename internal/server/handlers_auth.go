@@ -264,7 +264,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if n := len(days); n > 0 {
 		today = days[n-1].Up + days[n-1].Down
 	}
-	alerts := dashboardAlerts(s.DB, servers, users)
+	alertItems, alerts := dashboardAlerts(s.DB, servers, users)
 	announce, _ := db.GetSetting(s.DB, "announce")
 	jsonOK(w, map[string]any{
 		"version":     version.Version,
@@ -280,22 +280,34 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"days":        days,
 		"server_list": servers,
 		"alerts":      alerts,
+		"alert_items": alertItems,
 		"announce":    announce,
 		"timezone":    db.Timezone(s.DB),
 	})
 }
 
-func dashboardAlerts(d *sql.DB, servers []*db.Server, users []*db.User) []string {
-	var out []string
+type dashAlert struct {
+	Text string `json:"text"`
+	To   string `json:"to,omitempty"`
+	Kind string `json:"kind,omitempty"`
+}
+
+func dashboardAlerts(d *sql.DB, servers []*db.Server, users []*db.User) ([]dashAlert, []string) {
+	var items []dashAlert
+	push := func(text, to, kind string) {
+		items = append(items, dashAlert{Text: text, To: to, Kind: kind})
+	}
 	for _, x := range servers {
 		if x.LastError != "" {
-			out = append(out, x.Name+" 下发失败")
+			push(x.Name+" 下发失败", "/nodes", "danger")
 		}
-		if x.NeedsUpgrade {
-			out = append(out, x.Name+" Agent 可升级到 "+version.Version)
+		if x.NeedsReinstall {
+			push(x.Name+" Agent 太旧，请用安装命令重装", "/nodes", "warn")
+		} else if x.NeedsUpgrade {
+			push(x.Name+" Agent 可升级到 "+version.Version, "/nodes", "warn")
 		}
 		if x.OverQuota {
-			out = append(out, x.Name+" 已达流量上限，节点已停用")
+			push(x.Name+" 已达流量上限，节点已停用", "/nodes", "danger")
 		}
 	}
 	for _, u := range users {
@@ -303,22 +315,28 @@ func dashboardAlerts(d *sql.DB, servers []*db.Server, users []*db.User) []string
 			continue
 		}
 		if u.QuotaRatio >= 100 {
-			out = append(out, u.Username+" 流量已用尽")
+			push(u.Username+" 流量已用尽", "/users", "danger")
 		} else if u.QuotaRatio >= 80 {
-			out = append(out, u.Username+" 流量已用 "+strconv.Itoa(u.QuotaRatio)+"%")
+			push(u.Username+" 流量已用 "+strconv.Itoa(u.QuotaRatio)+"%", "/users", "warn")
 		}
 	}
 	certs, _ := db.ListCerts(d)
 	now := time.Now().Unix()
 	for _, c := range certs {
-		if c.ExpiresAt > 0 && c.ExpiresAt < now+30*86400 {
-			out = append(out, "证书 "+c.Name+" 即将到期")
+		if c.ExpiresAt > 0 && c.ExpiresAt < now {
+			push("证书 "+c.Name+" 已过期", "/settings?tab=certs", "danger")
+		} else if c.ExpiresAt > 0 && c.ExpiresAt < now+30*86400 {
+			push("证书 "+c.Name+" 即将到期", "/settings?tab=certs", "warn")
 		}
 	}
-	if len(out) > 12 {
-		out = out[:12]
+	if len(items) > 12 {
+		items = items[:12]
 	}
-	return out
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, it.Text)
+	}
+	return items, out
 }
 
 func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {

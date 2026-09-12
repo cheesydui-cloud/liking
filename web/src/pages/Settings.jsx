@@ -24,7 +24,7 @@ function expiryTone(ts) {
   const left = Number(ts) * 1000 - Date.now()
   if (left < 0) return 'danger'
   if (left < 14 * 86400 * 1000) return 'danger'
-  if (left < 30 * 86400 * 1000) return 'gold'
+  if (left < 30 * 86400 * 1000) return 'warn'
   return 'ok'
 }
 

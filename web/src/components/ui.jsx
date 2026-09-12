@@ -1,4 +1,5 @@
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 export function Icon({ name, size = 18, className = '' }) {
   const s = size
@@ -36,6 +37,7 @@ export function Icon({ name, size = 18, className = '' }) {
     download: <><path d="M12 4v11" /><path d="M7 11l5 5 5-5" /><path d="M5 20h14" /></>,
     upload: <><path d="M12 20V9" /><path d="M7 13l5-5 5 5" /><path d="M5 4h14" /></>,
     bars: <><path d="M4 19V10M10 19V5M16 19v-7M22 19H2" /></>,
+    more: <><circle cx="12" cy="5" r="1.15" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.15" fill="currentColor" stroke="none" /><circle cx="12" cy="19" r="1.15" fill="currentColor" stroke="none" /></>,
   }
   return <svg {...common}>{p[name] || p.spark}</svg>
 }
@@ -114,13 +116,13 @@ export function DayBars({ days = [], className = '' }) {
   )
 }
 
-export function Meter({ value = 0, max = 0, className = '' }) {
+export function Meter({ value = 0, max = 0, className = '', mark = 80 }) {
   const used = Number(value) || 0
   const cap = Number(max) || 0
   const unlimited = !cap
   const pct = unlimited ? 0 : Math.min(100, Math.round((used / cap) * 100))
-  const tone = unlimited ? 'ok' : pct >= 90 ? 'danger' : pct >= 70 ? 'gold' : 'ok'
-  const color = { ok: 'var(--color-ok)', gold: 'var(--color-accent)', danger: 'var(--color-danger)' }[tone]
+  const tone = unlimited ? 'ok' : pct >= 100 ? 'danger' : pct >= mark ? 'warn' : 'ok'
+  const color = { ok: 'var(--color-ok)', warn: 'var(--color-warn)', danger: 'var(--color-danger)' }[tone]
   return (
     <div className={className}>
       <div className="flex items-baseline justify-between gap-2 text-[12px] tabular-nums">
@@ -129,6 +131,7 @@ export function Meter({ value = 0, max = 0, className = '' }) {
       </div>
       <div className="meter mt-1.5">
         <div className="meter-bar" style={{ width: unlimited ? '8%' : `${Math.max(pct, used ? 3 : 0)}%`, background: color, opacity: unlimited ? 0.35 : 1 }} />
+        {!unlimited && mark > 0 && mark < 100 ? <div className="meter-mark" style={{ left: `${mark}%` }} title={`${mark}%`} /> : null}
       </div>
     </div>
   )
@@ -142,8 +145,9 @@ export function PageHead({ title, desc, actions }) {
           <h1 className="text-[20px] font-semibold tracking-tight leading-tight">{title}</h1>
           {desc && <p className="text-[13px] text-ink-mut mt-1 max-w-2xl leading-relaxed">{desc}</p>}
         </div>
-        {actions && <div className="flex flex-wrap items-center gap-2 shrink-0">{actions}</div>}
+        {actions && <div className="hidden sm:flex flex-wrap items-center gap-2 shrink-0">{actions}</div>}
       </div>
+      {actions ? <div className="page-cta-bar">{actions}</div> : null}
     </div>
   )
 }
@@ -193,6 +197,7 @@ export function Field({ label, hint, children }) {
 export function Badge({ tone = 'muted', children, className = '' }) {
   const map = {
     gold: { color: 'var(--color-accent)', bg: 'var(--color-accent-soft)' },
+    warn: { color: 'var(--color-warn)', bg: 'var(--color-warn-soft)' },
     ok: { color: 'var(--color-ok)', bg: 'var(--color-ok-soft)' },
     danger: { color: 'var(--color-danger)', bg: 'var(--color-danger-soft)' },
     muted: { color: 'var(--color-ink-mut)', bg: 'var(--color-raised)' },
@@ -250,6 +255,95 @@ export function SkeletonRows({ rows = 4 }) {
   return (
     <div className="p-4 space-y-3">
       {Array.from({ length: rows }).map((_, i) => <div key={i} className="skeleton h-9" />)}
+    </div>
+  )
+}
+
+export function MoreMenu({ label = '更多', items = [], disabled }) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ top: 0, left: 0 })
+  const btnRef = useRef(null)
+  const popRef = useRef(null)
+
+  const place = () => {
+    const r = btnRef.current?.getBoundingClientRect()
+    if (!r) return
+    const width = 200
+    const margin = 8
+    let left = r.right - width
+    if (left < margin) left = margin
+    if (left + width > window.innerWidth - margin) left = Math.max(margin, window.innerWidth - width - margin)
+    const spaceBelow = window.innerHeight - r.bottom
+    const openUp = spaceBelow < 240 && r.top > spaceBelow
+    setPos(openUp
+      ? { top: undefined, bottom: window.innerHeight - r.top + 4, left }
+      : { top: r.bottom + 4, bottom: undefined, left })
+  }
+
+  useEffect(() => {
+    if (!open) return
+    place()
+    const onDoc = (e) => {
+      if (btnRef.current?.contains(e.target) || popRef.current?.contains(e.target)) return
+      setOpen(false)
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    const onClose = () => setOpen(false)
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', onClose, true)
+    window.addEventListener('resize', onClose)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', onClose, true)
+      window.removeEventListener('resize', onClose)
+    }
+  }, [open])
+
+  const vis = (items || []).filter(Boolean)
+  if (!vis.length) return null
+  return (
+    <div className="more-menu">
+      <button
+        ref={btnRef}
+        type="button"
+        className="row-act inline-flex items-center gap-1"
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen(v => !v)}
+      >
+        {label}
+        <Icon name="more" size={14} />
+      </button>
+      {open ? createPortal(
+        <div
+          ref={popRef}
+          className="more-menu-pop"
+          role="menu"
+          style={{ top: pos.top, bottom: pos.bottom, left: pos.left }}
+        >
+          {vis.map((it, i) => (
+            it.sep ? (
+              <div key={`sep-${i}`} className="more-menu-sep" />
+            ) : (
+              <button
+                key={it.label || i}
+                type="button"
+                role="menuitem"
+                className={`more-menu-item${it.danger ? ' is-danger' : ''}`}
+                disabled={it.disabled}
+                onClick={() => { setOpen(false); if (!it.disabled) it.onSelect?.() }}
+              >
+                <span>{it.label}</span>
+                {it.hint ? <span className="more-menu-hint">{it.hint}</span> : null}
+              </button>
+            )
+          ))}
+        </div>,
+        document.body,
+      ) : null}
     </div>
   )
 }

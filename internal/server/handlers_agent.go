@@ -29,6 +29,10 @@ func (s *Server) handleUpgradeAgent(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "Agent 不在线，无法远程升级")
 		return
 	}
+	if !version.CanRemoteUpgrade(srv.AgentVer) {
+		jsonErrExtra(w, http.StatusBadRequest, "该 Agent 版本太旧，不支持远程升级。请复制安装命令在机器上执行一次", map[string]any{"code": "agent_too_old"})
+		return
+	}
 	if osName == "" {
 		osName = srv.OS
 	}
@@ -96,6 +100,10 @@ func (s *Server) handleUninstallAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.Hub.IsOnline(id) {
 		jsonErr(w, http.StatusBadRequest, "Agent 不在线，无法远程卸载")
+		return
+	}
+	if !version.CanRemoteUpgrade(srv.AgentVer) {
+		jsonErrExtra(w, http.StatusBadRequest, "该 Agent 版本太旧，不支持远程卸载。请复制安装命令在机器上执行一次", map[string]any{"code": "agent_too_old"})
 		return
 	}
 	raw, err := s.Hub.SendRPC(id, wsproto.TypeUninstall, map[string]any{}, 30*time.Second)

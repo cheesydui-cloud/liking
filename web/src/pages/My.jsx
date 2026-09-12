@@ -31,7 +31,7 @@ export default function My() {
           <div className="kicker">流量{user?.direction === 'twoway' ? ' · 双向' : ''}</div>
           <Meter className="mt-2.5" value={used} max={user?.traffic_cap || 0} />
           {ratio >= 80 ? (
-            <div className="text-[12px] mt-1.5" style={{ color: 'var(--color-danger)' }}>
+            <div className="text-[12px] mt-1.5" style={{ color: ratio >= 100 ? 'var(--color-danger)' : 'var(--color-warn)' }}>
               {ratio >= 100 ? '已用尽，节点已从订阅摘掉' : `已用 ${ratio}%`}
             </div>
           ) : null}

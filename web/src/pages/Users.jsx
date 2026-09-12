@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, DayBars, Empty, Field, Icon, Meter, Modal, PageHead, SearchInput, billedBytes, fmtBytes, fmtDateShort } from '../components/ui'
+import { Badge, DayBars, Empty, Field, Icon, Meter, Modal, MoreMenu, PageHead, SearchInput, billedBytes, fmtBytes, fmtDateShort } from '../components/ui'
 import { SubPanel } from '../components/SubPanel'
 
 function randPassword() {
@@ -64,6 +64,7 @@ export default function Users() {
   const [trafficDetail, setTrafficDetail] = useState(null)
   const [q, setQ] = useState('')
   const [pkgFilter, setPkgFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
   const [bulkOpen, setBulkOpen] = useState(false)
   const [bulkText, setBulkText] = useState('')
   const [bulkBusy, setBulkBusy] = useState(false)
@@ -212,14 +213,22 @@ export default function Users() {
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase()
+    const now = Date.now()
     return list.filter(u => {
       if (pkgFilter === 'none' && u.package_id) return false
       if (pkgFilter && pkgFilter !== 'none' && String(u.package_id) !== pkgFilter) return false
+      if (statusFilter === 'warn') {
+        if (u.role === 'admin') return false
+        if (!(u.quota_ratio >= 80 && u.quota_ratio < 100)) return false
+      }
+      if (statusFilter === 'expired') {
+        if (!(u.expires_at && u.expires_at * 1000 < now)) return false
+      }
       if (!needle) return true
       const hay = [u.username, u.remark, u.package_name, u.role === 'admin' ? '管理员' : '']
       return hay.some(x => String(x || '').toLowerCase().includes(needle))
     })
-  }, [list, q, pkgFilter])
+  }, [list, q, pkgFilter, statusFilter])
 
   const editing = !!editUser
   const selectedPkg = pkgs.find(p => Number(p.id) === Number(f.package_id))
@@ -245,6 +254,11 @@ export default function Users() {
           <option value="none">未绑定</option>
           {pkgs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
+        <div className="flex gap-1 shrink-0">
+          {[['','全部'],['warn','将满 80%'],['expired','已到期']].map(([id, lab]) => (
+            <button key={id || 'all'} type="button" className={`chip ${statusFilter === id ? 'is-on' : ''}`} onClick={() => setStatusFilter(id)}>{lab}</button>
+          ))}
+        </div>
       </div>
 
       <div className="card overflow-hidden">
@@ -278,17 +292,20 @@ export default function Users() {
                     <td>
                       {u.expires_at && u.expires_at * 1000 < Date.now() ? <Badge tone="danger">到期</Badge>
                         : (u.traffic_cap > 0 && billedBytes(u) >= u.traffic_cap) ? <Badge tone="danger">超量</Badge>
-                        : (u.quota_ratio >= 80) ? <Badge tone="gold">{u.quota_ratio}%</Badge>
+                        : (u.quota_ratio >= 80) ? <Badge tone="warn">{u.quota_ratio}%</Badge>
                         : u.enabled ? <Badge tone="ok">启用</Badge> : <Badge tone="muted">停用</Badge>}
                     </td>
                     <td className="whitespace-nowrap">
                       {u.role !== 'admin' && (
-                        <div className="flex gap-2.5 justify-end">
-                          <button type="button" className="row-act" onClick={() => openTraffic(u)}>流量</button>
-                          <button type="button" className="row-act" onClick={() => setSubUser(u)}>订阅</button>
+                        <div className="flex gap-2.5 justify-end items-center">
                           <button type="button" className="row-act" onClick={() => openEdit(u)}>编辑</button>
-                          <button type="button" className="row-act" onClick={() => act(() => api.put(`/users/${u.id}`, { enabled: !u.enabled }))}>{u.enabled ? '停用' : '启用'}</button>
-                          <button type="button" className="row-act is-danger" onClick={() => remove(u)}>删除</button>
+                          <button type="button" className="row-act" onClick={() => setSubUser(u)}>订阅</button>
+                          <MoreMenu items={[
+                            { label: '流量', onSelect: () => openTraffic(u) },
+                            { label: u.enabled ? '停用' : '启用', onSelect: () => act(() => api.put(`/users/${u.id}`, { enabled: !u.enabled })) },
+                            { sep: true },
+                            { label: '删除', danger: true, onSelect: () => remove(u) },
+                          ]} />
                         </div>
                       )}
                     </td>
