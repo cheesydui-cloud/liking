@@ -212,7 +212,7 @@ export default function Packages() {
               )}
             </div>
             {servers.length === 0 ? (
-              <div className="text-[13px] text-ink-mut py-3">还没有节点。先到「服务器」添加并安装 Agent。</div>
+              <div className="text-[13px] text-ink-mut py-3">还没有节点。先到「节点管理」添加并安装 Agent。</div>
             ) : (
               <div className="grid grid-cols-1 gap-2">
                 {servers.map(s => {
@@ -235,7 +235,7 @@ export default function Packages() {
                         </span>
                         <span className="block text-[12px] text-ink-mut font-mono truncate mt-0.5">{s.public_host || '未填公开地址'}</span>
                         <span className="block text-[12px] text-ink-soft mt-1 truncate">
-                          {lines.length ? lines.map(x => `${x.name} :${x.port}`).join(' · ') : '暂无入站'}
+                          {lines.length ? lines.map(x => `${x.name} :${x.port}`).join(' · ') : '暂无线路'}
                         </span>
                       </span>
                     </button>

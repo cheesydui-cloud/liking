@@ -2,8 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { UserProvider, useUser, Layout } from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
-import Servers from './pages/Servers'
-import Inbounds from './pages/Inbounds'
+import Nodes from './pages/Nodes'
 import Users from './pages/Users'
 import Packages from './pages/Packages'
 import Certs from './pages/Certs'
@@ -55,8 +54,9 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<Root />} />
-          <Route path="/servers" element={<AdminRoute><Servers /></AdminRoute>} />
-          <Route path="/inbounds" element={<AdminRoute><Inbounds /></AdminRoute>} />
+          <Route path="/nodes" element={<AdminRoute><Nodes /></AdminRoute>} />
+          <Route path="/servers" element={<Navigate to="/nodes" replace />} />
+          <Route path="/inbounds" element={<Navigate to="/nodes" replace />} />
           <Route path="/users" element={<AdminRoute><Users /></AdminRoute>} />
           <Route path="/packages" element={<AdminRoute><Packages /></AdminRoute>} />
           <Route path="/certs" element={<AdminRoute><Certs /></AdminRoute>} />

@@ -13,9 +13,9 @@ export default function Dashboard() {
   if (!d) return <div className="card"><SkeletonRows /></div>
 
   const cards = [
-    { label: '服务器', value: d.servers, to: '/servers', hint: '节点总数' },
-    { label: '在线', value: d.online, to: '/servers', hint: 'Agent 心跳' },
-    { label: '入站', value: d.inbounds, to: '/inbounds', hint: '已配置线路' },
+    { label: '节点', value: d.servers, to: '/nodes', hint: '机器总数' },
+    { label: '在线', value: d.online, to: '/nodes', hint: 'Agent 心跳' },
+    { label: '线路', value: d.inbounds, to: '/nodes', hint: '已配置线路' },
     { label: '用户', value: d.members ?? d.users, to: '/users', hint: '不含管理员' },
     { label: '套餐', value: d.packages || 0, to: '/packages', hint: '可绑定套餐' },
     { label: '已用流量', value: fmtBytes(d.used_bytes || 0), to: '/users', hint: '用户合计' },
@@ -23,7 +23,7 @@ export default function Dashboard() {
 
   return (
     <div>
-      <PageHead title="总览" desc="先加服务器，再开入站，然后把套餐绑给用户。流量按套餐方向和节点倍率计。" />
+      <PageHead title="总览" desc="先加节点，在机器上挂线路，再把套餐绑给用户。流量按套餐方向和节点倍率计。" />
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-5">
         {cards.map(c => (
           <Link key={c.label} to={c.to} className="card p-4 hover:border-[var(--color-accent)] transition-colors">
@@ -35,16 +35,16 @@ export default function Dashboard() {
       </div>
       {(d.server_list || []).some(s => s.last_error) && (
         <div className="notice mb-4">
-          有节点配置下发失败，打开「服务器」查看原因。常见原因：端口被占用、内核未安装。
+          有节点配置下发失败，打开「节点管理」查看原因。常见原因：端口被占用、内核未安装。
         </div>
       )}
       <div className="card overflow-hidden">
         <div className="px-4 py-3 flex items-center justify-between border-b" style={{ borderColor: 'var(--color-line-soft)' }}>
-          <div className="text-[14px] font-semibold">服务器</div>
-          <Link to="/servers" className="row-act">管理</Link>
+          <div className="text-[14px] font-semibold">节点</div>
+          <Link to="/nodes" className="row-act">管理</Link>
         </div>
         {(d.server_list || []).length === 0 ? (
-          <Empty title="还没有服务器" hint="添加一台节点，复制一键安装命令，在机器上以 root 执行。" action={<Link to="/servers" className="btn-primary">去添加</Link>} />
+          <Empty title="还没有节点" hint="添加一台节点，复制一键安装命令，在机器上以 root 执行。" action={<Link to="/nodes" className="btn-primary">去添加</Link>} />
         ) : (
           <div className="table-wrap">
             <table className="data">

@@ -155,8 +155,7 @@ export function Layout({ children }) {
     {
       label: '节点',
       items: [
-        { to: '/servers', icon: 'servers', label: '服务器' },
-        { to: '/inbounds', icon: 'plugs', label: '入站' },
+        { to: '/nodes', icon: 'servers', label: '节点管理' },
         { to: '/certs', icon: 'cert', label: '证书' },
       ],
     },
