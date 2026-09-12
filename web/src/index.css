@@ -3,23 +3,24 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --color-app: #f6f3f0;
-  --color-surface: #fffcfa;
-  --color-raised: #efe8e2;
-  --color-line: #e5d9d1;
-  --color-line-soft: #efe6df;
-  --color-ink: #1c1410;
-  --color-ink-soft: #5a4e47;
-  --color-ink-mut: #8a7d75;
-  --color-accent: #c24e2e;
-  --color-accent-soft: #f8e6de;
+  --color-app: #ffffff;
+  --color-surface: #ffffff;
+  --color-raised: #f4f4f5;
+  --color-fill: #f7f7f7;
+  --color-line: #e5e5e5;
+  --color-line-soft: #f3f3f3;
+  --color-ink: #111111;
+  --color-ink-soft: #5c5c5c;
+  --color-ink-mut: #8c8c8c;
+  --color-accent: #111111;
+  --color-accent-soft: #f4f4f5;
   --color-on-accent: #ffffff;
-  --color-gold: #c24e2e;
-  --color-gold-2: #d97757;
-  --color-ok: #1f8a5b;
-  --color-ok-soft: #dcf3e8;
-  --color-danger: #c2413b;
-  --color-danger-soft: #fde8e6;
+  --color-gold: #111111;
+  --color-gold-2: #3f3f3f;
+  --color-ok: #0e7a4a;
+  --color-ok-soft: #e8f6ef;
+  --color-danger: #d92d20;
+  --color-danger-soft: #fdecec;
   --font-sans: "Fira Sans", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Avenir Next", system-ui, sans-serif;
   --font-mono: "Fira Code", "SF Mono", ui-monospace, Menlo, monospace;
   --radius-md: 8px;
@@ -27,23 +28,24 @@
 }
 
 .dark {
-  --color-app: #0e1118;
-  --color-surface: #151924;
-  --color-raised: #1c2230;
-  --color-line: rgba(227, 146, 114, 0.16);
+  --color-app: #09090b;
+  --color-surface: #111113;
+  --color-raised: #1c1c1f;
+  --color-fill: #18181b;
+  --color-line: #27272a;
   --color-line-soft: rgba(255, 255, 255, 0.06);
-  --color-ink: #f3eee9;
-  --color-ink-soft: #c5bbb4;
-  --color-ink-mut: #8f877f;
-  --color-accent: #e39272;
-  --color-accent-soft: rgba(227, 146, 114, 0.12);
-  --color-on-accent: #1a0e0a;
-  --color-gold: #e39272;
-  --color-gold-2: #f0b090;
-  --color-ok: #5dcea0;
-  --color-ok-soft: rgba(93, 206, 160, 0.12);
-  --color-danger: #f08a84;
-  --color-danger-soft: rgba(240, 138, 132, 0.12);
+  --color-ink: #fafafa;
+  --color-ink-soft: #a1a1aa;
+  --color-ink-mut: #71717a;
+  --color-accent: #fafafa;
+  --color-accent-soft: rgba(255, 255, 255, 0.08);
+  --color-on-accent: #09090b;
+  --color-gold: #fafafa;
+  --color-gold-2: #d4d4d8;
+  --color-ok: #34d399;
+  --color-ok-soft: rgba(52, 211, 153, 0.12);
+  --color-danger: #f87171;
+  --color-danger-soft: rgba(248, 113, 113, 0.12);
 }
 
 html, body, #root { height: 100%; }
@@ -51,8 +53,8 @@ html { color-scheme: light; }
 html.dark { color-scheme: dark; }
 
 ::selection {
-  background: color-mix(in srgb, var(--color-accent) 28%, transparent);
-  color: var(--color-ink);
+  background: var(--color-ink);
+  color: var(--color-surface);
 }
 
 body {
@@ -82,10 +84,10 @@ body {
   color: var(--color-ink);
   border-color: var(--color-line);
 }
-.input-field:hover { border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-line)); }
+.input-field:hover { border-color: color-mix(in srgb, var(--color-ink) 28%, var(--color-line)); }
 .input-field:focus {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
+  border-color: var(--color-ink);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-ink) 10%, transparent);
 }
 .input-field:disabled { opacity: 0.5; cursor: not-allowed; }
 select.input-field { cursor: pointer; }
@@ -95,11 +97,11 @@ textarea.input-field { height: auto; min-height: 7rem; padding-top: 0.55rem; pad
   @apply inline-flex items-center justify-center gap-1.5 h-9 px-3.5 rounded-lg text-[13px] font-medium cursor-pointer transition-colors duration-150;
   background: var(--color-accent);
   color: var(--color-on-accent);
-  border: 1px solid color-mix(in srgb, var(--color-accent) 75%, #000);
+  border: 1px solid var(--color-accent);
 }
-.btn-primary:hover { filter: brightness(1.05); }
+.btn-primary:hover { opacity: 0.88; }
 .btn-primary:active { transform: translateY(0.5px); }
-.btn-primary:disabled { opacity: 0.55; cursor: not-allowed; transform: none; filter: none; }
+.btn-primary:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
 
 .btn-ghost {
   @apply inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium border cursor-pointer transition-colors duration-150;
@@ -107,7 +109,7 @@ textarea.input-field { height: auto; min-height: 7rem; padding-top: 0.55rem; pad
   color: var(--color-ink-soft);
   background: transparent;
 }
-.btn-ghost:hover { border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-line)); color: var(--color-ink); background: var(--color-accent-soft); }
+.btn-ghost:hover { border-color: var(--color-ink-mut); color: var(--color-ink); background: var(--color-raised); }
 
 .btn-danger {
   @apply inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium cursor-pointer;
@@ -120,9 +122,8 @@ textarea.input-field { height: auto; min-height: 7rem; padding-top: 0.55rem; pad
   @apply rounded-[10px] border;
   background: var(--color-surface);
   border-color: var(--color-line);
-  box-shadow: 0 1px 2px rgba(28, 20, 16, 0.04);
+  box-shadow: none;
 }
-html.dark .card { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28); }
 
 .table-wrap { @apply overflow-x-auto; }
 table.data { @apply w-full text-[13px]; border-collapse: collapse; }
@@ -131,7 +132,7 @@ table.data th {
   color: var(--color-ink-mut);
   font-size: 12px;
   border-bottom: 1px solid var(--color-line);
-  background: color-mix(in srgb, var(--color-raised) 55%, var(--color-surface));
+  background: var(--color-fill);
 }
 table.data td {
   @apply py-2.5 px-3;
@@ -140,18 +141,18 @@ table.data td {
   vertical-align: middle;
 }
 table.data tbody tr { transition: background 120ms ease; }
-table.data tbody tr:hover { background: var(--color-accent-soft); }
+table.data tbody tr:hover { background: var(--color-fill); }
 table.data tbody tr:last-child td { border-bottom: 0; }
 
 .dot { @apply inline-block w-2 h-2 rounded-full; }
 .dot-on { background: var(--color-ok); box-shadow: 0 0 0 3px var(--color-ok-soft); }
-.dot-off { background: #8a827b; opacity: 0.55; }
+.dot-off { background: #c6c6c6; }
 
 .chip {
   @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11.5px] font-medium border;
   border-color: var(--color-line);
   color: var(--color-ink-soft);
-  background: color-mix(in srgb, var(--color-raised) 50%, transparent);
+  background: var(--color-fill);
 }
 
 .node-pick {
@@ -160,7 +161,7 @@ table.data tbody tr:last-child td { border-bottom: 0; }
   border-color: var(--color-line);
   color: var(--color-ink);
 }
-.node-pick:hover { border-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-line)); }
+.node-pick:hover { border-color: color-mix(in srgb, var(--color-ink) 28%, var(--color-line)); }
 .node-pick.is-on {
   border-color: var(--color-accent);
   background: var(--color-accent-soft);
@@ -189,7 +190,7 @@ table.data tbody tr:last-child td { border-bottom: 0; }
   font: inherit;
   font-size: 12.5px;
 }
-.linkish:hover, .row-act:hover { color: var(--color-accent); }
+.linkish:hover, .row-act:hover { color: var(--color-ink); }
 .row-act.is-danger, .linkish.is-danger { color: var(--color-danger); }
 .row-act.is-danger:hover, .linkish.is-danger:hover { text-decoration: underline; }
 
@@ -224,8 +225,8 @@ table.data tbody tr:last-child td { border-bottom: 0; }
 .notice {
   @apply text-[13px] rounded-lg px-3 py-2.5 leading-relaxed;
   color: var(--color-ink-soft);
-  background: var(--color-accent-soft);
-  border: 1px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
+  background: var(--color-fill);
+  border: 1px solid var(--color-line);
 }
 
 .meter {
@@ -266,6 +267,6 @@ table.data tbody tr:last-child td { border-bottom: 0; }
 }
 
 .sidebar-link-active {
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
+  background: var(--color-raised);
+  color: var(--color-ink);
 }

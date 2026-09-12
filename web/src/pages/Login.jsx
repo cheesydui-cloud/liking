@@ -43,10 +43,8 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-dvh grid place-items-center p-5 relative overflow-hidden">
-      <div className="pointer-events-none absolute inset-0"
-        style={{ background: 'radial-gradient(720px 360px at 50% -10%, color-mix(in srgb, var(--color-accent) 16%, transparent), transparent 62%)' }} />
-      <div className="relative card w-full max-w-[380px] p-6 sm:p-7">
+    <div className="min-h-dvh grid place-items-center p-5 bg-app">
+      <div className="card w-full max-w-[380px] p-6 sm:p-7" style={{ boxShadow: '0 1px 2px rgba(17,17,17,0.04), 0 16px 40px rgba(17,17,17,0.06)' }}>
         <div className="flex items-center gap-2.5 mb-6">
           <BrandMark size={32} />
           <div>
