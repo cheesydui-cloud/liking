@@ -257,9 +257,20 @@ func MarkAllServersOffline(d *sql.DB) error {
 }
 
 func MarkServerOnline(d *sql.DB, id int64, ver, osName, arch, ip string, cores []string) error {
-	_, err := d.Exec(`UPDATE servers SET online=1, last_seen=?, agent_ver=?, os=?, arch=?, connect_ip=?, cores=? WHERE id=?`,
-		now(), ver, osName, arch, ip, joinCores(cores), id)
+	fill := shareFillIP(ip)
+	_, err := d.Exec(`UPDATE servers SET online=1, last_seen=?, agent_ver=?, os=?, arch=?, connect_ip=?, cores=?,
+		public_host=CASE WHEN TRIM(COALESCE(public_host,''))='' AND ?!='' THEN ? ELSE public_host END
+		WHERE id=?`,
+		now(), ver, osName, arch, ip, joinCores(cores), fill, fill, id)
 	return err
+}
+
+func shareFillIP(ip string) string {
+	ip = strings.TrimSpace(ip)
+	if ip == "" || ip == "127.0.0.1" || ip == "::1" || ip == "localhost" {
+		return ""
+	}
+	return ip
 }
 
 func SetServerCores(d *sql.DB, id int64, cores []string) error {
@@ -569,10 +580,10 @@ func GetInbound(d *sql.DB, id int64) (*Inbound, error) {
 	var en int
 	var certID, exitID sql.NullInt64
 	err := d.QueryRow(`SELECT i.id,i.server_id,i.name,i.profile,i.protocol,i.network,i.security,i.core,i.listen,i.port,i.enabled,i.settings,i.cert_id,i.line_kind,i.exit_inbound_id,i.exit_uri,i.created_at,
-		s.name, s.public_host, s.online
+		s.name, s.public_host, s.connect_ip, s.online
 		FROM inbounds i JOIN servers s ON s.id=i.server_id WHERE i.id=?`, id).
 		Scan(&in.ID, &in.ServerID, &in.Name, &in.Profile, &in.Protocol, &in.Network, &in.Security, &in.Core, &in.Listen, &in.Port, &en, &in.Settings, &certID, &in.LineKind, &exitID, &in.ExitURI, &in.CreatedAt,
-			&in.ServerName, &in.ServerHost, &in.ServerOnline)
+			&in.ServerName, &in.ServerHost, &in.ConnectIP, &in.ServerOnline)
 	if err != nil {
 		return nil, err
 	}

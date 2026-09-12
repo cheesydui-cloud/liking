@@ -207,3 +207,80 @@ func TestBuildIncludesMitaWhenCoreNotReported(t *testing.T) {
 		t.Fatal("mita config must be sent so the agent can install the core")
 	}
 }
+
+func TestBuildSS2022TCPUDP(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	srv, err := db.CreateServer(d, "jp", "", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MarkServerOnline(d, srv.ID, "0.1.9", "linux", "amd64", "177.5.54.5", []string{"xray"}); err != nil {
+		t.Fatal(err)
+	}
+	in := &db.Inbound{
+		ServerID: srv.ID, Name: "ss", Profile: ProfileSS2022,
+		Port: 8789, Enabled: true, LineKind: "direct", Settings: "{}",
+	}
+	if err := Normalize(in, nil); err != nil {
+		t.Fatal(err)
+	}
+	created, err := db.CreateInbound(d, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := db.CreatePackage(d, "std", 0, 30, 0, "oneway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetPackageServers(d, pkg.ID, []int64{srv.ID}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := db.CreateUser(d, "alice", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.BindUserPackage(d, u.ID, pkg.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	u, _ = db.GetUser(d, u.ID)
+	if _, err := ProvisionUser(d, u); err != nil {
+		t.Fatal(err)
+	}
+	b, err := Build(d, srv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.Apply.Xray) == 0 {
+		t.Fatal("xray")
+	}
+	var xray map[string]any
+	if err := json.Unmarshal(b.Apply.Xray, &xray); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, raw := range xray["inbounds"].([]any) {
+		obj, _ := raw.(map[string]any)
+		if obj["protocol"] != "shadowsocks" {
+			continue
+		}
+		found = true
+		st, _ := obj["settings"].(map[string]any)
+		if st["network"] != "tcp,udp" {
+			t.Fatalf("network %v", st["network"])
+		}
+		clients, _ := st["clients"].([]any)
+		if len(clients) != 1 {
+			t.Fatalf("clients %v", st["clients"])
+		}
+		if obj["port"] != float64(created.Port) {
+			t.Fatalf("port %v", obj["port"])
+		}
+	}
+	if !found {
+		t.Fatal("missing shadowsocks inbound")
+	}
+}

@@ -230,3 +230,82 @@ func TestUserAccessExpired(t *testing.T) {
 		t.Fatal("expired")
 	}
 }
+
+func TestMarkServerOnlineFillsEmptyPublicHost(t *testing.T) {
+	d, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	tok, err := RandomHex(8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := CreateServer(d, "jp", "", tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.PublicHost != "" {
+		t.Fatalf("public_host %q", s.PublicHost)
+	}
+	if err := MarkServerOnline(d, s.ID, "0.1.9", "linux", "amd64", "177.5.54.5", []string{"xray"}); err != nil {
+		t.Fatal(err)
+	}
+	s, err = GetServer(d, s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.PublicHost != "177.5.54.5" || s.ConnectIP != "177.5.54.5" {
+		t.Fatalf("fill %+v", s)
+	}
+
+	in, err := CreateInbound(d, &Inbound{
+		ServerID: s.ID, Name: "ss", Profile: "ss2022", Protocol: "shadowsocks",
+		Network: "tcp", Security: "none", Core: "xray", Listen: "0.0.0.0",
+		Port: 8789, Enabled: true, Settings: "{}", LineKind: "direct",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.ServerHost != "177.5.54.5" || in.ConnectIP != "177.5.54.5" {
+		t.Fatalf("inbound host %q ip %q", in.ServerHost, in.ConnectIP)
+	}
+
+	if err := MarkServerOnline(d, s.ID, "0.1.9", "linux", "amd64", "9.9.9.9", []string{"xray"}); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = GetServer(d, s.ID)
+	if s.PublicHost != "177.5.54.5" {
+		t.Fatalf("should keep first fill %q", s.PublicHost)
+	}
+	if s.ConnectIP != "9.9.9.9" {
+		t.Fatalf("connect_ip %q", s.ConnectIP)
+	}
+
+	tok2, _ := RandomHex(8)
+	loop, err := CreateServer(d, "loop", "", tok2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := MarkServerOnline(d, loop.ID, "0.1.9", "linux", "amd64", "127.0.0.1", []string{"xray"}); err != nil {
+		t.Fatal(err)
+	}
+	loop, _ = GetServer(d, loop.ID)
+	if loop.PublicHost != "" {
+		t.Fatalf("loopback should not fill %q", loop.PublicHost)
+	}
+
+	tok3, _ := RandomHex(8)
+	named, err := CreateServer(d, "named", "jp.example", tok3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := MarkServerOnline(d, named.ID, "0.1.9", "linux", "amd64", "1.2.3.4", []string{"xray"}); err != nil {
+		t.Fatal(err)
+	}
+	named, _ = GetServer(d, named.ID)
+	if named.PublicHost != "jp.example" {
+		t.Fatalf("named host overwritten %q", named.PublicHost)
+	}
+}

@@ -1,6 +1,7 @@
 package corecfg
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -10,10 +11,13 @@ import (
 )
 
 func ShareHost(in *db.Inbound) string {
-	if in.ServerHost != "" {
-		return in.ServerHost
+	if in == nil {
+		return ""
 	}
-	return ""
+	if h := strings.TrimSpace(in.ServerHost); h != "" {
+		return h
+	}
+	return strings.TrimSpace(in.ConnectIP)
 }
 
 func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
@@ -67,7 +71,8 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 		return fmt.Sprintf("trojan://%s@%s?%s#%s", url.QueryEscape(c.Password), hp, q.Encode(), name), nil
 	case ProfileSS2022:
 		method := st.String("method")
-		userinfo := url.UserPassword(method, st.String("server_password")+":"+c.Password).String()
+		combined := st.String("server_password") + ":" + c.Password
+		userinfo := base64.RawURLEncoding.EncodeToString([]byte(method + ":" + combined))
 		return fmt.Sprintf("ss://%s@%s#%s", userinfo, hp, name), nil
 	case ProfileAnyTLS:
 		q := url.Values{}

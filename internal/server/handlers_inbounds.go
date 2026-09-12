@@ -179,8 +179,8 @@ func (s *Server) handleInboundShare(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "入站不存在")
 		return
 	}
-	if strings.TrimSpace(in.ServerHost) == "" {
-		jsonErr(w, http.StatusBadRequest, "节点未填写公开地址")
+	if corecfg.ShareHost(in) == "" {
+		jsonErr(w, http.StatusBadRequest, "节点未填写公开地址，也还没有上报连接 IP。先点「改」填 IP 或域名。")
 		return
 	}
 	clients, err := db.ListClientsByInbound(s.DB, in.ID)

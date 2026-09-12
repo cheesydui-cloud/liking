@@ -338,6 +338,123 @@ func TestInboundShareURI(t *testing.T) {
 	}
 }
 
+func TestInboundShareSS2022UsesConnectIP(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	body, _ := json.Marshal(map[string]string{"name": "jp"})
+	res, err = c.Post(ts.URL+"/api/servers", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		Server struct {
+			ID int64 `json:"id"`
+		} `json:"server"`
+	}
+	decodeRes(t, res, &created)
+	if _, err := d.Exec(`UPDATE servers SET connect_ip=? WHERE id=?`, "177.5.54.5", created.Server.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	inBody, _ := json.Marshal(map[string]any{
+		"server_id": created.Server.ID,
+		"name":      "jp-ss",
+		"profile":   "ss2022",
+		"port":      8789,
+	})
+	res, err = c.Post(ts.URL+"/api/inbounds", "application/json", bytes.NewReader(inBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var createdIn struct {
+		Inbound struct {
+			ID int64 `json:"id"`
+		} `json:"inbound"`
+	}
+	decodeRes(t, res, &createdIn)
+
+	res, err = c.Get(ts.URL + "/api/inbounds/" + strconv.FormatInt(createdIn.Inbound.ID, 10) + "/share")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("share without user %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	pkgBody, _ := json.Marshal(map[string]any{
+		"name": "std", "traffic_bytes": 0, "cycle_days": 30, "direction": "oneway",
+		"server_ids": []int64{created.Server.ID},
+	})
+	res, err = c.Post(ts.URL+"/api/packages", "application/json", bytes.NewReader(pkgBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkg struct {
+		Package struct {
+			ID int64 `json:"id"`
+		} `json:"package"`
+	}
+	decodeRes(t, res, &pkg)
+
+	uBody, _ := json.Marshal(map[string]any{
+		"username": "alice", "password": "alice12", "package_id": pkg.Package.ID, "days": 30,
+	})
+	res, err = c.Post(ts.URL+"/api/users", "application/json", bytes.NewReader(uBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	res, err = c.Get(ts.URL + "/api/inbounds/" + strconv.FormatInt(createdIn.Inbound.ID, 10) + "/share")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var share struct {
+		URI     string `json:"uri"`
+		Profile string `json:"profile"`
+	}
+	decodeRes(t, res, &share)
+	if share.Profile != "ss2022" || !strings.HasPrefix(share.URI, "ss://") || !strings.Contains(share.URI, "@177.5.54.5:8789") {
+		t.Fatalf("share %+v", share)
+	}
+	userinfo := strings.TrimPrefix(share.URI, "ss://")
+	userinfo = userinfo[:strings.Index(userinfo, "@")]
+	raw, err := base64.RawURLEncoding.DecodeString(userinfo)
+	if err != nil {
+		t.Fatalf("sip002 %v %s", err, share.URI)
+	}
+	if !strings.HasPrefix(string(raw), "2022-blake3-aes-128-gcm:") || strings.Contains(string(raw), "%") {
+		t.Fatalf("decoded %s", raw)
+	}
+}
+
 func TestCreateMieruWhenOnlyXrayReported(t *testing.T) {
 	d, err := db.Open(":memory:")
 	if err != nil {

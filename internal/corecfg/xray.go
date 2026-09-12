@@ -139,6 +139,7 @@ func xrayInbound(in *db.Inbound, clients []*db.Client, certs map[int64]*db.Certi
 			"method":   st.String("method"),
 			"password": st.String("server_password"),
 			"clients":  users,
+			"network":  "tcp,udp",
 		}
 	default:
 		return nil, nil

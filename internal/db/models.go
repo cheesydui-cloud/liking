@@ -79,6 +79,7 @@ type Inbound struct {
 	CreatedAt     int64  `json:"created_at"`
 	ServerName    string `json:"server_name,omitempty"`
 	ServerHost    string `json:"server_host,omitempty"`
+	ConnectIP     string `json:"connect_ip,omitempty"`
 	ServerOnline  int    `json:"server_online,omitempty"`
 }
 
