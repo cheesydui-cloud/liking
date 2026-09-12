@@ -106,7 +106,7 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 			udp = "1"
 		}
 		userinfo := url.UserPassword(user, c.Password).String()
-		return fmt.Sprintf("mierus://%s@%s?udp=%s&port=%s&profile=default", userinfo, shareHostOnly(host), udp, strconv.Itoa(in.Port)), nil
+		return fmt.Sprintf("mierus://%s@%s?udp=%s&port=%s&profile=default#%s", userinfo, shareHostOnly(host), udp, strconv.Itoa(in.Port), name), nil
 	default:
 		return "", fmt.Errorf("未知协议")
 	}

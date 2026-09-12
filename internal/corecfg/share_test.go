@@ -90,6 +90,9 @@ func TestClashAndSingboxSkipMieru(t *testing.T) {
 	if !strings.Contains(uri, "udp=0") || !strings.Contains(uri, "port=8964") || !strings.Contains(uri, "profile=default") {
 		t.Fatalf("uri %s", uri)
 	}
+	if !strings.HasSuffix(uri, "#m") {
+		t.Fatalf("missing node name %s", uri)
+	}
 	if strings.Contains(uri, "1.2.3.4:8964") {
 		t.Fatalf("port must be in query %s", uri)
 	}
