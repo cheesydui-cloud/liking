@@ -2,6 +2,19 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.1.12 — 2026-09-12
+
+线路「复制」贴出的 `mieru://` 多数软件不认。真正通用的是 HTTP 订阅链接。
+
+### 改进
+- 点「复制」弹出导入面板，并自动复制通用订阅（`/api/sub/令牌`）：Clash / v2rayN / 小火箭 / sing-box 都能添加订阅
+- 同时给出 Clash Meta 订阅；VLESS / Trojan / SS 仍可复制单节点 `vless://` 等
+- Mieru / AnyTLS 不再把自定义单节点链接当作可导入格式，提示用 Clash Meta 订阅
+
+### 升级注意
+- 只升面板即可，节点 Agent 不用重装
+- 回滚：`liking-upgrade --release v0.1.11`
+
 ## v0.1.11 — 2026-09-12
 
 节点管理里点「复制」，贴出来的是公钥、端口这类参数，不是 `vless://` 分享链接，代理软件导不进去。

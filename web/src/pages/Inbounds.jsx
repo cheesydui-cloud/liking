@@ -3,6 +3,7 @@ import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, Icon, Modal, PageHead } from '../components/ui'
+import { ShareModal } from '../components/ShareModal'
 
 const SUGGESTED_PORTS = [8443, 8444, 2053, 2083, 2087, 2096, 8880, 9443, 10443, 11443]
 
@@ -107,7 +108,7 @@ export default function Inbounds() {
   const [busy, setBusy] = useState(false)
   const [serverFilter, setServerFilter] = useState('')
   const [paramInb, setParamInb] = useState(null)
-  const [shareText, setShareText] = useState('')
+  const [share, setShare] = useState(null)
 
   const load = async () => {
     try {
@@ -237,15 +238,7 @@ export default function Inbounds() {
 
   const copyShare = async (inb) => {
     try {
-      const d = await api.get(`/inbounds/${inb.id}/share`)
-      try {
-        await copyText(d.uri)
-        if (d.profile === 'mieru') toast('已复制。Mieru 请到用户页复制 Clash 订阅，单条链接多数软件不认')
-        else toast(`已复制分享链接（${d.username}）`)
-      } catch {
-        setShareText(d.uri)
-        toast('浏览器不允许自动复制，请手动选中链接', 'error')
-      }
+      setShare(await api.get(`/inbounds/${inb.id}/share`))
     } catch (e) {
       toast(e.message, 'error')
     }
@@ -422,22 +415,9 @@ export default function Inbounds() {
             }}><Icon name="copy" size={13} /></button>
           </div>
         ))}
-        <p className="text-[12px] text-ink-mut mt-3">这些是服务端参数，不能直接导入客户端。分享链接请点线路上的「复制」；用户订阅在用户页。</p>
+        <p className="text-[12px] text-ink-mut mt-3">这些是服务端参数，不能直接导入客户端。点线路上的「复制」拿订阅链接。</p>
       </Modal>
-      <Modal open={!!shareText} title="分享链接" onClose={() => setShareText('')} footer={
-        <>
-          <button type="button" className="btn-ghost" onClick={() => setShareText('')}>关闭</button>
-          <button type="button" className="btn-primary" onClick={async () => {
-            try { await copyText(shareText); toast('已复制分享链接') }
-            catch { toast('请手动选中复制', 'error') }
-          }}>
-            <Icon name="copy" size={15} /> 复制
-          </button>
-        </>
-      }>
-        <p className="text-[12px] text-ink-mut mb-2">粘贴到 v2rayN / Nekobox / Shadowrocket 等即可导入。Mieru 请用用户页的 Clash 订阅。</p>
-        <code className="block text-[12px] break-all font-mono p-3 rounded-md" style={{ background: 'var(--color-fill)' }}>{shareText}</code>
-      </Modal>
+      <ShareModal share={share} onClose={() => setShare(null)} onToast={toast} />
     </div>
   )
 }

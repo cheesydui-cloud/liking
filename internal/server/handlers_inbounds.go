@@ -218,9 +218,10 @@ func (s *Server) handleInboundShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, map[string]any{
-		"uri":      uri,
-		"username": pickedUser.Username,
-		"profile":  in.Profile,
+		"uri":       uri,
+		"username":  pickedUser.Username,
+		"profile":   in.Profile,
+		"sub_token": pickedUser.SubToken,
 	})
 }
 

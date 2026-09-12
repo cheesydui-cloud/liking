@@ -327,9 +327,10 @@ func TestInboundShareURI(t *testing.T) {
 		URI      string `json:"uri"`
 		Username string `json:"username"`
 		Profile  string `json:"profile"`
+		SubToken string `json:"sub_token"`
 	}
 	decodeRes(t, res, &share)
-	if share.Username != "alice" || share.Profile != "vless-reality-vision" {
+	if share.Username != "alice" || share.Profile != "vless-reality-vision" || share.SubToken == "" {
 		t.Fatalf("share meta %+v", share)
 	}
 	if !strings.HasPrefix(share.URI, "vless://") || !strings.Contains(share.URI, "10.0.0.1:8443") {
