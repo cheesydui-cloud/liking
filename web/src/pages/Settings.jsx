@@ -23,8 +23,8 @@ export default function Settings() {
   }
   return (
     <div>
-      <PageHead kicker="Studio" title="设置" desc={`当前版本 ${version || '—'}`} />
-      <form onSubmit={save} className="card p-6 max-w-xl space-y-4">
+      <PageHead title="设置" desc={`当前版本 ${version || '—'}`} />
+      <form onSubmit={save} className="card p-5 max-w-xl space-y-4">
         <Field label="面板名称">
           <input className="input-field" value={f.panel_name} onChange={e => setF({ ...f, panel_name: e.target.value })} />
         </Field>
@@ -33,7 +33,7 @@ export default function Settings() {
         </Field>
         <button className="btn-primary" disabled={busy}>保存</button>
       </form>
-      <div className="mt-6 text-[13px] text-ink-mut max-w-xl leading-relaxed">
+      <div className="mt-5 text-[13px] text-ink-mut max-w-xl leading-relaxed">
         节点按入站协议自行安装内核到 PATH：Xray（默认）、sing-box（AnyTLS，≥ 1.12）、mita（Mieru）。Agent 只在有对应入站时才拉起该内核。
       </div>
     </div>

@@ -12,6 +12,7 @@ export default function Servers() {
   const [name, setName] = useState('')
   const [host, setHost] = useState('')
   const [cmd, setCmd] = useState('')
+  const [formOpen, setFormOpen] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const load = async () => {
@@ -23,12 +24,19 @@ export default function Servers() {
   }
   useEffect(() => { load() }, [])
 
+  const openCreate = () => {
+    setName('')
+    setHost('')
+    setFormOpen(true)
+  }
+
   const create = async (e) => {
     e.preventDefault()
     setBusy(true)
     try {
       const d = await api.post('/servers', { name, public_host: host })
       setName(''); setHost('')
+      setFormOpen(false)
       setCmd(d.install || '')
       toast('已创建')
       load()
@@ -66,22 +74,23 @@ export default function Servers() {
 
   return (
     <div>
-      <PageHead kicker="Fleet" title="服务器" desc="每台机器一个 Agent。安装命令从面板下载二进制，不走 GitHub。" />
-      <form onSubmit={create} className="card p-5 mb-4 grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
-        <Field label="名称">
-          <input className="input-field" value={name} onChange={e => setName(e.target.value)} required placeholder="香港-01" />
-        </Field>
-        <Field label="公开地址" hint="可稍后填写">
-          <input className="input-field" value={host} onChange={e => setHost(e.target.value)} placeholder="IP 或域名" />
-        </Field>
-        <button className="btn-primary" disabled={busy}><Icon name="plus" size={16} /> 添加</button>
-      </form>
+      <PageHead
+        title="服务器"
+        desc="每台机器一个 Agent。安装命令从面板下载二进制，不走 GitHub。"
+        actions={
+          <button type="button" className="btn-primary" onClick={openCreate}>
+            <Icon name="plus" size={15} /> 添加服务器
+          </button>
+        }
+      />
       {list.length > 0 && (
         <div className="text-[12px] text-ink-mut mb-3">{online} 在线 · {list.length - online} 离线</div>
       )}
       {list.length === 0 ? (
         <div className="card overflow-hidden">
-          <Empty title="暂无服务器" hint="先起一个名字，添加后再复制安装命令到节点上执行。" />
+          <Empty title="暂无服务器" hint="先起一个名字，添加后再复制安装命令到节点上执行。" action={
+            <button type="button" className="btn-primary" onClick={openCreate}><Icon name="plus" size={15} /> 添加服务器</button>
+          } />
         </div>
       ) : (
         <div className="grid md:grid-cols-2 gap-3">
@@ -92,10 +101,10 @@ export default function Servers() {
               <div key={s.id} className="card server-card">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="font-display text-[26px] leading-none truncate">{s.name}</div>
-                    <div className="text-[12px] font-mono text-ink-mut mt-1.5 truncate">
+                    <div className="text-[15px] font-semibold truncate">{s.name}</div>
+                    <div className="text-[12px] font-mono text-ink-mut mt-1 truncate">
                       {s.public_host || '未填公开地址'}
-                      <button type="button" className="linkish ml-2 font-sans" onClick={() => saveHost(s)}>改</button>
+                      <button type="button" className="row-act ml-2 font-sans" onClick={() => saveHost(s)}>改</button>
                     </div>
                   </div>
                   <div className="shrink-0 flex items-center gap-2">
@@ -120,15 +129,30 @@ export default function Servers() {
                   </div>
                 )}
                 <div className="flex gap-3 mt-auto pt-1">
-                  <button type="button" className="linkish" onClick={() => showInstall(s.id)}>安装命令</button>
-                  <button type="button" className="linkish" onClick={() => sync(s.id)}>同步</button>
-                  <button type="button" className="linkish" style={{ color: 'var(--color-danger)' }} onClick={() => del(s.id)}>删除</button>
+                  <button type="button" className="row-act" onClick={() => showInstall(s.id)}>安装命令</button>
+                  <button type="button" className="row-act" onClick={() => sync(s.id)}>同步</button>
+                  <button type="button" className="row-act is-danger" onClick={() => del(s.id)}>删除</button>
                 </div>
               </div>
             )
           })}
         </div>
       )}
+      <Modal open={formOpen} title="添加服务器" onClose={() => setFormOpen(false)} footer={
+        <>
+          <button type="button" className="btn-ghost" onClick={() => setFormOpen(false)}>取消</button>
+          <button type="submit" form="srv-form" className="btn-primary" disabled={busy}>{busy ? '添加中…' : '添加'}</button>
+        </>
+      }>
+        <form id="srv-form" onSubmit={create} className="space-y-3">
+          <Field label="名称">
+            <input className="input-field" value={name} onChange={e => setName(e.target.value)} required placeholder="香港-01" autoFocus />
+          </Field>
+          <Field label="公开地址" hint="客户端连接用的 IP 或域名，可稍后填写">
+            <input className="input-field" value={host} onChange={e => setHost(e.target.value)} placeholder="IP 或域名" />
+          </Field>
+        </form>
+      </Modal>
       <Modal open={!!cmd} title="一键安装 Agent" onClose={() => setCmd('')} wide footer={
         <>
           <button type="button" className="btn-ghost" onClick={() => setCmd('')}>关闭</button>
@@ -141,7 +165,7 @@ export default function Servers() {
         </>
       }>
         <p className="text-[13px] text-ink-mut mb-3">在节点上以 root 执行。明文 http 会自动带 --insecure。</p>
-        <pre className="text-[12px] font-mono bg-raised p-3 rounded-xl overflow-x-auto whitespace-pre-wrap">{cmd}</pre>
+        <pre className="text-[12px] font-mono bg-raised p-3 rounded-lg overflow-x-auto whitespace-pre-wrap">{cmd}</pre>
       </Modal>
     </div>
   )

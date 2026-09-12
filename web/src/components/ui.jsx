@@ -1,3 +1,5 @@
+import { useEffect } from 'react'
+
 export function Icon({ name, size = 18, className = '' }) {
   const s = size
   const common = {
@@ -35,6 +37,14 @@ export function Icon({ name, size = 18, className = '' }) {
   return <svg {...common}>{p[name] || p.spark}</svg>
 }
 
+export function BrandMark({ size = 28, className = '' }) {
+  return (
+    <span className={`brand-mark ${className}`} style={{ width: size, height: size, fontSize: Math.round(size * 0.46) }} aria-hidden>
+      L
+    </span>
+  )
+}
+
 export function fmtBytes(n) {
   if (!n) return '0 B'
   const u = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -69,7 +79,7 @@ export function Meter({ value = 0, max = 0, className = '' }) {
   const unlimited = !cap
   const pct = unlimited ? 0 : Math.min(100, Math.round((used / cap) * 100))
   const tone = unlimited ? 'ok' : pct >= 90 ? 'danger' : pct >= 70 ? 'gold' : 'ok'
-  const color = { ok: 'var(--color-ok)', gold: 'var(--color-gold)', danger: 'var(--color-danger)' }[tone]
+  const color = { ok: 'var(--color-ok)', gold: 'var(--color-accent)', danger: 'var(--color-danger)' }[tone]
   return (
     <div className={className}>
       <div className="flex items-baseline justify-between gap-2 text-[12px] tabular-nums">
@@ -83,26 +93,27 @@ export function Meter({ value = 0, max = 0, className = '' }) {
   )
 }
 
-export function PageHead({ kicker, title, desc, actions }) {
+export function PageHead({ title, desc, actions }) {
   return (
-    <div className="flex flex-col sm:flex-row sm:items-end gap-4 mb-7">
-      <div className="flex-1 min-w-0">
-        {kicker && <div className="kicker mb-2">{kicker}</div>}
-        <h1 className="font-display text-[32px] sm:text-[36px] leading-none tracking-tight">{title}</h1>
-        {desc && <p className="text-[13.5px] text-ink-mut mt-2 max-w-2xl">{desc}</p>}
+    <div className="mb-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-[20px] font-semibold tracking-tight leading-tight">{title}</h1>
+          {desc && <p className="text-[13px] text-ink-mut mt-1 max-w-2xl leading-relaxed">{desc}</p>}
+        </div>
+        {actions && <div className="flex flex-wrap items-center gap-2 shrink-0">{actions}</div>}
       </div>
-      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </div>
   )
 }
 
 export function Empty({ title, hint, action }) {
   return (
-    <div className="py-14 px-6 text-center">
-      <div className="mx-auto w-11 h-11 rounded-full grid place-items-center mb-3 border" style={{ borderColor: 'var(--color-line)', color: 'var(--color-gold)' }}>
-        <Icon name="spark" />
+    <div className="py-12 px-6 text-center">
+      <div className="mx-auto w-10 h-10 rounded-lg grid place-items-center mb-3 bg-raised text-ink-mut">
+        <Icon name="spark" size={16} />
       </div>
-      <div className="font-display text-[22px]">{title}</div>
+      <div className="text-[15px] font-medium">{title}</div>
       {hint && <p className="text-[13px] text-ink-mut mt-1.5 max-w-md mx-auto">{hint}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
@@ -121,28 +132,52 @@ export function Field({ label, hint, children }) {
 
 export function Badge({ tone = 'muted', children, className = '' }) {
   const map = {
-    gold: { color: 'var(--color-gold)', bg: 'var(--color-accent-soft)' },
+    gold: { color: 'var(--color-accent)', bg: 'var(--color-accent-soft)' },
     ok: { color: 'var(--color-ok)', bg: 'var(--color-ok-soft)' },
     danger: { color: 'var(--color-danger)', bg: 'var(--color-danger-soft)' },
     muted: { color: 'var(--color-ink-mut)', bg: 'var(--color-raised)' },
   }
   const t = map[tone] || map.muted
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${className}`} style={{ color: t.color, background: t.bg }}>
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-medium ${className}`} style={{ color: t.color, background: t.bg }}>
       {children}
     </span>
   )
 }
 
-export function Modal({ open, title, onClose, children, footer, wide }) {
+const modalStack = []
+
+export function Modal({ open, title, onClose, children, footer, wide, size }) {
+  useEffect(() => {
+    if (!open) return
+    const id = {}
+    modalStack.push(id)
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return
+      if (modalStack[modalStack.length - 1] !== id) return
+      e.preventDefault()
+      onClose?.()
+    }
+    document.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      const i = modalStack.lastIndexOf(id)
+      if (i >= 0) modalStack.splice(i, 1)
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prev
+    }
+  }, [open, onClose])
+
   if (!open) return null
+  const max = size === 'xl' ? 'max-w-3xl' : (size === 'lg' || wide) ? 'max-w-2xl' : 'max-w-md'
   return (
     <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-0 sm:p-6">
-      <button type="button" className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" aria-label="关闭" onClick={onClose} />
-      <div className={`relative card w-full ${wide ? 'max-w-2xl' : 'max-w-md'} p-5 sm:p-6 m-0 sm:m-auto rounded-t-2xl sm:rounded-2xl`}>
+      <button type="button" className="absolute inset-0 bg-black/50" aria-label="关闭" onClick={onClose} />
+      <div role="dialog" aria-modal="true" className={`relative card w-full ${max} p-5 m-0 sm:m-auto rounded-t-xl sm:rounded-xl max-h-[92dvh] overflow-y-auto`}>
         <div className="flex items-start justify-between gap-3 mb-4">
-          <h2 className="font-display text-[24px] leading-tight">{title}</h2>
-          <button type="button" className="btn-ghost h-9 w-9 px-0" onClick={onClose} aria-label="关闭"><Icon name="close" size={16} /></button>
+          <h2 className="text-[16px] font-semibold leading-tight">{title}</h2>
+          <button type="button" className="btn-ghost h-8 w-8 px-0" onClick={onClose} aria-label="关闭"><Icon name="close" size={15} /></button>
         </div>
         <div>{children}</div>
         {footer && <div className="mt-5 flex justify-end gap-2">{footer}</div>}
@@ -154,7 +189,16 @@ export function Modal({ open, title, onClose, children, footer, wide }) {
 export function SkeletonRows({ rows = 4 }) {
   return (
     <div className="p-4 space-y-3">
-      {Array.from({ length: rows }).map((_, i) => <div key={i} className="skeleton h-10" />)}
+      {Array.from({ length: rows }).map((_, i) => <div key={i} className="skeleton h-9" />)}
+    </div>
+  )
+}
+
+export function SearchInput({ value, onChange, placeholder = '搜索' }) {
+  return (
+    <div className="relative flex-1 min-w-[12rem]">
+      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-mut"><Icon name="search" size={14} /></span>
+      <input className="input-field pl-8" placeholder={placeholder} value={value} onChange={onChange} />
     </div>
   )
 }

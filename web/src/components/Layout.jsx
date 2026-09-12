@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
-import { Icon, Modal } from './ui'
+import { BrandMark, Icon, Modal } from './ui'
 
 const UserCtx = createContext(null)
 const ToastCtx = createContext(() => {})
@@ -80,8 +80,10 @@ export function UserProvider({ children }) {
           {children}
           <div className="fixed right-4 bottom-4 z-[90] flex flex-col gap-2" aria-live="polite">
             {toasts.map(t => (
-              <div key={t.id} className="card px-3.5 py-2.5 text-[13px] min-w-[220px] shadow-lg"
-                style={{ borderColor: t.type === 'error' ? 'color-mix(in srgb, var(--color-danger) 50%, var(--color-line))' : 'var(--color-line)' }}>
+              <div key={t.id} className="card px-3.5 py-2.5 text-[13px] min-w-[220px]"
+                style={{
+                  borderLeft: `3px solid ${t.type === 'error' ? 'var(--color-danger)' : 'var(--color-accent)'}`,
+                }}>
                 <span style={{ color: t.type === 'error' ? 'var(--color-danger)' : 'var(--color-ink)' }}>{t.msg}</span>
               </div>
             ))}
@@ -119,17 +121,12 @@ function SideLink({ to, end, icon, children }) {
   return (
     <NavLink to={to} end={end}
       className={({ isActive }) =>
-        `group flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] transition-colors duration-200 ${
-          isActive ? 'text-ink' : 'text-ink-mut hover:text-ink hover:bg-raised'
+        `flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[13px] transition-colors duration-150 ${
+          isActive ? 'sidebar-link-active font-medium' : 'text-ink-soft hover:text-ink hover:bg-raised'
         }`
       }>
-      {({ isActive }) => (
-        <>
-          <span className={`w-[3px] h-4 rounded-full ${isActive ? 'bg-gold' : 'bg-transparent'}`} />
-          <span className={isActive ? 'text-gold' : ''}><Icon name={icon} size={17} /></span>
-          <span className={isActive ? 'font-semibold' : ''}>{children}</span>
-        </>
-      )}
+      <Icon name={icon} size={16} />
+      <span>{children}</span>
     </NavLink>
   )
 }
@@ -153,58 +150,86 @@ export function Layout({ children }) {
     localStorage.setItem('lk-theme', next ? 'dark' : 'light')
   }
 
-  const nav = isAdmin ? [
-    { to: '/', end: true, icon: 'layout', label: '总览' },
-    { to: '/servers', icon: 'servers', label: '服务器' },
-    { to: '/inbounds', icon: 'plugs', label: '入站' },
-    { to: '/users', icon: 'users', label: '用户' },
-    { to: '/packages', icon: 'package', label: '套餐' },
-    { to: '/certs', icon: 'cert', label: '证书' },
-    { to: '/settings', icon: 'gear', label: '设置' },
+  const groups = isAdmin ? [
+    { items: [{ to: '/', end: true, icon: 'layout', label: '总览' }] },
+    {
+      label: '节点',
+      items: [
+        { to: '/servers', icon: 'servers', label: '服务器' },
+        { to: '/inbounds', icon: 'plugs', label: '入站' },
+        { to: '/certs', icon: 'cert', label: '证书' },
+      ],
+    },
+    {
+      label: '业务',
+      items: [
+        { to: '/users', icon: 'users', label: '用户' },
+        { to: '/packages', icon: 'package', label: '套餐' },
+      ],
+    },
+    {
+      label: '系统',
+      items: [
+        { to: '/settings', icon: 'gear', label: '设置' },
+        { to: '/password', icon: 'key', label: '密码' },
+      ],
+    },
   ] : [
-    { to: '/my', icon: 'spark', label: '我的订阅' },
+    { items: [{ to: '/my', icon: 'spark', label: '我的订阅' }] },
+    { label: '账号', items: [{ to: '/my/password', icon: 'key', label: '修改密码' }] },
   ]
 
   return (
     <div className="flex h-screen">
-      {open && <div className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setOpen(false)} />}
-      <aside className={`fixed lg:static z-40 h-full w-[248px] flex flex-col border-r bg-surface/90 backdrop-blur-xl ${open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} transition-transform duration-200`}
+      {open && <div className="fixed inset-0 bg-black/45 z-30 lg:hidden" onClick={() => setOpen(false)} />}
+      <aside className={`fixed lg:static z-40 h-full w-[216px] flex flex-col border-r bg-surface ${open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} transition-transform duration-200`}
         style={{ borderColor: 'var(--color-line)' }}>
-        <div className="px-6 pt-7 pb-5 flex items-start gap-3">
-          <div className="mt-0.5 w-9 h-9 rounded-lg grid place-items-center font-display text-[18px] leading-none shrink-0"
-            style={{ color: 'var(--color-gold)', border: '1px solid color-mix(in srgb, var(--color-gold) 55%, transparent)', background: 'var(--color-accent-soft)' }}>L</div>
+        <div className="px-4 pt-4 pb-3 flex items-center gap-2.5">
+          <BrandMark size={28} />
           <div className="min-w-0">
-            <div className="font-display text-[28px] leading-none tracking-tight truncate">{panelName || 'liking'}</div>
-            <div className="kicker mt-2">{isAdmin ? 'Control' : 'Member'}{version ? ` · v${version}` : ''}</div>
+            <div className="text-[15px] font-semibold truncate leading-tight">{panelName || 'liking'}</div>
+            <div className="text-[11px] text-ink-mut mt-0.5">{isAdmin ? '管理' : '用户'}{version ? ` · v${version}` : ''}</div>
           </div>
         </div>
-        <div className="gold-rule mx-6 mb-3" />
-        <nav className="flex-1 px-3 space-y-0.5" onClick={() => setOpen(false)}>
-          {nav.map(n => <SideLink key={n.to} to={n.to} end={n.end} icon={n.icon}>{n.label}</SideLink>)}
+        <nav className="flex-1 px-2.5 overflow-y-auto" onClick={() => setOpen(false)}>
+          {groups.map((g, i) => (
+            <div key={i} className={i ? 'mt-3.5' : ''}>
+              {g.label && <div className="px-2.5 mb-1 text-[11px] font-medium text-ink-mut">{g.label}</div>}
+              <div className="space-y-0.5">
+                {g.items.map(n => (
+                  <SideLink key={n.to} to={n.to} end={n.end} icon={n.icon}>{n.label}</SideLink>
+                ))}
+              </div>
+            </div>
+          ))}
         </nav>
-        <div className="p-4 border-t" style={{ borderColor: 'var(--color-line)' }}>
-          <div className="text-[13px] font-semibold truncate">{user?.username}</div>
-          <div className="text-[11px] text-ink-mut mt-0.5">{isAdmin ? '管理员' : '用户'}</div>
-          <div className="flex gap-2 mt-3">
-            <NavLink to={isAdmin ? '/password' : '/my/password'} className="btn-ghost flex-1 h-9">密码</NavLink>
-            <button type="button" onClick={logout} className="btn-ghost flex-1 h-9" aria-label="退出">
-              <Icon name="logout" size={15} /> 退出
-            </button>
+        <div className="p-3 border-t" style={{ borderColor: 'var(--color-line)' }}>
+          <div className="flex items-center gap-2 px-1">
+            <span className="w-7 h-7 rounded-md grid place-items-center text-[11px] font-semibold bg-raised text-ink-soft">
+              {(user?.username || '?').slice(0, 1).toUpperCase()}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-medium truncate">{user?.username}</div>
+              <div className="text-[11px] text-ink-mut">{isAdmin ? '管理员' : '用户'}</div>
+            </div>
           </div>
+          <button type="button" onClick={logout} className="btn-ghost w-full h-8 mt-2.5 text-[12px]" aria-label="退出">
+            <Icon name="logout" size={14} /> 退出
+          </button>
         </div>
       </aside>
-      <main className="flex-1 min-w-0 flex flex-col">
-        <div className="h-14 px-4 sm:px-8 flex items-center gap-3">
-          <button type="button" className="lg:hidden btn-ghost h-10 w-10 px-0" onClick={() => setOpen(true)} aria-label="打开菜单">
-            <Icon name="menu" />
+      <main className="flex-1 min-w-0 flex flex-col bg-app">
+        <div className="h-12 px-3 sm:px-5 flex items-center gap-2 border-b shrink-0" style={{ borderColor: 'var(--color-line)', background: 'var(--color-surface)' }}>
+          <button type="button" className="lg:hidden btn-ghost h-9 w-9 px-0" onClick={() => setOpen(true)} aria-label="打开菜单">
+            <Icon name="menu" size={16} />
           </button>
           <div className="flex-1" />
-          <button type="button" className="btn-ghost h-10 w-10 px-0" onClick={toggleTheme} aria-label={dark ? '切换浅色' : '切换深色'}>
-            <Icon name={dark ? 'sun' : 'moon'} size={16} />
+          <button type="button" className="btn-ghost h-9 w-9 px-0" onClick={toggleTheme} aria-label={dark ? '切换浅色' : '切换深色'}>
+            <Icon name={dark ? 'sun' : 'moon'} size={15} />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-4 sm:px-8 pb-10">
-          <div className="max-w-[1180px] mx-auto">{children}</div>
+        <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 sm:py-5">
+          <div className="max-w-[1280px] mx-auto">{children}</div>
         </div>
       </main>
     </div>

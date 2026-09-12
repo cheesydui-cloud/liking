@@ -10,15 +10,15 @@ import Certs from './pages/Certs'
 import Settings from './pages/Settings'
 import My from './pages/My'
 import Password from './pages/Password'
+import { BrandMark } from './components/ui'
 
 function Loading() {
   return (
     <div className="min-h-dvh grid place-items-center">
       <div className="text-center">
-        <div className="mx-auto w-11 h-11 rounded-xl grid place-items-center font-display text-[20px] mb-4"
-          style={{ color: 'var(--color-gold)', border: '1px solid color-mix(in srgb, var(--color-gold) 45%, transparent)' }}>L</div>
-        <div className="font-display text-[32px] leading-none">liking</div>
-        <div className="kicker mt-3">Loading</div>
+        <BrandMark size={36} className="mx-auto mb-3" />
+        <div className="text-[15px] font-semibold">liking</div>
+        <div className="text-[12px] text-ink-mut mt-1">加载中</div>
       </div>
     </div>
   )
@@ -67,8 +67,8 @@ export default function App() {
           <Route path="*" element={
             <div className="min-h-dvh grid place-items-center">
               <div className="text-center">
-                <div className="kicker">Lost</div>
-                <div className="font-display text-[48px]">404</div>
+                <div className="text-[12px] text-ink-mut">页面不存在</div>
+                <div className="text-[28px] font-semibold mt-1">404</div>
                 <a href="/" className="linkish mt-3 inline-block">返回</a>
               </div>
             </div>

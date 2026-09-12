@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Meter, Modal, PageHead, fmtDateShort } from '../components/ui'
+import { Badge, Empty, Field, Icon, Meter, Modal, PageHead, SearchInput, fmtDateShort } from '../components/ui'
 import { SubPanel } from '../components/SubPanel'
 
 function randPassword() {
@@ -25,6 +25,7 @@ export default function Users() {
   const [pkgs, setPkgs] = useState([])
   const [f, setF] = useState({ username: '', password: '', remark: '', package_id: '', days: 30 })
   const [busy, setBusy] = useState(false)
+  const [formOpen, setFormOpen] = useState(false)
   const [subUser, setSubUser] = useState(null)
   const [q, setQ] = useState('')
   const [pkgFilter, setPkgFilter] = useState('')
@@ -38,6 +39,11 @@ export default function Users() {
   }
   useEffect(() => { load() }, [])
 
+  const openCreate = () => {
+    setF({ username: '', password: '', remark: '', package_id: f.package_id, days: 30 })
+    setFormOpen(true)
+  }
+
   const create = async (e) => {
     e.preventDefault()
     setBusy(true)
@@ -47,6 +53,7 @@ export default function Users() {
       if (f.package_id) body.package_id = Number(f.package_id)
       const d = await api.post('/users', body)
       const pw = d.password || f.password
+      setFormOpen(false)
       setF({ username: '', password: '', remark: '', package_id: f.package_id, days: 30 })
       if (pw) {
         try { await copyText(pw); toast(`已创建，密码已复制`) } catch { toast(`已创建，密码 ${pw}`) }
@@ -105,8 +112,6 @@ export default function Users() {
     } catch (e) { toast(e.message, 'error') }
   }
 
-  const openSub = (u) => setSubUser(u)
-
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase()
     return list.filter(u => {
@@ -122,36 +127,18 @@ export default function Users() {
 
   return (
     <div>
-      <PageHead kicker="People" title="用户" desc="一人一套餐。创建后密码和订阅都能直接复制；到期或超量会从内核配置里摘掉客户端。" />
-      <form onSubmit={create} className="card p-5 mb-4 grid grid-cols-1 md:grid-cols-6 gap-3">
-        <Field label="用户名"><input className="input-field" placeholder="alice" value={f.username} onChange={e => setF({ ...f, username: e.target.value })} required /></Field>
-        <Field label="密码" hint="可留空随机">
-          <div className="flex gap-2">
-            <input className="input-field" placeholder="随机" value={f.password} onChange={e => setF({ ...f, password: e.target.value })} />
-            <button type="button" className="btn-ghost shrink-0" onClick={() => setF({ ...f, password: randPassword() })}>随机</button>
-          </div>
-        </Field>
-        <Field label="备注"><input className="input-field" placeholder="可选" value={f.remark} onChange={e => setF({ ...f, remark: e.target.value })} /></Field>
-        <Field label="套餐">
-          <select className="input-field" value={f.package_id} onChange={e => setF({ ...f, package_id: e.target.value })}>
-            <option value="">不绑定</option>
-            {pkgs.map(p => {
-              const n = (p.server_ids || []).length
-              const tag = n ? `${n} 节点` : ((p.inbound_ids || []).length ? '指定线路' : '全部节点')
-              return <option key={p.id} value={p.id}>{p.name} · {tag}</option>
-            })}
-          </select>
-        </Field>
-        <Field label="天数"><input className="input-field" type="number" value={f.days} onChange={e => setF({ ...f, days: e.target.value })} /></Field>
-        <div className="flex items-end"><button className="btn-primary w-full" disabled={busy}><Icon name="plus" size={16} /> 创建</button></div>
-      </form>
-
+      <PageHead
+        title="用户"
+        desc="一人一套餐。创建后密码和订阅都能直接复制；到期或超量会从内核配置里摘掉客户端。"
+        actions={
+          <button type="button" className="btn-primary" onClick={openCreate}>
+            <Icon name="plus" size={15} /> 新建用户
+          </button>
+        }
+      />
       <div className="flex flex-col sm:flex-row gap-2 mb-3">
-        <div className="relative flex-1">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-mut"><Icon name="search" size={15} /></span>
-          <input className="input-field pl-9" placeholder="搜索用户名 / 备注 / 套餐" value={q} onChange={e => setQ(e.target.value)} />
-        </div>
-        <select className="input-field sm:w-52" value={pkgFilter} onChange={e => setPkgFilter(e.target.value)}>
+        <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索用户名 / 备注 / 套餐" />
+        <select className="input-field sm:w-48" value={pkgFilter} onChange={e => setPkgFilter(e.target.value)}>
           <option value="">全部套餐</option>
           <option value="none">未绑定</option>
           {pkgs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -160,7 +147,9 @@ export default function Users() {
 
       <div className="card overflow-hidden">
         {members.length === 0 ? (
-          <Empty title="暂无用户" hint="先建套餐并勾选节点，再开账号。" />
+          <Empty title="暂无用户" hint="先建套餐并勾选节点，再开账号。" action={
+            <button type="button" className="btn-primary" onClick={openCreate}><Icon name="plus" size={15} /> 新建用户</button>
+          } />
         ) : rows.length === 0 ? (
           <Empty title="没有匹配的用户" hint="换个关键词或套餐筛选。" />
         ) : (
@@ -176,7 +165,7 @@ export default function Users() {
                     </td>
                     <td>
                       {u.role === 'admin' ? '—' : (
-                        <select className="input-field h-9 text-[12px] min-w-[9rem]" value={u.package_id || ''} onChange={e => bindPkg(u, e.target.value)}>
+                        <select className="input-field h-8 text-[12px] min-w-[9rem]" value={u.package_id || ''} onChange={e => bindPkg(u, e.target.value)}>
                           <option value="">未绑定</option>
                           {pkgs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
@@ -191,9 +180,9 @@ export default function Users() {
                       <div>{u.expires_at ? fmtDateShort(u.expires_at) : '—'}</div>
                       {u.role !== 'admin' && (
                         <div className="flex gap-2 mt-1">
-                          <button type="button" className="linkish text-[11px]" onClick={() => extend(u, 30)}>+30</button>
-                          <button type="button" className="linkish text-[11px]" onClick={() => extend(u, 60)}>+60</button>
-                          <button type="button" className="linkish text-[11px]" onClick={() => extend(u, 90)}>+90</button>
+                          <button type="button" className="row-act" onClick={() => extend(u, 30)}>+30</button>
+                          <button type="button" className="row-act" onClick={() => extend(u, 60)}>+60</button>
+                          <button type="button" className="row-act" onClick={() => extend(u, 90)}>+90</button>
                         </div>
                       )}
                     </td>
@@ -203,12 +192,12 @@ export default function Users() {
                     </td>
                     <td className="whitespace-nowrap">
                       {u.role !== 'admin' && (
-                        <div className="flex gap-3 justify-end text-[12px]">
-                          <button type="button" className="linkish" onClick={() => openSub(u)}>订阅</button>
-                          <button type="button" className="linkish" onClick={() => act(() => api.post(`/users/${u.id}/reset-traffic`))}>清流量</button>
-                          <button type="button" className="linkish" onClick={() => resetPw(u)}>改密</button>
-                          <button type="button" className="linkish" onClick={() => act(() => api.put(`/users/${u.id}`, { remark: u.remark, enabled: !u.enabled }))}>{u.enabled ? '停用' : '启用'}</button>
-                          <button type="button" className="linkish" style={{ color: 'var(--color-danger)' }} onClick={() => remove(u)}>删除</button>
+                        <div className="flex gap-2.5 justify-end">
+                          <button type="button" className="row-act" onClick={() => setSubUser(u)}>订阅</button>
+                          <button type="button" className="row-act" onClick={() => act(() => api.post(`/users/${u.id}/reset-traffic`))}>清流量</button>
+                          <button type="button" className="row-act" onClick={() => resetPw(u)}>改密</button>
+                          <button type="button" className="row-act" onClick={() => act(() => api.put(`/users/${u.id}`, { remark: u.remark, enabled: !u.enabled }))}>{u.enabled ? '停用' : '启用'}</button>
+                          <button type="button" className="row-act is-danger" onClick={() => remove(u)}>删除</button>
                         </div>
                       )}
                     </td>
@@ -219,6 +208,34 @@ export default function Users() {
           </div>
         )}
       </div>
+      <Modal open={formOpen} title="新建用户" onClose={() => setFormOpen(false)} size="lg" footer={
+        <>
+          <button type="button" className="btn-ghost" onClick={() => setFormOpen(false)}>取消</button>
+          <button type="submit" form="user-create" className="btn-primary" disabled={busy}>{busy ? '创建中…' : '创建'}</button>
+        </>
+      }>
+        <form id="user-create" onSubmit={create} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="用户名"><input className="input-field" placeholder="alice" value={f.username} onChange={e => setF({ ...f, username: e.target.value })} required autoFocus /></Field>
+          <Field label="密码" hint="可留空随机">
+            <div className="flex gap-2">
+              <input className="input-field" placeholder="随机" value={f.password} onChange={e => setF({ ...f, password: e.target.value })} />
+              <button type="button" className="btn-ghost shrink-0" onClick={() => setF({ ...f, password: randPassword() })}>随机</button>
+            </div>
+          </Field>
+          <Field label="备注"><input className="input-field" placeholder="可选" value={f.remark} onChange={e => setF({ ...f, remark: e.target.value })} /></Field>
+          <Field label="套餐">
+            <select className="input-field" value={f.package_id} onChange={e => setF({ ...f, package_id: e.target.value })}>
+              <option value="">不绑定</option>
+              {pkgs.map(p => {
+                const n = (p.server_ids || []).length
+                const tag = n ? `${n} 节点` : ((p.inbound_ids || []).length ? '指定线路' : '全部节点')
+                return <option key={p.id} value={p.id}>{p.name} · {tag}</option>
+              })}
+            </select>
+          </Field>
+          <Field label="天数"><input className="input-field" type="number" value={f.days} onChange={e => setF({ ...f, days: e.target.value })} /></Field>
+        </form>
+      </Modal>
       <Modal open={!!subUser} title={subUser ? `${subUser.username} 的订阅` : '订阅'} onClose={() => setSubUser(null)} wide footer={
         <>
           <button type="button" className="btn-ghost" onClick={() => subUser && rotate(subUser)}>重置令牌</button>

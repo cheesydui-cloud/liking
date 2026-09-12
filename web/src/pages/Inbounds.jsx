@@ -103,6 +103,7 @@ export default function Inbounds() {
   const [profiles, setProfiles] = useState([])
   const [f, setF] = useState(empty)
   const [editId, setEditId] = useState(0)
+  const [formOpen, setFormOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [serverFilter, setServerFilter] = useState('')
   const [paramInb, setParamInb] = useState(null)
@@ -121,10 +122,10 @@ export default function Inbounds() {
   useEffect(() => { load() }, [])
 
   useEffect(() => {
-    if (editId || Number(f.server_id) || servers.length !== 1) return
+    if (!formOpen || editId || Number(f.server_id) || servers.length !== 1) return
     const sid = servers[0].id
     setF(prev => ({ ...prev, server_id: sid, port: nextPort(sid, list) }))
-  }, [servers, list, editId, f.server_id])
+  }, [servers, list, editId, f.server_id, formOpen])
 
   const meta = profiles.find(p => p.id === f.profile)
   const selectedServer = servers.find(s => Number(s.id) === Number(f.server_id))
@@ -142,10 +143,20 @@ export default function Inbounds() {
     setF({ ...empty, server_id: sid, port: sid ? nextPort(sid, list) : 8443 })
   }
 
+  const openCreate = () => {
+    resetForm()
+    setFormOpen(true)
+  }
+
   const startEdit = (inb) => {
     setEditId(inb.id)
     setF(formFromInbound(inb))
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    setFormOpen(true)
+  }
+
+  const closeForm = () => {
+    setFormOpen(false)
+    resetForm()
   }
 
   const bodyFromForm = () => {
@@ -191,7 +202,7 @@ export default function Inbounds() {
       const d = editId ? await api.put(`/inbounds/${editId}`, body) : await api.post('/inbounds', body)
       if (d.apply_error) toast(d.apply_error, 'error')
       else toast(editId ? '已保存' : '已创建')
-      resetForm()
+      closeForm()
       load()
     } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
@@ -199,7 +210,7 @@ export default function Inbounds() {
 
   const del = async (id) => {
     if (!(await dialog.confirm({ title: '删除入站', message: '订阅里对应的节点会立刻消失。', danger: true }))) return
-    try { await api.del(`/inbounds/${id}`); if (editId === id) resetForm(); load() }
+    try { await api.del(`/inbounds/${id}`); if (editId === id) closeForm(); load() }
     catch (e) { toast(e.message, 'error') }
   }
 
@@ -229,10 +240,73 @@ export default function Inbounds() {
 
   return (
     <div>
-      <PageHead kicker="Lines" title="入站" desc="一条入站就是一条线路。端口可自定义；被占用的端口会自动停用，不会拖垮其它线路。" />
-      <form onSubmit={submit} className="card p-5 mb-4">
-        <div className="kicker mb-4">{editId ? '编辑线路' : '新建线路'}</div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <PageHead
+        title="入站"
+        desc="一条入站就是一条线路。端口可自定义；被占用的端口会自动停用，不会拖垮其它线路。"
+        actions={
+          <button type="button" className="btn-primary" onClick={openCreate}>
+            <Icon name="plus" size={15} /> 新建入站
+          </button>
+        }
+      />
+      {list.length > 0 && (
+        <div className="flex flex-col sm:flex-row gap-2 mb-3">
+          <select className="input-field sm:w-64" value={serverFilter} onChange={e => setServerFilter(e.target.value)}>
+            <option value="">全部服务器 · {list.length} 条</option>
+            {servers.map(s => {
+              const n = list.filter(x => x.server_id === s.id).length
+              return <option key={s.id} value={s.id}>{s.name} · {n} 条</option>
+            })}
+          </select>
+        </div>
+      )}
+      <div className="card overflow-hidden">
+        {list.length === 0 ? (
+          <Empty title="暂无入站" hint="选一台在线服务器，填自定义端口，挑一种协议。" action={
+            <button type="button" className="btn-primary" onClick={openCreate}><Icon name="plus" size={15} /> 新建入站</button>
+          } />
+        ) : shown.length === 0 ? (
+          <Empty title="这台服务器还没有入站" hint="换一台，或新建入站。" />
+        ) : (
+          <div className="table-wrap">
+            <table className="data">
+              <thead><tr><th>名称</th><th>服务器</th><th>协议</th><th>端口</th><th>线路</th><th>内核</th><th></th></tr></thead>
+              <tbody>
+                {shown.map(inb => {
+                  const srv = servers.find(s => s.id === inb.server_id)
+                  const dead = srv && !serverHasCore(srv, inb.core)
+                  return (
+                    <tr key={inb.id} className={!inb.enabled ? 'opacity-50' : ''}>
+                      <td className="font-medium">{inb.name}</td>
+                      <td>{inb.server_name}</td>
+                      <td><Badge tone="gold">{inb.profile}</Badge></td>
+                      <td className="tabular-nums">{inb.port}</td>
+                      <td>{inb.line_kind === 'chain' ? '链式' : '直出'}</td>
+                      <td className="text-ink-mut">{inb.core}{dead ? ' · 未安装' : ''}{!inb.enabled ? ' · 停用' : ''}</td>
+                      <td className="whitespace-nowrap">
+                        <div className="flex gap-2.5 justify-end">
+                          <button type="button" className="row-act" onClick={() => setParamInb(inb)}>参数</button>
+                          <button type="button" className="row-act" onClick={() => copyParams(inb)}>复制</button>
+                          <button type="button" className="row-act" onClick={() => startEdit(inb)}>编辑</button>
+                          <button type="button" className="row-act" onClick={() => toggle(inb)}>{inb.enabled ? '停用' : '启用'}</button>
+                          <button type="button" className="row-act is-danger" onClick={() => del(inb.id)}>删除</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      <Modal open={formOpen} title={editId ? '编辑入站' : '新建入站'} onClose={closeForm} size="lg" footer={
+        <>
+          <button type="button" className="btn-ghost" onClick={closeForm}>取消</button>
+          <button type="submit" form="inb-form" className="btn-primary" disabled={busy}>{busy ? '保存中…' : (editId ? '保存' : '创建')}</button>
+        </>
+      }>
+        <form id="inb-form" onSubmit={submit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="服务器">
             <select className="input-field" value={f.server_id} onChange={e => pickServer(e.target.value)} required disabled={!!editId}>
               <option value="">选择</option>
@@ -245,7 +319,7 @@ export default function Inbounds() {
             </select>
           </Field>
           <Field label="名称">
-            <input className="input-field" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} required placeholder="HK-8443" />
+            <input className="input-field" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} required placeholder="HK-8443" autoFocus />
           </Field>
           <Field label="端口" hint={f.server_id ? usedPortsText(f.server_id, list, editId) : '1–65535，不要用已被占用的口'}>
             <input className="input-field" type="number" min="1" max="65535" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} required />
@@ -307,71 +381,14 @@ export default function Inbounds() {
               </select>
             </Field>
           )}
-        </div>
-        {Number(f.port) === 443 && (
-          <div className="notice mt-4">443 很容易被 Nginx / 其它面板占用。建议改成 8443 或其它空闲端口。</div>
-        )}
-        {missingCore && (
-          <div className="notice mt-4">这台节点没有 {meta.core}，该协议下发后不会生效。请换 VLESS / SS2022，或先安装内核。</div>
-        )}
-        <div className="mt-4 flex gap-2">
-          <button className="btn-primary" disabled={busy}>
-            <Icon name={editId ? 'check' : 'plus'} size={16} /> {editId ? '保存入站' : '创建入站'}
-          </button>
-          {editId ? (
-            <button type="button" className="btn-ghost" onClick={resetForm}>取消编辑</button>
-          ) : null}
-        </div>
-      </form>
-      {list.length > 0 && (
-        <div className="flex flex-col sm:flex-row gap-2 mb-3">
-          <select className="input-field sm:w-64" value={serverFilter} onChange={e => setServerFilter(e.target.value)}>
-            <option value="">全部服务器 · {list.length} 条</option>
-            {servers.map(s => {
-              const n = list.filter(x => x.server_id === s.id).length
-              return <option key={s.id} value={s.id}>{s.name} · {n} 条</option>
-            })}
-          </select>
-        </div>
-      )}
-      <div className="card overflow-hidden">
-        {list.length === 0 ? (
-          <Empty title="暂无入站" hint="选一台在线服务器，填自定义端口，挑一种协议。" />
-        ) : shown.length === 0 ? (
-          <Empty title="这台服务器还没有入站" hint="换一台，或在上方表单创建。" />
-        ) : (
-          <div className="table-wrap">
-            <table className="data">
-              <thead><tr><th>名称</th><th>服务器</th><th>协议</th><th>端口</th><th>线路</th><th>内核</th><th></th></tr></thead>
-              <tbody>
-                {shown.map(inb => {
-                  const srv = servers.find(s => s.id === inb.server_id)
-                  const dead = srv && !serverHasCore(srv, inb.core)
-                  return (
-                    <tr key={inb.id} className={!inb.enabled ? 'opacity-50' : ''}>
-                      <td className="font-medium">{inb.name}</td>
-                      <td>{inb.server_name}</td>
-                      <td><Badge tone="gold">{inb.profile}</Badge></td>
-                      <td className="tabular-nums">{inb.port}</td>
-                      <td>{inb.line_kind === 'chain' ? '链式' : '直出'}</td>
-                      <td className="text-ink-mut">{inb.core}{dead ? ' · 未安装' : ''}{!inb.enabled ? ' · 停用' : ''}</td>
-                      <td className="whitespace-nowrap">
-                        <div className="flex gap-3 justify-end">
-                          <button type="button" className="linkish" onClick={() => setParamInb(inb)}>参数</button>
-                          <button type="button" className="linkish" onClick={() => copyParams(inb)}>复制</button>
-                          <button type="button" className="linkish" onClick={() => startEdit(inb)}>编辑</button>
-                          <button type="button" className="linkish" onClick={() => toggle(inb)}>{inb.enabled ? '停用' : '启用'}</button>
-                          <button type="button" className="linkish" style={{ color: 'var(--color-danger)' }} onClick={() => del(inb.id)}>删除</button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+          {Number(f.port) === 443 && (
+            <div className="notice sm:col-span-2">443 很容易被 Nginx / 其它面板占用。建议改成 8443 或其它空闲端口。</div>
+          )}
+          {missingCore && (
+            <div className="notice sm:col-span-2">这台节点没有 {meta.core}，该协议下发后不会生效。请换 VLESS / SS2022，或先安装内核。</div>
+          )}
+        </form>
+      </Modal>
       <Modal open={!!paramInb} title={paramInb ? `${paramInb.name} 参数` : '参数'} onClose={() => setParamInb(null)} wide footer={
         <>
           <button type="button" className="btn-ghost" onClick={() => setParamInb(null)}>关闭</button>

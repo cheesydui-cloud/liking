@@ -7,7 +7,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@fontsource/cormorant-garamond": "^5.2.8",
     "@fontsource/fira-code": "^5.2.7",
     "@fontsource/fira-sans": "^5.2.8",
     "qrcode": "^1.5.4",
