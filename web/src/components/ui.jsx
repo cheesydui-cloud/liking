@@ -33,6 +33,8 @@ export function Icon({ name, size = 18, className = '' }) {
     search: <><circle cx="11" cy="11" r="6.2" /><path d="M16 16.5 20.5 21" /></>,
     calendar: <><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M8 3.5V7M16 3.5V7M4 10h16" /></>,
     link: <><path d="M9 12a4 4 0 0 0 6 0l2-2a4 4 0 0 0-6-6l-1 1" /><path d="M15 12a4 4 0 0 0-6 0l-2 2a4 4 0 1 0 6 6l1-1" /></>,
+    download: <><path d="M12 4v11" /><path d="M7 11l5 5 5-5" /><path d="M5 20h14" /></>,
+    upload: <><path d="M12 20V9" /><path d="M7 13l5-5 5 5" /><path d="M5 4h14" /></>,
   }
   return <svg {...common}>{p[name] || p.spark}</svg>
 }

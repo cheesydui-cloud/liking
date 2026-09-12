@@ -36,9 +36,67 @@ async function request(method, path, body) {
   return data
 }
 
+async function parseError(res) {
+  const ct = res.headers.get('content-type') || ''
+  if (ct.includes('application/json')) {
+    try {
+      const data = await res.json()
+      return (data && data.error) || httpErrorMessage(res.status)
+    } catch {
+      return httpErrorMessage(res.status)
+    }
+  }
+  return httpErrorMessage(res.status)
+}
+
 export const api = {
   get: (path) => request('GET', path),
   post: (path, body) => request('POST', path, body),
   put: (path, body) => request('PUT', path, body),
   del: (path) => request('DELETE', path),
+  postForm: async (path, formData) => {
+    let res
+    try {
+      res = await fetch(BASE + path, { method: 'POST', body: formData, credentials: 'same-origin' })
+    } catch {
+      throw new Error('网络错误')
+    }
+    if (res.status === 401) {
+      window.dispatchEvent(new CustomEvent('lk-unauthorized'))
+      throw new Error('登录已过期')
+    }
+    const ct = res.headers.get('content-type') || ''
+    let data = null
+    if (ct.includes('application/json')) {
+      try { data = await res.json() } catch { data = null }
+    }
+    if (!res.ok) throw new Error((data && data.error) || httpErrorMessage(res.status))
+    return data
+  },
+  download: async (path, fallbackName) => {
+    let res
+    try {
+      res = await fetch(BASE + path, { credentials: 'same-origin' })
+    } catch {
+      throw new Error('网络错误')
+    }
+    if (res.status === 401) {
+      window.dispatchEvent(new CustomEvent('lk-unauthorized'))
+      throw new Error('登录已过期')
+    }
+    if (!res.ok) throw new Error(await parseError(res))
+    const blob = await res.blob()
+    let name = fallbackName || 'download'
+    const cd = res.headers.get('Content-Disposition') || ''
+    const m = cd.match(/filename="([^"]+)"/)
+    if (m) name = m[1]
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  },
 }

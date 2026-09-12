@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useToast, useDialog, useUser } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Modal, PageHead, Tabs, fmtDateShort } from '../components/ui'
+import { Badge, Empty, Field, Icon, Modal, PageHead, Tabs, fmtBytes, fmtDate, fmtDateShort } from '../components/ui'
 
 const emptyIssue = { channel: 'acme-cf', name: '', domains: '', cert_pem: '', key_pem: '' }
 
@@ -82,9 +82,199 @@ function AccountForm() {
   )
 }
 
+function backupLine(s) {
+  if (!s) return '正在统计…'
+  return `${s.servers} 台服务器 · ${s.inbounds} 个节点 · ${s.users} 个用户 · ${s.packages} 个套餐 · ${s.certs} 张证书`
+}
+
+function BackupStat({ n, label }) {
+  return (
+    <div className="rounded-lg px-3 py-2.5" style={{ background: 'var(--color-fill)' }}>
+      <div className="text-[16px] font-semibold tabular-nums leading-none">{n ?? '—'}</div>
+      <div className="text-[11.5px] text-ink-mut mt-1.5">{label}</div>
+    </div>
+  )
+}
+
+function BackupPanel() {
+  const toast = useToast()
+  const [live, setLive] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [file, setFile] = useState(null)
+  const [preview, setPreview] = useState(null)
+  const [previewErr, setPreviewErr] = useState('')
+  const [reading, setReading] = useState(false)
+  const [password, setPassword] = useState('')
+  const [ack, setAck] = useState(false)
+  const [restoring, setRestoring] = useState(false)
+  const [over, setOver] = useState(false)
+
+  const loadLive = () => api.get('/backup/summary').then(setLive).catch(e => toast(e.message, 'error'))
+  useEffect(() => { loadLive() }, [])
+
+  const download = async () => {
+    setBusy(true)
+    try {
+      await api.download('/backup', 'liking-backup.lkbak')
+      toast('已开始下载')
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  const pick = async (f) => {
+    setOver(false)
+    setFile(f || null)
+    setPreview(null)
+    setPreviewErr('')
+    setAck(false)
+    setPassword('')
+    if (!f) return
+    setReading(true)
+    const fd = new FormData()
+    fd.append('file', f)
+    try {
+      setPreview(await api.postForm('/backup/preview', fd))
+    } catch (e) {
+      setPreviewErr(e.message)
+    } finally {
+      setReading(false)
+    }
+  }
+
+  const restore = async () => {
+    if (!file || !preview || !password || !ack) return
+    setRestoring(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('password', password)
+      await api.postForm('/backup/restore', fd)
+      toast('已恢复，请用备份里的管理员账号重新登录')
+      window.dispatchEvent(new CustomEvent('lk-unauthorized'))
+    } catch (e) { toast(e.message, 'error') }
+    finally { setRestoring(false) }
+  }
+
+  const steps = [
+    { n: '1', t: '新机器安装', d: '装好面板，打开设置 → 备份' },
+    { n: '2', t: '上传并恢复', d: '覆盖新机数据，会话会退出' },
+    { n: '3', t: '核对面板 URL', d: '域名没变可跳过' },
+    { n: '4', t: '重装 Agent', d: '令牌没变，用原来的安装命令' },
+  ]
+
+  return (
+    <div className="max-w-3xl space-y-5">
+      <div className="card p-5 space-y-4">
+        <div>
+          <div className="text-[15px] font-medium">下载备份</div>
+          <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
+            整份快照：用户和密码哈希、套餐、节点、证书私钥、Cloudflare Token、面板设置和 Agent 令牌。只保存在你自己的电脑上，不要发到聊天软件。
+          </p>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <BackupStat n={live?.servers} label="服务器" />
+          <BackupStat n={live?.inbounds} label="节点" />
+          <BackupStat n={live?.users} label="用户" />
+          <BackupStat n={live?.certs} label="证书" />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className="btn-primary" disabled={busy} onClick={download}>
+            <Icon name="download" size={15} /> {busy ? '正在打包…' : '下载备份'}
+          </button>
+          <span className="text-[12px] text-ink-mut">文件名 liking-backup-日期.lkbak</span>
+        </div>
+      </div>
+
+      <div className="card p-5 space-y-4">
+        <div>
+          <div className="text-[15px] font-medium">恢复 / 迁到新机器</div>
+          <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
+            只换数据，不换程序。会覆盖本机全部面板数据，且无法撤销。恢复后用备份里的管理员账号登录，新装时打印的密码作废。
+          </p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {steps.map(s => (
+            <div key={s.n} className="rounded-lg px-3 py-2.5 flex gap-2.5" style={{ background: 'var(--color-fill)' }}>
+              <div className="text-[12px] font-medium tabular-nums w-4 shrink-0 pt-px">{s.n}</div>
+              <div>
+                <div className="text-[13px] font-medium">{s.t}</div>
+                <div className="text-[12px] text-ink-mut mt-0.5 leading-relaxed">{s.d}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <label
+          className={`dropzone${over ? ' is-over' : ''}`}
+          onDragOver={e => { e.preventDefault(); if (!over) setOver(true) }}
+          onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setOver(false) }}
+          onDrop={e => {
+            e.preventDefault()
+            const f = e.dataTransfer.files && e.dataTransfer.files[0]
+            if (f) pick(f)
+            else setOver(false)
+          }}
+        >
+          <input
+            type="file"
+            className="sr-only"
+            accept=".lkbak,.gz,.json,application/gzip,application/json"
+            onChange={e => pick(e.target.files && e.target.files[0])}
+          />
+          <Icon name="upload" size={18} className="mx-auto mb-2 text-ink-mut" />
+          <div className="text-[13px] font-medium">{file ? file.name : '选择备份文件'}</div>
+          <div className="text-[12px] text-ink-mut mt-1">
+            {file ? fmtBytes(file.size) : '.lkbak，可点此或拖到此处'}
+          </div>
+        </label>
+        {file && (
+          <button type="button" className="btn-ghost" onClick={() => pick(null)}>换一个文件</button>
+        )}
+
+        {reading ? (
+          <div className="text-[13px] text-ink-mut">正在读取备份…</div>
+        ) : previewErr ? (
+          <div className="notice" style={{ color: 'var(--color-danger)' }}>{previewErr}</div>
+        ) : preview ? (
+          <div className="rounded-lg px-3 py-2.5 space-y-1.5" style={{ background: 'var(--color-fill)' }}>
+            <div className="text-[12px] text-ink-mut">当前　{backupLine(live)}</div>
+            <div className="text-[13px] font-medium">备份　{backupLine(preview)}</div>
+            <div className="text-[12px] text-ink-mut">
+              {preview.created_at ? fmtDate(preview.created_at) : '时间未知'}
+              {preview.app_version ? ` · 来自 ${preview.app_version}` : ''}
+              {preview.has_cf_token ? ' · 含 Cloudflare Token' : ''}
+            </div>
+          </div>
+        ) : null}
+
+        {preview && (
+          <div className="space-y-3">
+            <Field label="当前管理员密码" hint="确认是你本人。恢复后要改用备份里的密码登录。">
+              <input className="input-field" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} />
+            </Field>
+            <label className="flex items-start gap-2.5 text-[13px] leading-relaxed cursor-pointer">
+              <input type="checkbox" className="mt-1" checked={ack} onChange={e => setAck(e.target.checked)} />
+              <span>覆盖本机现有用户、节点、证书和设置，且无法撤销。</span>
+            </label>
+            <button
+              type="button"
+              className="btn-danger"
+              disabled={restoring || !password || !ack}
+              onClick={restore}
+            >
+              {restoring ? '恢复中…' : '恢复备份'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const settingTabs = [
   { id: 'panel', label: '面板' },
   { id: 'certs', label: '证书' },
+  { id: 'backup', label: '备份' },
   { id: 'account', label: '账号' },
 ]
 
@@ -286,6 +476,8 @@ export default function Settings({ accountOnly = false }) {
       </div>
       </>
       )}
+
+      {tab === 'backup' && <BackupPanel />}
 
       {tab === 'account' && <AccountForm />}
 

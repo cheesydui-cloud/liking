@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -1370,5 +1371,175 @@ func TestServerCFDomains(t *testing.T) {
 	decodeRes(t, res, &all)
 	if len(all.Domains) == 0 {
 		t.Fatal("cf-domains empty")
+	}
+}
+
+func TestBackupRestore(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetSetting(d, "cf_api_token", "tok-live"); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	body, _ := json.Marshal(map[string]string{"name": "hk", "public_host": "hk.example.com"})
+	res, err = c.Post(ts.URL+"/api/servers", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		Server struct {
+			ID int64 `json:"id"`
+		} `json:"server"`
+	}
+	decodeRes(t, res, &created)
+
+	res, err = c.Get(ts.URL + "/api/backup/summary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var live db.BackupSummary
+	decodeRes(t, res, &live)
+	if live.Users < 1 || live.Servers != 1 || !live.HasCFToken {
+		t.Fatalf("live %+v", live)
+	}
+
+	res, err = c.Get(ts.URL + "/api/backup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(res.Body)
+	res.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 || len(raw) < 32 {
+		t.Fatalf("download %d %d", res.StatusCode, len(raw))
+	}
+
+	create, _ := json.Marshal(map[string]string{"username": "intruder", "password": "intruder"})
+	res, err = c.Post(ts.URL+"/api/users", "application/json", bytes.NewReader(create))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	postFile := func(path, password string, payload []byte) *http.Response {
+		t.Helper()
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		fw, err := mw.CreateFormFile("file", "x.lkbak")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fw.Write(payload); err != nil {
+			t.Fatal(err)
+		}
+		if password != "" {
+			if err := mw.WriteField("password", password); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := mw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		req, err := http.NewRequest(http.MethodPost, ts.URL+path, &buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		res, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+
+	res = postFile("/api/backup/preview", "", raw)
+	var prev db.BackupSummary
+	decodeRes(t, res, &prev)
+	if prev.Servers != 1 || prev.Users != 1 {
+		t.Fatalf("preview %+v", prev)
+	}
+
+	res = postFile("/api/backup/restore", "wrong", raw)
+	if res.StatusCode != 403 {
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		t.Fatalf("bad pw %d %s", res.StatusCode, b)
+	}
+	res.Body.Close()
+
+	res = postFile("/api/backup/restore", "secret12", raw)
+	var out map[string]any
+	decodeRes(t, res, &out)
+	if out["relogin"] != true {
+		t.Fatalf("restore %+v", out)
+	}
+
+	res, err = c.Get(ts.URL + "/api/servers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 401 {
+		res.Body.Close()
+		t.Fatalf("session survived %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	jar2, _ := cookiejar.New(nil)
+	c2 := &http.Client{Jar: jar2}
+	res, err = c2.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+	res, err = c2.Get(ts.URL + "/api/users")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var users struct {
+		Users []map[string]any `json:"users"`
+	}
+	decodeRes(t, res, &users)
+	for _, u := range users.Users {
+		if u["username"] == "intruder" {
+			t.Fatal("intruder survived restore")
+		}
+	}
+	res, err = c2.Get(ts.URL + "/api/servers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var servers struct {
+		Servers []map[string]any `json:"servers"`
+	}
+	decodeRes(t, res, &servers)
+	if len(servers.Servers) != 1 {
+		t.Fatalf("servers %d", len(servers.Servers))
 	}
 }

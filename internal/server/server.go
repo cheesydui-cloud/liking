@@ -26,6 +26,7 @@ type Server struct {
 	kickWant     map[int64]bool
 	kickRun      map[int64]bool
 	acmeMu       sync.Mutex
+	backupMu     sync.Mutex
 	CFAPI        string // test override for Cloudflare API base URL
 }
 
@@ -130,6 +131,10 @@ func (s *Server) Router() http.Handler {
 
 			r.Get("/api/settings", s.handleGetSettings)
 			r.Put("/api/settings", s.handlePutSettings)
+			r.Get("/api/backup", s.handleBackupDownload)
+			r.Get("/api/backup/summary", s.handleBackupSummary)
+			r.Post("/api/backup/preview", s.handleBackupPreview)
+			r.Post("/api/backup/restore", s.handleBackupRestore)
 			r.Get("/api/audit", s.handleAudit)
 		})
 	})

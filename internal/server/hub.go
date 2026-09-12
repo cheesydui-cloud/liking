@@ -173,6 +173,20 @@ func (h *Hub) unregisterConn(ac *agentConn) {
 	_ = db.MarkServerOffline(h.DB, ac.serverID)
 }
 
+func (h *Hub) DropAll() {
+	h.mu.Lock()
+	conns := make([]*agentConn, 0, len(h.conns))
+	for id, ac := range h.conns {
+		conns = append(conns, ac)
+		delete(h.conns, id)
+	}
+	h.mu.Unlock()
+	for _, ac := range conns {
+		ac.signalClose()
+		_ = ac.ws.Close(websocket.StatusGoingAway, "panel restore")
+	}
+}
+
 func (h *Hub) Drop(id int64) {
 	h.mu.Lock()
 	ac, ok := h.conns[id]

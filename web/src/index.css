@@ -117,6 +117,7 @@ textarea.input-field { height: auto; min-height: 7rem; padding-top: 0.55rem; pad
   background: var(--color-danger-soft);
   border: 1px solid color-mix(in srgb, var(--color-danger) 32%, transparent);
 }
+.btn-danger:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .card {
   @apply rounded-[10px] border;
@@ -269,6 +270,22 @@ button.chip:hover { border-color: color-mix(in srgb, var(--color-ink) 28%, var(-
   color: var(--color-ink-soft);
   background: var(--color-fill);
   border: 1px solid var(--color-line);
+}
+
+.dropzone {
+  display: block;
+  border: 1px dashed var(--color-line);
+  border-radius: 10px;
+  padding: 1.25rem 1rem;
+  text-align: center;
+  cursor: pointer;
+  background: var(--color-surface);
+  transition: border-color 150ms ease, background 150ms ease;
+}
+.dropzone:hover,
+.dropzone.is-over {
+  border-color: var(--color-ink);
+  background: var(--color-fill);
 }
 
 .meter {
