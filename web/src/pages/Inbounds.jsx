@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
+import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, Icon, PageHead } from '../components/ui'
+import { Badge, Empty, Field, Icon, Modal, PageHead } from '../components/ui'
 
 const SUGGESTED_PORTS = [8443, 8444, 2053, 2083, 2087, 2096, 8880, 9443, 10443, 11443]
 
@@ -40,8 +41,40 @@ function serverHasCore(s, core) {
   return have.includes(want)
 }
 
+function inboundSettings(inb) {
+  const st = inb?.settings
+  if (!st) return {}
+  if (typeof st === 'string') {
+    try { return JSON.parse(st) || {} } catch { return {} }
+  }
+  return st
+}
+
+function inboundParamRows(inb) {
+  const st = inboundSettings(inb)
+  const short = Array.isArray(st.short_ids) ? st.short_ids.filter(Boolean).join(',') : (st.short_id || '')
+  return [
+    ['名称', inb.name],
+    ['节点', [inb.server_name, inb.server_host].filter(Boolean).join(' ')],
+    ['协议', inb.profile],
+    ['端口', String(inb.port || '')],
+    ['dest', st.dest],
+    ['sni', st.sni],
+    ['path', st.path],
+    ['public_key', st.public_key],
+    ['short_id', short],
+    ['fingerprint', st.fingerprint],
+    ['method', st.method],
+    ['server_password', st.server_password],
+  ].filter(([, v]) => v)
+}
+
+function inboundParamLines(inb) {
+  return inboundParamRows(inb).map(([k, v]) => `${k} ${v}`).join('\n')
+}
+
 function formFromInbound(inb) {
-  const st = inb.settings || {}
+  const st = inboundSettings(inb)
   return {
     server_id: inb.server_id,
     name: inb.name || '',
@@ -71,6 +104,8 @@ export default function Inbounds() {
   const [f, setF] = useState(empty)
   const [editId, setEditId] = useState(0)
   const [busy, setBusy] = useState(false)
+  const [serverFilter, setServerFilter] = useState('')
+  const [paramInb, setParamInb] = useState(null)
 
   const load = async () => {
     try {
@@ -180,6 +215,17 @@ export default function Inbounds() {
   }
 
   const landings = list.filter(x => x.line_kind === 'direct' && ['vless-reality', 'vless-reality-vision', 'vless-xhttp-tls', 'trojan-tls', 'ss2022'].includes(x.profile))
+  const shown = serverFilter ? list.filter(x => String(x.server_id) === String(serverFilter)) : list
+
+  const copyParams = async (inb) => {
+    try {
+      await copyText(inboundParamLines(inb))
+      toast('参数已复制')
+    } catch {
+      setParamInb(inb)
+      toast('浏览器不允许自动复制，请手动选中', 'error')
+    }
+  }
 
   return (
     <div>
@@ -277,15 +323,28 @@ export default function Inbounds() {
           ) : null}
         </div>
       </form>
+      {list.length > 0 && (
+        <div className="flex flex-col sm:flex-row gap-2 mb-3">
+          <select className="input-field sm:w-64" value={serverFilter} onChange={e => setServerFilter(e.target.value)}>
+            <option value="">全部服务器 · {list.length} 条</option>
+            {servers.map(s => {
+              const n = list.filter(x => x.server_id === s.id).length
+              return <option key={s.id} value={s.id}>{s.name} · {n} 条</option>
+            })}
+          </select>
+        </div>
+      )}
       <div className="card overflow-hidden">
         {list.length === 0 ? (
           <Empty title="暂无入站" hint="选一台在线服务器，填自定义端口，挑一种协议。" />
+        ) : shown.length === 0 ? (
+          <Empty title="这台服务器还没有入站" hint="换一台，或在上方表单创建。" />
         ) : (
           <div className="table-wrap">
             <table className="data">
               <thead><tr><th>名称</th><th>服务器</th><th>协议</th><th>端口</th><th>线路</th><th>内核</th><th></th></tr></thead>
               <tbody>
-                {list.map(inb => {
+                {shown.map(inb => {
                   const srv = servers.find(s => s.id === inb.server_id)
                   const dead = srv && !serverHasCore(srv, inb.core)
                   return (
@@ -298,6 +357,8 @@ export default function Inbounds() {
                       <td className="text-ink-mut">{inb.core}{dead ? ' · 未安装' : ''}{!inb.enabled ? ' · 停用' : ''}</td>
                       <td className="whitespace-nowrap">
                         <div className="flex gap-3 justify-end">
+                          <button type="button" className="linkish" onClick={() => setParamInb(inb)}>参数</button>
+                          <button type="button" className="linkish" onClick={() => copyParams(inb)}>复制</button>
                           <button type="button" className="linkish" onClick={() => startEdit(inb)}>编辑</button>
                           <button type="button" className="linkish" onClick={() => toggle(inb)}>{inb.enabled ? '停用' : '启用'}</button>
                           <button type="button" className="linkish" style={{ color: 'var(--color-danger)' }} onClick={() => del(inb.id)}>删除</button>
@@ -311,6 +372,28 @@ export default function Inbounds() {
           </div>
         )}
       </div>
+      <Modal open={!!paramInb} title={paramInb ? `${paramInb.name} 参数` : '参数'} onClose={() => setParamInb(null)} wide footer={
+        <>
+          <button type="button" className="btn-ghost" onClick={() => setParamInb(null)}>关闭</button>
+          {paramInb && (
+            <button type="button" className="btn-primary" onClick={() => copyParams(paramInb)}>
+              <Icon name="copy" size={15} /> 复制全部
+            </button>
+          )}
+        </>
+      }>
+        {paramInb && inboundParamRows(paramInb).map(([k, v]) => (
+          <div key={k} className="param-row">
+            <div className="kicker">{k}</div>
+            <code className="text-[12px] break-all font-mono">{v}</code>
+            <button type="button" className="btn-ghost h-8 px-2" onClick={async () => {
+              try { await copyText(String(v)); toast(`已复制 ${k}`) }
+              catch { toast('请手动选中复制', 'error') }
+            }}><Icon name="copy" size={13} /></button>
+          </div>
+        ))}
+        <p className="text-[12px] text-ink-mut mt-3">私钥不展示。客户端 UUID / 密码在对应用户的订阅里。</p>
+      </Modal>
     </div>
   )
 }

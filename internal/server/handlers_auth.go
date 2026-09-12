@@ -107,6 +107,13 @@ func (s *Server) sessionPayload(u *db.User, r *http.Request) map[string]any {
 			"singbox": base + "/api/sub/" + u.SubToken + "/singbox",
 			"uri":     base + "/api/sub/" + u.SubToken + "/uri",
 		}
+		if u.TrafficLimit != nil {
+			u.TrafficCap = *u.TrafficLimit
+		} else if u.PackageID != nil {
+			if p, err := db.GetPackage(s.DB, *u.PackageID); err == nil {
+				u.TrafficCap = p.TrafficBytes
+			}
+		}
 	}
 	return out
 }
@@ -125,12 +132,24 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			x.Online = 0
 		}
 	}
+	pkgs, _ := db.ListPackages(s.DB)
+	var used int64
+	members := 0
+	for _, u := range users {
+		used += u.UsedUp + u.UsedDown
+		if u.Role != "admin" {
+			members++
+		}
+	}
 	jsonOK(w, map[string]any{
 		"version":     version.Version,
 		"servers":     len(servers),
 		"online":      online,
 		"users":       len(users),
+		"members":     members,
 		"inbounds":    len(ins),
+		"packages":    len(pkgs),
+		"used_bytes":  used,
 		"server_list": servers,
 	})
 }

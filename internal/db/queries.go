@@ -533,6 +533,15 @@ func BindUserPackage(d *sql.DB, userID, packageID, expiresAt int64) error {
 	return err
 }
 
+// SetPackageExpiry updates expiry only. Does not reset traffic (unlike BindUserPackage).
+func SetPackageExpiry(d *sql.DB, userID, expiresAt int64) error {
+	if _, err := d.Exec(`UPDATE users SET expires_at=? WHERE id=?`, expiresAt, userID); err != nil {
+		return err
+	}
+	_, err := d.Exec(`UPDATE user_packages SET expires_at=? WHERE user_id=?`, expiresAt, userID)
+	return err
+}
+
 func UnbindUserPackage(d *sql.DB, userID int64) error {
 	_, err := d.Exec(`DELETE FROM user_packages WHERE user_id=?`, userID)
 	return err

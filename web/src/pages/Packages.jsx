@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { useToast, useDialog } from '../components/Layout'
-import { Empty, Field, Icon, PageHead } from '../components/ui'
+import { Badge, Empty, Field, Icon, PageHead } from '../components/ui'
 
 const emptyForm = { name: '', gb: 100, cycle_days: 30, direction: 'oneway', server_ids: [] }
 
@@ -30,16 +30,18 @@ export default function Packages() {
   const [list, setList] = useState([])
   const [servers, setServers] = useState([])
   const [ins, setIns] = useState([])
+  const [users, setUsers] = useState([])
   const [f, setF] = useState(emptyForm)
   const [editId, setEditId] = useState(0)
   const [busy, setBusy] = useState(false)
 
   const load = async () => {
     try {
-      const [a, b, c] = await Promise.all([api.get('/packages'), api.get('/servers'), api.get('/inbounds')])
+      const [a, b, c, d] = await Promise.all([api.get('/packages'), api.get('/servers'), api.get('/inbounds'), api.get('/users')])
       setList(a.packages || [])
       setServers(b.servers || [])
       setIns(c.inbounds || [])
+      setUsers(d.users || [])
     } catch (e) { toast(e.message, 'error') }
   }
   useEffect(() => { load() }, [])
@@ -71,6 +73,14 @@ export default function Packages() {
 
   const save = async (e) => {
     e.preventDefault()
+    if (!f.server_ids.length) {
+      const ok = await dialog.confirm({
+        title: '包含全部节点？',
+        message: '没有勾选节点时，绑定该套餐的用户可以使用所有节点（含以后新加的）。',
+        okText: '全部节点',
+      })
+      if (!ok) return
+    }
     setBusy(true)
     const body = {
       name: f.name,
@@ -170,32 +180,52 @@ export default function Packages() {
           ) : null}
         </div>
       </form>
-      <div className="card overflow-hidden">
-        {list.length === 0 ? (
+      {list.length === 0 ? (
+        <div className="card overflow-hidden">
           <Empty title="暂无套餐" hint="勾选节点，再把套餐绑给用户。" />
-        ) : (
-          <div className="table-wrap">
-            <table className="data">
-              <thead><tr><th>名称</th><th>流量</th><th>周期</th><th>计费</th><th>节点</th><th></th></tr></thead>
-              <tbody>
-                {list.map(p => (
-                  <tr key={p.id}>
-                    <td className="font-medium">{p.name}</td>
-                    <td>{p.traffic_bytes ? (p.traffic_bytes / 1024 / 1024 / 1024).toFixed(0) + ' GB' : '不限'}</td>
-                    <td>{p.cycle_days} 天</td>
-                    <td>{p.direction === 'twoway' ? '双向' : '单向'}</td>
-                    <td className="text-[13px]">{packageNodesText(p, servers)}</td>
-                    <td className="whitespace-nowrap text-right">
-                      <button type="button" className="linkish mr-3" onClick={() => startEdit(p)}>编辑</button>
-                      <button type="button" className="linkish" style={{ color: 'var(--color-danger)' }} onClick={() => del(p.id)}>删除</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {list.map(p => {
+            const n = users.filter(u => u.role !== 'admin' && u.package_id === p.id).length
+            const names = (p.server_ids || []).map(id => servers.find(s => s.id === id)?.name).filter(Boolean)
+            const gb = p.traffic_bytes ? `${Math.round(p.traffic_bytes / 1024 / 1024 / 1024)} GB` : '不限'
+            return (
+              <div key={p.id} className="card plan-card">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-display text-[26px] leading-none">{p.name}</div>
+                    <div className="text-[12px] text-ink-mut mt-1.5">{n} 个用户</div>
+                  </div>
+                  <Badge tone="gold">{p.direction === 'twoway' ? '双向' : '单向'}</Badge>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[13px]">
+                  <div>
+                    <div className="kicker">流量</div>
+                    <div className="mt-1 font-medium">{gb}</div>
+                  </div>
+                  <div>
+                    <div className="kicker">周期</div>
+                    <div className="mt-1 font-medium">{p.cycle_days} 天</div>
+                  </div>
+                </div>
+                <div>
+                  <div className="kicker mb-1.5">关联节点</div>
+                  <div className="plan-nodes">
+                    {names.length ? names.map(n => <span key={n} className="chip">{n}</span>) : (
+                      <span className="chip">{packageNodesText(p, servers)}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-auto pt-1">
+                  <button type="button" className="linkish" onClick={() => startEdit(p)}>编辑</button>
+                  <button type="button" className="linkish" style={{ color: 'var(--color-danger)' }} onClick={() => del(p.id)}>删除</button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

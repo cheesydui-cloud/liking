@@ -10,8 +10,9 @@
 
 - 管理员登录、服务器列表、反向 WSS 纳管 Agent
 - 七组入站：VLESS+REALITY、VLESS+REALITY+Vision、VLESS+XHTTP+TLS、Trojan+TLS、SS2022、AnyTLS+TLS、Mieru
-- 用户 / 套餐（套餐勾选节点；不选表示全部）；到期或超量从内核配置摘掉客户端
-- 订阅：Clash Meta、sing-box JSON、URI（base64）
+- 用户 / 套餐（一人一套餐；套餐勾选节点，不选表示全部）；到期或超量从内核配置摘掉客户端
+- 开户随机密码、一键续期、流量进度、订阅二维码 / Clash·sing-box 导入
+- 入站可按节点筛选并复制公钥、short_id 等参数；订阅：Clash Meta、sing-box JSON、URI（base64）
 - 链式转发：入口 → 另一台落地。**Mieru / AnyTLS 不能当链式落地**；Mieru 可以直出，也可以当链式入口
 
 ## 一键安装面板
@@ -53,7 +54,7 @@ liking-upgrade
 指定版本：
 
 ```bash
-liking-upgrade --release v0.1.6
+liking-upgrade --release v0.1.7
 ```
 
 只更新安装脚本本身：

@@ -28,6 +28,9 @@ export function Icon({ name, size = 18, className = '' }) {
     wifi: <><path d="M5 12.5a10 10 0 0 1 14 0M8.2 15.4a5.5 5.5 0 0 1 7.6 0" /><circle cx="12" cy="18.2" r="1" fill="currentColor" stroke="none" /></>,
     spark: <><path d="M12 3.5 13.6 9 19 10.5 13.6 12 12 17.5 10.4 12 5 10.5 10.4 9z" /></>,
     warning: <><path d="M12 4 21 19H3L12 4z" /><path d="M12 10v4M12 16.5v.5" /></>,
+    search: <><circle cx="11" cy="11" r="6.2" /><path d="M16 16.5 20.5 21" /></>,
+    calendar: <><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M8 3.5V7M16 3.5V7M4 10h16" /></>,
+    link: <><path d="M9 12a4 4 0 0 0 6 0l2-2a4 4 0 0 0-6-6l-1 1" /><path d="M15 12a4 4 0 0 0-6 0l-2 2a4 4 0 1 0 6 6l1-1" /></>,
   }
   return <svg {...common}>{p[name] || p.spark}</svg>
 }
@@ -43,6 +46,41 @@ export function fmtBytes(n) {
 export function fmtDate(ts) {
   if (!ts) return '—'
   try { return new Date(ts * 1000).toLocaleString() } catch { return '—' }
+}
+
+export function fmtDateShort(ts) {
+  if (!ts) return '—'
+  try { return new Date(ts * 1000).toLocaleDateString() } catch { return '—' }
+}
+
+export function fmtAgo(ts) {
+  if (!ts) return '从未'
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - Number(ts)))
+  if (s < 45) return '刚刚'
+  if (s < 3600) return `${Math.floor(s / 60)} 分钟前`
+  if (s < 86400) return `${Math.floor(s / 3600)} 小时前`
+  if (s < 86400 * 10) return `${Math.floor(s / 86400)} 天前`
+  return fmtDateShort(ts)
+}
+
+export function Meter({ value = 0, max = 0, className = '' }) {
+  const used = Number(value) || 0
+  const cap = Number(max) || 0
+  const unlimited = !cap
+  const pct = unlimited ? 0 : Math.min(100, Math.round((used / cap) * 100))
+  const tone = unlimited ? 'ok' : pct >= 90 ? 'danger' : pct >= 70 ? 'gold' : 'ok'
+  const color = { ok: 'var(--color-ok)', gold: 'var(--color-gold)', danger: 'var(--color-danger)' }[tone]
+  return (
+    <div className={className}>
+      <div className="flex items-baseline justify-between gap-2 text-[12px] tabular-nums">
+        <span>{fmtBytes(used)}{unlimited ? '' : ` / ${fmtBytes(cap)}`}</span>
+        <span className="text-ink-mut">{unlimited ? '不限' : `${pct}%`}</span>
+      </div>
+      <div className="meter mt-1.5">
+        <div className="meter-bar" style={{ width: unlimited ? '8%' : `${Math.max(pct, used ? 3 : 0)}%`, background: color, opacity: unlimited ? 0.35 : 1 }} />
+      </div>
+    </div>
+  )
 }
 
 export function PageHead({ kicker, title, desc, actions }) {

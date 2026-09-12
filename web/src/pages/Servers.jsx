@@ -2,18 +2,25 @@ import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Modal, PageHead } from '../components/ui'
+import { Badge, Empty, Field, Icon, Modal, PageHead, fmtAgo } from '../components/ui'
 
 export default function Servers() {
   const toast = useToast()
   const dialog = useDialog()
   const [list, setList] = useState([])
+  const [ins, setIns] = useState([])
   const [name, setName] = useState('')
   const [host, setHost] = useState('')
   const [cmd, setCmd] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const load = () => api.get('/servers').then(d => setList(d.servers || [])).catch(e => toast(e.message, 'error'))
+  const load = async () => {
+    try {
+      const [a, b] = await Promise.all([api.get('/servers'), api.get('/inbounds')])
+      setList(a.servers || [])
+      setIns(b.inbounds || [])
+    } catch (e) { toast(e.message, 'error') }
+  }
   useEffect(() => { load() }, [])
 
   const create = async (e) => {
@@ -54,6 +61,9 @@ export default function Servers() {
     catch (e) { toast(e.message, 'error') }
   }
 
+  const linesOf = (id) => ins.filter(x => x.server_id === id)
+  const online = list.filter(s => s.online).length
+
   return (
     <div>
       <PageHead kicker="Fleet" title="服务器" desc="每台机器一个 Agent。安装命令从面板下载二进制，不走 GitHub。" />
@@ -66,45 +76,59 @@ export default function Servers() {
         </Field>
         <button className="btn-primary" disabled={busy}><Icon name="plus" size={16} /> 添加</button>
       </form>
-      <div className="card overflow-hidden">
-        {list.length === 0 ? (
+      {list.length > 0 && (
+        <div className="text-[12px] text-ink-mut mb-3">{online} 在线 · {list.length - online} 离线</div>
+      )}
+      {list.length === 0 ? (
+        <div className="card overflow-hidden">
           <Empty title="暂无服务器" hint="先起一个名字，添加后再复制安装命令到节点上执行。" />
-        ) : (
-          <div className="table-wrap">
-            <table className="data">
-              <thead><tr><th>名称</th><th>地址</th><th>状态</th><th>版本</th><th></th></tr></thead>
-              <tbody>
-                {list.map(s => (
-                  <tr key={s.id}>
-                    <td>
-                      <div className="font-medium">{s.name}</div>
-                      {s.last_error ? <div className="text-[12px] mt-1" style={{ color: 'var(--color-danger)' }}>{s.last_error}</div> : null}
-                    </td>
-                    <td className="font-mono text-[12px]">
-                      {s.public_host || '—'}
-                      <button type="button" className="linkish ml-2 text-[12px]" onClick={() => saveHost(s)}>改</button>
-                    </td>
-                    <td>
-                      <span className={`dot ${s.online ? 'dot-on' : 'dot-off'}`} />
-                      <span className="ml-2">{s.online ? '在线' : '离线'}</span>
-                      {s.online && !s.last_error ? <Badge tone="ok" className="ml-2">live</Badge> : null}
-                      {s.last_error ? <Badge tone="danger" className="ml-2">下发失败</Badge> : null}
-                    </td>
-                    <td className="text-ink-mut text-[12px] font-mono">{s.agent_ver || '—'}</td>
-                    <td className="whitespace-nowrap">
-                      <div className="flex gap-3 justify-end">
-                        <button type="button" className="linkish" onClick={() => showInstall(s.id)}>安装命令</button>
-                        <button type="button" className="linkish" onClick={() => sync(s.id)}>同步</button>
-                        <button type="button" className="linkish" style={{ color: 'var(--color-danger)' }} onClick={() => del(s.id)}>删除</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="grid md:grid-cols-2 gap-3">
+          {list.map(s => {
+            const lines = linesOf(s.id)
+            const cores = String(s.cores || '').split(',').map(x => x.trim()).filter(Boolean)
+            return (
+              <div key={s.id} className="card server-card">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-display text-[26px] leading-none truncate">{s.name}</div>
+                    <div className="text-[12px] font-mono text-ink-mut mt-1.5 truncate">
+                      {s.public_host || '未填公开地址'}
+                      <button type="button" className="linkish ml-2 font-sans" onClick={() => saveHost(s)}>改</button>
+                    </div>
+                  </div>
+                  <div className="shrink-0 flex items-center gap-2">
+                    <span className={`dot ${s.online ? 'dot-on' : 'dot-off'}`} />
+                    {s.online ? <Badge tone="ok">在线</Badge> : <Badge tone="muted">离线</Badge>}
+                  </div>
+                </div>
+                {s.last_error ? (
+                  <div className="text-[12px]" style={{ color: 'var(--color-danger)' }}>{s.last_error}</div>
+                ) : null}
+                <div className="flex flex-wrap gap-1.5">
+                  {cores.length ? cores.map(c => <span key={c} className="chip">{c}</span>) : <span className="chip">未上报内核</span>}
+                  <span className="chip">{lines.length ? `${lines.length} 条入站` : '暂无入站'}</span>
+                </div>
+                <div className="text-[12px] text-ink-mut">
+                  Agent {s.agent_ver || '—'} · 心跳 {fmtAgo(s.last_seen)}
+                  {s.os ? ` · ${[s.os, s.arch].filter(Boolean).join('/')}` : ''}
+                </div>
+                {lines.length > 0 && (
+                  <div className="text-[12px] text-ink-soft truncate">
+                    {lines.map(x => `${x.name} :${x.port}`).join(' · ')}
+                  </div>
+                )}
+                <div className="flex gap-3 mt-auto pt-1">
+                  <button type="button" className="linkish" onClick={() => showInstall(s.id)}>安装命令</button>
+                  <button type="button" className="linkish" onClick={() => sync(s.id)}>同步</button>
+                  <button type="button" className="linkish" style={{ color: 'var(--color-danger)' }} onClick={() => del(s.id)}>删除</button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
       <Modal open={!!cmd} title="一键安装 Agent" onClose={() => setCmd('')} wide footer={
         <>
           <button type="button" className="btn-ghost" onClick={() => setCmd('')}>关闭</button>

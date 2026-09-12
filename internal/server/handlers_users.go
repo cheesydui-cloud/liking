@@ -1,12 +1,29 @@
 package server
 
 import (
+	"crypto/rand"
 	"net/http"
 	"strings"
 	"time"
 
 	"liking/internal/db"
 )
+
+func randomPassword(n int) (string, error) {
+	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+	if n < 6 {
+		n = 10
+	}
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	out := make([]byte, n)
+	for i := range b {
+		out[i] = alphabet[int(b[i])%len(alphabet)]
+	}
+	return string(out), nil
+}
 
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	list, err := db.ListUsers(s.DB)
@@ -35,8 +52,21 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Username = strings.TrimSpace(req.Username)
-	if req.Username == "" || len(req.Password) < 6 {
-		jsonErr(w, http.StatusBadRequest, "用户名不能为空，密码至少 6 位")
+	if req.Username == "" {
+		jsonErr(w, http.StatusBadRequest, "用户名不能为空")
+		return
+	}
+	generated := ""
+	if strings.TrimSpace(req.Password) == "" {
+		pw, err := randomPassword(10)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		req.Password = pw
+		generated = pw
+	} else if len(req.Password) < 6 {
+		jsonErr(w, http.StatusBadRequest, "密码至少 6 位")
 		return
 	}
 	if req.Role == "" {
@@ -73,7 +103,11 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	s.provisionAndSyncUser(u)
 	admin := userFromCtx(r.Context())
 	db.AddAudit(s.DB, &admin.ID, "user.create", u.Username)
-	jsonOK(w, map[string]any{"user": u})
+	out := map[string]any{"user": u}
+	if generated != "" {
+		out["password"] = generated
+	}
+	jsonOK(w, out)
 }
 
 func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
@@ -95,6 +129,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		PackageID    *int64 `json:"package_id"`
 		Unbind       bool   `json:"unbind_package"`
 		TrafficLimit *int64 `json:"traffic_limit"`
+		ExtendDays   *int   `json:"extend_days"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -114,6 +149,14 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			u.ExpiresAt = time.Now().Add(time.Duration(*req.Days) * 24 * time.Hour).Unix()
 		}
 	}
+	if req.ExtendDays != nil && *req.ExtendDays > 0 {
+		base := u.ExpiresAt
+		now := time.Now().Unix()
+		if base < now {
+			base = now
+		}
+		u.ExpiresAt = base + int64(*req.ExtendDays)*24*3600
+	}
 	u.TrafficLimit = req.TrafficLimit
 	if err := db.UpdateUser(s.DB, u); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
@@ -126,6 +169,8 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
+	} else if req.ExtendDays != nil || req.Days != nil || req.ExpiresAt != nil {
+		_ = db.SetPackageExpiry(s.DB, u.ID, u.ExpiresAt)
 	}
 	u, _ = db.GetUser(s.DB, u.ID)
 	s.provisionAndSyncUser(u)
@@ -189,7 +234,21 @@ func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Password string `json:"password"`
 	}
-	if err := decodeJSON(r, &req); err != nil || len(req.Password) < 6 {
+	if err := decodeJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效请求")
+		return
+	}
+	generated := ""
+	req.Password = strings.TrimSpace(req.Password)
+	if req.Password == "" {
+		pw, err := randomPassword(10)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		req.Password = pw
+		generated = pw
+	} else if len(req.Password) < 6 {
 		jsonErr(w, http.StatusBadRequest, "密码至少 6 位")
 		return
 	}
@@ -202,5 +261,9 @@ func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	jsonOK(w, map[string]any{"ok": true})
+	out := map[string]any{"ok": true}
+	if generated != "" {
+		out["password"] = generated
+	}
+	jsonOK(w, out)
 }

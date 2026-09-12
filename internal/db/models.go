@@ -17,6 +17,7 @@ type User struct {
 	PackageID    *int64 `json:"package_id,omitempty"`
 	PackageName  string `json:"package_name,omitempty"`
 	PkgExpires   int64  `json:"package_expires_at,omitempty"`
+	TrafficCap   int64  `json:"traffic_cap,omitempty"`
 }
 
 type Server struct {

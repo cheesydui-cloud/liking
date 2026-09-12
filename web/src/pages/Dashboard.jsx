@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
-import { Badge, Empty, PageHead, SkeletonRows } from '../components/ui'
+import { Badge, Empty, PageHead, SkeletonRows, fmtAgo, fmtBytes } from '../components/ui'
 
 export default function Dashboard() {
   const [d, setD] = useState(null)
@@ -16,17 +16,19 @@ export default function Dashboard() {
     { label: '服务器', value: d.servers, to: '/servers', hint: '节点总数' },
     { label: '在线', value: d.online, to: '/servers', hint: 'Agent 心跳' },
     { label: '入站', value: d.inbounds, to: '/inbounds', hint: '已配置线路' },
-    { label: '用户', value: d.users, to: '/users', hint: '含管理员' },
+    { label: '用户', value: d.members ?? d.users, to: '/users', hint: '不含管理员' },
+    { label: '套餐', value: d.packages || 0, to: '/packages', hint: '可绑定套餐' },
+    { label: '已用流量', value: fmtBytes(d.used_bytes || 0), to: '/users', hint: '用户合计', compact: true },
   ]
 
   return (
     <div>
-      <PageHead kicker="Overview" title="总览" desc="节点在线状态与线路规模。先加服务器，再开入站，然后把套餐绑给用户。" />
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+      <PageHead kicker="Overview" title="总览" desc="先加服务器，再开入站，然后把套餐绑给用户。流量按套餐方向和节点倍率计。" />
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
         {cards.map(c => (
           <Link key={c.label} to={c.to} className="card p-5 hover:border-[var(--color-gold)] transition-colors">
             <div className="kicker">{c.label}</div>
-            <div className="font-display text-[40px] leading-none mt-3 tabular-nums">{c.value}</div>
+            <div className={`font-display leading-none mt-3 tabular-nums ${c.compact ? 'text-[28px]' : 'text-[40px]'}`}>{c.value}</div>
             <div className="text-[12px] text-ink-mut mt-2">{c.hint}</div>
           </Link>
         ))}
@@ -46,7 +48,7 @@ export default function Dashboard() {
         ) : (
           <div className="table-wrap">
             <table className="data">
-              <thead><tr><th>名称</th><th>地址</th><th>状态</th><th>系统</th></tr></thead>
+              <thead><tr><th>名称</th><th>地址</th><th>状态</th><th>心跳</th><th>系统</th></tr></thead>
               <tbody>
                 {(d.server_list || []).map(s => (
                   <tr key={s.id}>
@@ -57,6 +59,7 @@ export default function Dashboard() {
                       <span className="ml-2">{s.online ? '在线' : '离线'}</span>
                       {s.last_error ? <Badge tone="danger" className="ml-2">下发失败</Badge> : null}
                     </td>
+                    <td className="text-[12px] text-ink-mut whitespace-nowrap">{fmtAgo(s.last_seen)}</td>
                     <td className="text-ink-mut">{[s.os, s.arch].filter(Boolean).join(' / ') || '—'}</td>
                   </tr>
                 ))}

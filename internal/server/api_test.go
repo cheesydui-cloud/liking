@@ -239,6 +239,127 @@ func TestParseBusyPorts(t *testing.T) {
 	}
 }
 
+func TestUserPasswordAndExtend(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := db.CreatePackage(d, "std", 10*1024*1024*1024, 30, 0, "oneway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	body, _ := json.Marshal(map[string]any{"username": "bob", "package_id": pkg.ID, "days": 30})
+	res, err = c.Post(ts.URL+"/api/users", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		Password string `json:"password"`
+		User     struct {
+			ID        int64 `json:"id"`
+			ExpiresAt int64 `json:"expires_at"`
+		} `json:"user"`
+	}
+	decodeRes(t, res, &created)
+	if len(created.Password) < 6 || created.User.ID == 0 || created.User.ExpiresAt == 0 {
+		t.Fatalf("generated %+v", created)
+	}
+	before := created.User.ExpiresAt
+	ext, _ := json.Marshal(map[string]any{"extend_days": 30, "remark": ""})
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/api/users/"+strconv.FormatInt(created.User.ID, 10), bytes.NewReader(ext))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var updated struct {
+		User struct {
+			ExpiresAt int64 `json:"expires_at"`
+		} `json:"user"`
+	}
+	decodeRes(t, res, &updated)
+	if updated.User.ExpiresAt-before < 29*24*3600 {
+		t.Fatalf("extend %d -> %d", before, updated.User.ExpiresAt)
+	}
+
+	pwBody, _ := json.Marshal(map[string]string{"password": ""})
+	res, err = c.Post(ts.URL+"/api/users/"+strconv.FormatInt(created.User.ID, 10)+"/password", "application/json", bytes.NewReader(pwBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rotated struct {
+		Password string `json:"password"`
+	}
+	decodeRes(t, res, &rotated)
+	if len(rotated.Password) < 6 {
+		t.Fatalf("random password %q", rotated.Password)
+	}
+
+	res, err = c.Get(ts.URL + "/api/dashboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dash struct {
+		Members  int   `json:"members"`
+		Packages int   `json:"packages"`
+		Used     int64 `json:"used_bytes"`
+	}
+	decodeRes(t, res, &dash)
+	if dash.Members < 1 || dash.Packages < 1 {
+		t.Fatalf("dashboard %+v", dash)
+	}
+
+	jar2, _ := cookiejar.New(nil)
+	c2 := &http.Client{Jar: jar2}
+	login2, _ := json.Marshal(map[string]string{"username": "bob", "password": rotated.Password})
+	res, err = c2.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+	res, err = c2.Get(ts.URL + "/api/me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var me struct {
+		User struct {
+			TrafficCap int64 `json:"traffic_cap"`
+		} `json:"user"`
+		Sub map[string]string `json:"sub"`
+	}
+	decodeRes(t, res, &me)
+	if me.User.TrafficCap != 10*1024*1024*1024 || me.Sub["auto"] == "" || me.Sub["clash"] == "" {
+		t.Fatalf("me %+v", me)
+	}
+}
+
 func TestHealthz(t *testing.T) {
 	d, err := db.Open(":memory:")
 	if err != nil {

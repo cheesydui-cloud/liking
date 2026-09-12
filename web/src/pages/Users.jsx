@@ -1,13 +1,21 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Modal, PageHead, fmtBytes, fmtDate } from '../components/ui'
+import { Badge, Empty, Field, Icon, Meter, Modal, PageHead, fmtDateShort } from '../components/ui'
+import { SubPanel } from '../components/SubPanel'
 
-function subURL(token, fmt) {
-  const base = `${window.location.origin}/api/sub/${token}`
-  if (fmt) return `${base}/${fmt}`
-  return base
+function randPassword() {
+  const a = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
+  const b = new Uint8Array(10)
+  crypto.getRandomValues(b)
+  return [...b].map(x => a[x % a.length]).join('')
+}
+
+function trafficCap(u, pkgs) {
+  if (u.traffic_limit != null) return Number(u.traffic_limit)
+  const p = pkgs.find(x => x.id === u.package_id)
+  return p?.traffic_bytes || 0
 }
 
 export default function Users() {
@@ -18,6 +26,8 @@ export default function Users() {
   const [f, setF] = useState({ username: '', password: '', remark: '', package_id: '', days: 30 })
   const [busy, setBusy] = useState(false)
   const [subUser, setSubUser] = useState(null)
+  const [q, setQ] = useState('')
+  const [pkgFilter, setPkgFilter] = useState('')
 
   const load = async () => {
     try {
@@ -32,24 +42,17 @@ export default function Users() {
     e.preventDefault()
     setBusy(true)
     try {
-      const body = { ...f, days: Number(f.days) || 0 }
+      const body = { username: f.username, remark: f.remark, days: Number(f.days) || 0 }
+      if (f.password) body.password = f.password
       if (f.package_id) body.package_id = Number(f.package_id)
-      else delete body.package_id
       const d = await api.post('/users', body)
+      const pw = d.password || f.password
       setF({ username: '', password: '', remark: '', package_id: f.package_id, days: 30 })
-      if (!body.package_id) toast('已创建。未绑定套餐，订阅里不会有节点', 'error')
-      else {
-        const token = d.user?.sub_token
-        if (token) {
-          try {
-            await copyText(subURL(token))
-            toast('已创建，订阅链接已复制')
-          } catch {
-            toast('已创建')
-            setSubUser(d.user)
-          }
-        } else toast('已创建')
-      }
+      if (pw) {
+        try { await copyText(pw); toast(`已创建，密码已复制`) } catch { toast(`已创建，密码 ${pw}`) }
+      } else toast('已创建')
+      if (!body.package_id) toast('未绑定套餐，订阅里不会有节点', 'error')
+      else if (d.user) setSubUser(d.user)
       load()
     } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
@@ -60,10 +63,11 @@ export default function Users() {
   }
 
   const resetPw = async (u) => {
-    const pw = await dialog.prompt({ title: `重置 ${u.username} 的密码`, message: '至少 6 位。', inputType: 'password', okText: '保存' })
-    if (!pw) return
-    await act(() => api.post(`/users/${u.id}/password`, { password: pw }))
-    toast('密码已改')
+    const pw = await dialog.prompt({ title: `重置 ${u.username} 的密码`, message: '留空则随机生成。至少 6 位。', inputType: 'text', okText: '保存' })
+    if (pw == null) return
+    const next = pw.trim() || randPassword()
+    await act(() => api.post(`/users/${u.id}/password`, { password: next }))
+    try { await copyText(next); toast('新密码已复制') } catch { toast(`新密码 ${next}`) }
   }
 
   const remove = async (u) => {
@@ -82,33 +86,52 @@ export default function Users() {
     } catch (e) { toast(e.message, 'error') }
   }
 
-  const openSub = async (u) => {
-    setSubUser(u)
+  const extend = async (u, days) => {
     try {
-      await copyText(subURL(u.sub_token))
-      toast('已复制订阅链接')
-    } catch {
-      toast('请手动复制订阅链接', 'error')
-    }
+      await api.put(`/users/${u.id}`, { remark: u.remark || '', enabled: u.enabled, extend_days: days })
+      toast(`已续期 +${days} 天`)
+      load()
+    } catch (e) { toast(e.message, 'error') }
   }
 
-  const copyOne = async (url) => {
+  const rotate = async (u) => {
+    if (!(await dialog.confirm({ title: '重置订阅令牌', message: '旧订阅链接立刻失效。' }))) return
     try {
-      await copyText(url)
-      toast('已复制')
-    } catch {
-      toast('浏览器不允许自动复制，请手动选中链接', 'error')
-    }
+      const d = await api.post(`/users/${u.id}/rotate-sub`)
+      load()
+      const next = { ...u, sub_token: d.sub_token }
+      setSubUser(next)
+      toast('订阅令牌已更换')
+    } catch (e) { toast(e.message, 'error') }
   }
 
-  const rows = list.filter(u => u.role !== 'admin').concat(list.filter(u => u.role === 'admin'))
+  const openSub = (u) => setSubUser(u)
+
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return list.filter(u => {
+      if (u.role === 'admin') return !needle && !pkgFilter
+      if (pkgFilter === 'none' && u.package_id) return false
+      if (pkgFilter && pkgFilter !== 'none' && String(u.package_id) !== pkgFilter) return false
+      if (!needle) return true
+      return [u.username, u.remark, u.package_name].some(x => String(x || '').toLowerCase().includes(needle))
+    })
+  }, [list, q, pkgFilter])
+
+  const members = list.filter(u => u.role !== 'admin')
 
   return (
     <div>
-      <PageHead kicker="People" title="用户" desc="一人一套餐。绑定套餐后即可订阅；到期或超量会从内核配置里摘掉客户端。" />
-      <form onSubmit={create} className="card p-5 mb-4 grid grid-cols-1 md:grid-cols-5 gap-3">
+      <PageHead kicker="People" title="用户" desc="一人一套餐。创建后密码和订阅都能直接复制；到期或超量会从内核配置里摘掉客户端。" />
+      <form onSubmit={create} className="card p-5 mb-4 grid grid-cols-1 md:grid-cols-6 gap-3">
         <Field label="用户名"><input className="input-field" placeholder="alice" value={f.username} onChange={e => setF({ ...f, username: e.target.value })} required /></Field>
-        <Field label="密码"><input className="input-field" placeholder="至少 6 位" value={f.password} onChange={e => setF({ ...f, password: e.target.value })} required /></Field>
+        <Field label="密码" hint="可留空随机">
+          <div className="flex gap-2">
+            <input className="input-field" placeholder="随机" value={f.password} onChange={e => setF({ ...f, password: e.target.value })} />
+            <button type="button" className="btn-ghost shrink-0" onClick={() => setF({ ...f, password: randPassword() })}>随机</button>
+          </div>
+        </Field>
+        <Field label="备注"><input className="input-field" placeholder="可选" value={f.remark} onChange={e => setF({ ...f, remark: e.target.value })} /></Field>
         <Field label="套餐">
           <select className="input-field" value={f.package_id} onChange={e => setF({ ...f, package_id: e.target.value })}>
             <option value="">不绑定</option>
@@ -122,9 +145,24 @@ export default function Users() {
         <Field label="天数"><input className="input-field" type="number" value={f.days} onChange={e => setF({ ...f, days: e.target.value })} /></Field>
         <div className="flex items-end"><button className="btn-primary w-full" disabled={busy}><Icon name="plus" size={16} /> 创建</button></div>
       </form>
+
+      <div className="flex flex-col sm:flex-row gap-2 mb-3">
+        <div className="relative flex-1">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-mut"><Icon name="search" size={15} /></span>
+          <input className="input-field pl-9" placeholder="搜索用户名 / 备注 / 套餐" value={q} onChange={e => setQ(e.target.value)} />
+        </div>
+        <select className="input-field sm:w-52" value={pkgFilter} onChange={e => setPkgFilter(e.target.value)}>
+          <option value="">全部套餐</option>
+          <option value="none">未绑定</option>
+          {pkgs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+
       <div className="card overflow-hidden">
-        {rows.length === 0 ? (
+        {members.length === 0 ? (
           <Empty title="暂无用户" hint="先建套餐并勾选节点，再开账号。" />
+        ) : rows.length === 0 ? (
+          <Empty title="没有匹配的用户" hint="换个关键词或套餐筛选。" />
         ) : (
           <div className="table-wrap">
             <table className="data">
@@ -144,16 +182,32 @@ export default function Users() {
                         </select>
                       )}
                     </td>
-                    <td className="text-[12px] tabular-nums">{fmtBytes((u.used_up || 0) + (u.used_down || 0))}</td>
-                    <td className="text-[12px]">{u.expires_at ? fmtDate(u.expires_at) : '—'}</td>
-                    <td>{u.enabled ? <Badge tone="ok">启用</Badge> : <Badge tone="muted">停用</Badge>}</td>
+                    <td className="min-w-[10rem]">
+                      {u.role === 'admin' ? '—' : (
+                        <Meter value={(u.used_up || 0) + (u.used_down || 0)} max={trafficCap(u, pkgs)} />
+                      )}
+                    </td>
+                    <td className="text-[12px] whitespace-nowrap">
+                      <div>{u.expires_at ? fmtDateShort(u.expires_at) : '—'}</div>
+                      {u.role !== 'admin' && (
+                        <div className="flex gap-2 mt-1">
+                          <button type="button" className="linkish text-[11px]" onClick={() => extend(u, 30)}>+30</button>
+                          <button type="button" className="linkish text-[11px]" onClick={() => extend(u, 60)}>+60</button>
+                          <button type="button" className="linkish text-[11px]" onClick={() => extend(u, 90)}>+90</button>
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      {u.expires_at && u.expires_at * 1000 < Date.now() ? <Badge tone="danger">到期</Badge>
+                        : u.enabled ? <Badge tone="ok">启用</Badge> : <Badge tone="muted">停用</Badge>}
+                    </td>
                     <td className="whitespace-nowrap">
                       {u.role !== 'admin' && (
                         <div className="flex gap-3 justify-end text-[12px]">
-                          <button type="button" className="linkish" onClick={() => act(() => api.put(`/users/${u.id}`, { remark: u.remark, enabled: !u.enabled }))}>{u.enabled ? '停用' : '启用'}</button>
                           <button type="button" className="linkish" onClick={() => openSub(u)}>订阅</button>
                           <button type="button" className="linkish" onClick={() => act(() => api.post(`/users/${u.id}/reset-traffic`))}>清流量</button>
                           <button type="button" className="linkish" onClick={() => resetPw(u)}>改密</button>
+                          <button type="button" className="linkish" onClick={() => act(() => api.put(`/users/${u.id}`, { remark: u.remark, enabled: !u.enabled }))}>{u.enabled ? '停用' : '启用'}</button>
                           <button type="button" className="linkish" style={{ color: 'var(--color-danger)' }} onClick={() => remove(u)}>删除</button>
                         </div>
                       )}
@@ -167,28 +221,11 @@ export default function Users() {
       </div>
       <Modal open={!!subUser} title={subUser ? `${subUser.username} 的订阅` : '订阅'} onClose={() => setSubUser(null)} wide footer={
         <>
+          <button type="button" className="btn-ghost" onClick={() => subUser && rotate(subUser)}>重置令牌</button>
           <button type="button" className="btn-ghost" onClick={() => setSubUser(null)}>关闭</button>
-          {subUser && (
-            <button type="button" className="btn-primary" onClick={() => copyOne(subURL(subUser.sub_token))}>
-              <Icon name="copy" size={15} /> 复制自动识别
-            </button>
-          )}
         </>
       }>
-        {subUser && (
-          <div className="space-y-3">
-            {[['自动识别', subURL(subUser.sub_token)], ['Clash Meta', subURL(subUser.sub_token, 'clash')], ['sing-box', subURL(subUser.sub_token, 'singbox')], ['URI / 通用', subURL(subUser.sub_token, 'uri')]].map(([k, v]) => (
-              <div key={k}>
-                <div className="kicker mb-1">{k}</div>
-                <div className="flex gap-2 items-center">
-                  <code className="text-[12px] break-all flex-1 font-mono">{v}</code>
-                  <button type="button" className="btn-ghost h-9 shrink-0" onClick={() => copyOne(v)}><Icon name="copy" size={14} /> 复制</button>
-                </div>
-              </div>
-            ))}
-            <p className="text-[12px] text-ink-mut">HTTP 打开面板时浏览器可能禁止剪贴板，直接选中链接也能复制。</p>
-          </div>
-        )}
+        {subUser && <SubPanel token={subUser.sub_token} onCopied={(msg, kind) => toast(msg, kind)} />}
       </Modal>
     </div>
   )
