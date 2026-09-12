@@ -26,6 +26,7 @@ type Server struct {
 	kickWant     map[int64]bool
 	kickRun      map[int64]bool
 	acmeMu       sync.Mutex
+	CFAPI        string // test override for Cloudflare API base URL
 }
 
 func New(d *sql.DB) (*Server, error) {
@@ -96,6 +97,8 @@ func (s *Server) Router() http.Handler {
 			r.Delete("/api/servers/{id}", s.handleDeleteServer)
 			r.Post("/api/servers/{id}/sync", s.handleSyncServer)
 			r.Get("/api/servers/{id}/install", s.handleServerInstall)
+			r.Get("/api/servers/{id}/cf-domains", s.handleServerCFDomains)
+			r.Get("/api/cf-domains", s.handleCFDomains)
 
 			r.Get("/api/inbounds", s.handleListInbounds)
 			r.Post("/api/inbounds", s.handleCreateInbound)

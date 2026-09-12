@@ -2,6 +2,20 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.1.28 — 2026-09-13
+
+服务器公开地址只能手填 IP，域名托管到 Cloudflare 之后还得再敲一遍。
+
+### 改进
+- 服务器管理增加「从 CF 同步」：用设置里的 Cloudflare Token 拉取已托管域名，点选即可写成公开地址
+- 指向这台机器 IP 的记录排在前面；橙云代理会提示（REALITY 需要 DNS only）
+- 添加服务器时也可以从 CF 拉取，不必手输
+- 通配符和 `_acme-challenge` 不会出现在列表里
+
+### 升级注意
+- 只升面板即可。设置里先保存 Cloudflare API Token（Zone 读取）
+- 回滚：`liking-upgrade --release v0.1.27`
+
 ## v0.1.27 — 2026-09-13
 
 复制 Mieru 链接没有节点名称，导入客户端后备注是空的。

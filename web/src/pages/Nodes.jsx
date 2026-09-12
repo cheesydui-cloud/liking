@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Meter, Modal, PageHead, fmtAgo, fmtBps, fmtBytes, fmtDateShort } from '../components/ui'
+import { Badge, Empty, Field, Icon, Meter, Modal, PageHead, SearchInput, fmtAgo, fmtBps, fmtBytes, fmtDateShort } from '../components/ui'
 
 const DEST_PRESETS = [
   'www.microsoft.com:443',
@@ -195,6 +195,13 @@ export default function Nodes() {
   const [paramInb, setParamInb] = useState(null)
   const [shareText, setShareText] = useState('')
   const [showAdv, setShowAdv] = useState(false)
+  const [cfOpen, setCfOpen] = useState(false)
+  const [cfServer, setCfServer] = useState(null)
+  const [cfDomains, setCfDomains] = useState([])
+  const [cfLoading, setCfLoading] = useState(false)
+  const [cfErr, setCfErr] = useState('')
+  const [cfPick, setCfPick] = useState('')
+  const [cfFilter, setCfFilter] = useState('')
 
   const load = async () => {
     try {
@@ -264,10 +271,55 @@ export default function Nodes() {
   }
 
   const saveHost = async (s) => {
-    const v = await dialog.prompt({ title: '公开地址', message: '客户端连接用的 IP 或域名。', defaultValue: s.public_host || '', okText: '保存' })
+    const v = await dialog.prompt({ title: '公开地址', message: '客户端连接用的 IP 或域名。也可点「从 CF 同步」拉取托管域名。', defaultValue: s.public_host || '', okText: '保存' })
     if (v == null) return
     try { await api.put(`/servers/${s.id}`, { name: s.name, public_host: v }); load() }
     catch (e) { toast(e.message, 'error') }
+  }
+
+  const openCF = async (s) => {
+    setCfServer(s)
+    setCfOpen(true)
+    setCfDomains([])
+    setCfErr('')
+    setCfPick('')
+    setCfFilter('')
+    setCfLoading(true)
+    try {
+      const d = await api.get(s?.id ? `/servers/${s.id}/cf-domains` : '/cf-domains')
+      const names = d.domains || []
+      setCfDomains(names)
+      const current = s?.public_host || host
+      const matched = names.find(x => x.matched)
+      const cur = names.find(x => x.name === current)
+      setCfPick((matched || cur || names[0] || {}).name || '')
+    } catch (e) {
+      setCfErr(e.message || '拉取失败')
+    } finally {
+      setCfLoading(false)
+    }
+  }
+
+  const applyCF = async (picked) => {
+    const name = String(typeof picked === 'string' ? picked : (cfPick || '')).trim()
+    if (!name) {
+      toast('请选择一个域名', 'error')
+      return
+    }
+    if (!cfServer?.id) {
+      setHost(name)
+      setCfOpen(false)
+      toast('已填入 ' + name)
+      return
+    }
+    setBusy(true)
+    try {
+      await api.put(`/servers/${cfServer.id}`, { public_host: name })
+      toast('公开地址已设为 ' + name)
+      setCfOpen(false)
+      load()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
   }
 
   const saveLimit = async (s) => {
@@ -480,6 +532,7 @@ export default function Nodes() {
                       <div className="text-[12px] font-mono text-ink-mut mt-1 truncate">
                         {s.public_host || '未填公开地址'}
                         <button type="button" className="row-act ml-2 font-sans" onClick={() => saveHost(s)}>改</button>
+                        <button type="button" className="row-act ml-2 font-sans" onClick={() => openCF(s)}>从 CF 同步</button>
                       </div>
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         {cores.length ? cores.map(c => <span key={c} className="chip">{c}</span>) : <span className="chip">未上报内核</span>}
@@ -554,9 +607,10 @@ export default function Nodes() {
           <Field label="名称">
             <input className="input-field" value={name} onChange={e => setName(e.target.value)} required placeholder="香港-01" autoFocus />
           </Field>
-          <Field label="公开地址" hint="客户端连接用的 IP 或域名，可稍后填写">
+          <Field label="公开地址" hint="客户端连接用的 IP 或域名。托管在 Cloudflare 的可直接拉取。">
             <input className="input-field" value={host} onChange={e => setHost(e.target.value)} placeholder="IP 或域名" />
           </Field>
+          <button type="button" className="row-act" onClick={() => openCF(null)}>从 CF 同步</button>
         </form>
       </Modal>
 
@@ -833,6 +887,83 @@ export default function Nodes() {
       }>
         <p className="text-[12px] text-ink-mut mb-2">粘贴到小火箭 / v2rayN / Nekobox 即可导入。</p>
         <code className="block text-[12px] break-all font-mono p-3 rounded-md" style={{ background: 'var(--color-fill)' }}>{shareText}</code>
+      </Modal>
+
+      <Modal open={cfOpen} title="从 Cloudflare 同步域名" onClose={() => setCfOpen(false)} wide footer={
+        <>
+          <button type="button" className="btn-ghost" onClick={() => setCfOpen(false)}>取消</button>
+          <button type="button" className="btn-primary" disabled={busy || cfLoading || !cfPick} onClick={() => applyCF()}>
+            {busy ? '保存中…' : (cfServer?.id ? '设为公开地址' : '填入')}
+          </button>
+        </>
+      }>
+        <p className="text-[12.5px] text-ink-mut leading-relaxed mb-3">
+          列出 Token 下已托管的域名。指向这台机器 IP 的会排在前面。橙云代理的记录 REALITY 可能连不上，TLS 节点一般没问题。
+        </p>
+        {cfLoading ? (
+          <div className="text-[13px] text-ink-mut py-6 text-center">正在从 Cloudflare 拉取…</div>
+        ) : cfErr ? (
+          <div>
+            <div className="notice">{cfErr}</div>
+            {String(cfErr).includes('Token') ? (
+              <a href="/settings?tab=certs" className="row-act mt-3 inline-block">去设置保存 Token</a>
+            ) : null}
+          </div>
+        ) : (
+          <>
+            {cfDomains.length > 6 ? (
+              <div className="mb-3">
+                <SearchInput value={cfFilter} onChange={e => setCfFilter(e.target.value)} placeholder="筛选域名" />
+              </div>
+            ) : null}
+            {(() => {
+              const q = cfFilter.trim().toLowerCase()
+              const shown = !q ? cfDomains : cfDomains.filter(d =>
+                d.name.includes(q) || (d.zone || '').includes(q) || (d.content || '').includes(q)
+              )
+              if (!shown.length) {
+                return <Empty title="没有可拉取的域名" hint="先把域名 NS 指到 Cloudflare，并确认 Token 绑了这个区。" />
+              }
+              const selected = cfDomains.find(d => d.name === cfPick)
+              return (
+                <>
+                  <div className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-0.5">
+                    {shown.map(d => {
+                      const on = cfPick === d.name
+                      return (
+                        <button
+                          type="button"
+                          key={d.name}
+                          className={`node-pick ${on ? 'is-on' : ''}`}
+                          aria-pressed={on}
+                          onClick={() => setCfPick(d.name)}
+                          onDoubleClick={() => applyCF(d.name)}
+                        >
+                          <span className={`node-check ${on ? 'is-on' : ''}`}>{on ? '✓' : ''}</span>
+                          <span className="min-w-0 flex-1 text-left">
+                            <span className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[13px] font-medium font-mono">{d.name}</span>
+                              {d.matched ? <Badge tone="ok">指向本机</Badge> : null}
+                              {d.proxied ? <Badge tone="muted">已代理</Badge> : null}
+                            </span>
+                            <span className="block text-[12px] text-ink-mut mt-0.5 font-mono truncate">
+                              {[d.type, d.content].filter(Boolean).join(' · ') || d.zone || 'Zone'}
+                            </span>
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {selected?.proxied ? (
+                    <p className="text-[12px] mt-3" style={{ color: 'var(--color-danger)' }}>
+                      这条开了 Cloudflare 代理（橙云）。REALITY 需要 DNS only；TLS 节点可以走橙云。
+                    </p>
+                  ) : null}
+                </>
+              )
+            })()}
+          </>
+        )}
       </Modal>
     </div>
   )

@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -36,9 +38,18 @@ func (c *Cloudflare) httpc() *http.Client {
 }
 
 type cfResp struct {
-	Success bool            `json:"success"`
-	Errors  []cfErr         `json:"errors"`
-	Result  json.RawMessage `json:"result"`
+	Success    bool            `json:"success"`
+	Errors     []cfErr         `json:"errors"`
+	Result     json.RawMessage `json:"result"`
+	ResultInfo cfResultInfo    `json:"result_info"`
+}
+
+type cfResultInfo struct {
+	Page       int `json:"page"`
+	PerPage    int `json:"per_page"`
+	TotalPages int `json:"total_pages"`
+	Count      int `json:"count"`
+	TotalCount int `json:"total_count"`
 }
 
 type cfErr struct {
@@ -57,6 +68,7 @@ type cfRecord struct {
 	Type    string `json:"type"`
 	Name    string `json:"name"`
 	Content string `json:"content"`
+	Proxied bool   `json:"proxied"`
 }
 
 func (c *Cloudflare) do(ctx context.Context, method, path string, body any) (*cfResp, error) {
@@ -202,5 +214,231 @@ func (c *Cloudflare) listTXT(ctx context.Context, zoneID, name string) ([]cfReco
 			out = append(out, r)
 		}
 	}
+	return out, nil
+}
+
+const cfPerPage = 50
+const cfMaxPages = 40
+
+// HostName is a Cloudflare-hosted name that can be used as a server public_host.
+type HostName struct {
+	Name    string `json:"name"`
+	Zone    string `json:"zone"`
+	Type    string `json:"type,omitempty"`
+	Content string `json:"content,omitempty"`
+	Proxied bool   `json:"proxied"`
+	Matched bool   `json:"matched"`
+}
+
+func (c *Cloudflare) forEachPage(ctx context.Context, path string, fn func(json.RawMessage) (int, error)) error {
+	page := 1
+	for {
+		sep := "?"
+		if strings.Contains(path, "?") {
+			sep = "&"
+		}
+		wrap, err := c.do(ctx, http.MethodGet, fmt.Sprintf("%s%sper_page=%d&page=%d", path, sep, cfPerPage, page), nil)
+		if err != nil {
+			return err
+		}
+		n, err := fn(wrap.Result)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return nil
+		}
+		if wrap.ResultInfo.TotalPages > 0 && page >= wrap.ResultInfo.TotalPages {
+			return nil
+		}
+		if wrap.ResultInfo.TotalPages == 0 && n < cfPerPage {
+			return nil
+		}
+		page++
+		if page > cfMaxPages {
+			return nil
+		}
+	}
+}
+
+func (c *Cloudflare) listZones(ctx context.Context) ([]cfZone, error) {
+	var out []cfZone
+	err := c.forEachPage(ctx, "/zones?status=active", func(raw json.RawMessage) (int, error) {
+		var zones []cfZone
+		if len(raw) == 0 || string(raw) == "null" {
+			return 0, nil
+		}
+		if err := json.Unmarshal(raw, &zones); err != nil {
+			return 0, fmt.Errorf("Cloudflare zone 无法解析")
+		}
+		out = append(out, zones...)
+		return len(zones), nil
+	})
+	return out, err
+}
+
+func (c *Cloudflare) listRecords(ctx context.Context, zoneID, recType string) ([]cfRecord, error) {
+	var out []cfRecord
+	path := "/zones/" + zoneID + "/dns_records?type=" + url.QueryEscape(recType)
+	err := c.forEachPage(ctx, path, func(raw json.RawMessage) (int, error) {
+		var recs []cfRecord
+		if len(raw) == 0 || string(raw) == "null" {
+			return 0, nil
+		}
+		if err := json.Unmarshal(raw, &recs); err != nil {
+			return 0, fmt.Errorf("Cloudflare DNS 记录无法解析")
+		}
+		out = append(out, recs...)
+		return len(recs), nil
+	})
+	return out, err
+}
+
+func skipHostName(name string) bool {
+	n := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), "."))
+	if n == "" {
+		return true
+	}
+	for _, label := range strings.Split(n, ".") {
+		if label == "" || label == "*" || strings.HasPrefix(label, "_") {
+			return true
+		}
+	}
+	return false
+}
+
+func collectMatchIPs(vals ...string) []net.IP {
+	var out []net.IP
+	seen := map[string]bool{}
+	for _, v := range vals {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		host := v
+		if h, _, err := net.SplitHostPort(v); err == nil {
+			host = h
+		}
+		host = strings.Trim(host, "[]")
+		ip := net.ParseIP(host)
+		if ip == nil {
+			continue
+		}
+		key := ip.String()
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, ip)
+	}
+	return out
+}
+
+func ipMatches(content string, ips []net.IP) bool {
+	got := net.ParseIP(strings.TrimSpace(strings.Trim(content, "[]")))
+	if got == nil {
+		return false
+	}
+	for _, ip := range ips {
+		if ip.Equal(got) {
+			return true
+		}
+	}
+	return false
+}
+
+type hostAcc struct {
+	HostName
+	types map[string]bool
+	ips   []string
+}
+
+// ListHostNames returns A/AAAA names (and zone apex) from the token's zones.
+// Names whose content equals connectIP or an IP publicHost are marked Matched.
+func (c *Cloudflare) ListHostNames(ctx context.Context, connectIP, publicHost string) ([]HostName, error) {
+	zones, err := c.listZones(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ips := collectMatchIPs(connectIP, publicHost)
+	byName := map[string]*hostAcc{}
+	add := func(name, zone, recType, content string, proxied bool) {
+		if skipHostName(name) {
+			return
+		}
+		name = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), "."))
+		zone = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(zone), "."))
+		a := byName[name]
+		if a == nil {
+			a = &hostAcc{HostName: HostName{Name: name, Zone: zone}, types: map[string]bool{}}
+			byName[name] = a
+		}
+		if recType != "" {
+			a.types[recType] = true
+		}
+		content = strings.TrimSpace(content)
+		if content != "" {
+			dup := false
+			for _, x := range a.ips {
+				if strings.EqualFold(x, content) {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				a.ips = append(a.ips, content)
+			}
+			if ipMatches(content, ips) {
+				a.Matched = true
+			}
+		}
+		if proxied {
+			a.Proxied = true
+		}
+		if a.Zone == "" {
+			a.Zone = zone
+		}
+	}
+	for _, z := range zones {
+		if z.Name == "" || z.ID == "" {
+			continue
+		}
+		add(z.Name, z.Name, "", "", false)
+		for _, typ := range []string{"A", "AAAA"} {
+			recs, err := c.listRecords(ctx, z.ID, typ)
+			if err != nil {
+				return nil, err
+			}
+			for _, rec := range recs {
+				t := rec.Type
+				if t == "" {
+					t = typ
+				}
+				add(rec.Name, z.Name, t, rec.Content, rec.Proxied)
+			}
+		}
+	}
+	out := make([]HostName, 0, len(byName))
+	for _, a := range byName {
+		var types []string
+		if a.types["A"] {
+			types = append(types, "A")
+		}
+		if a.types["AAAA"] {
+			types = append(types, "AAAA")
+		}
+		a.Type = strings.Join(types, ",")
+		a.Content = strings.Join(a.ips, ", ")
+		out = append(out, a.HostName)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Matched != out[j].Matched {
+			return out[i].Matched
+		}
+		if out[i].Proxied != out[j].Proxied {
+			return !out[i].Proxied
+		}
+		return out[i].Name < out[j].Name
+	})
 	return out, nil
 }

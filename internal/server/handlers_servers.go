@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -11,7 +12,9 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
+	"liking/internal/certs"
 	"liking/internal/corecfg"
 	"liking/internal/db"
 	"liking/internal/version"
@@ -149,6 +152,51 @@ func (s *Server) handleSyncServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, map[string]any{"ok": true})
+}
+
+func (s *Server) handleCFDomains(w http.ResponseWriter, r *http.Request) {
+	s.writeCFDomains(w, r, "", "")
+}
+
+func (s *Server) handleServerCFDomains(w http.ResponseWriter, r *http.Request) {
+	id, err := chiID(r, "id")
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	srv, err := db.GetServer(s.DB, id)
+	if err != nil {
+		jsonErr(w, http.StatusNotFound, "服务器不存在")
+		return
+	}
+	s.writeCFDomains(w, r, srv.ConnectIP, srv.PublicHost)
+}
+
+func (s *Server) writeCFDomains(w http.ResponseWriter, r *http.Request, connectIP, publicHost string) {
+	token, _ := db.GetSetting(s.DB, "cf_api_token")
+	if strings.TrimSpace(token) == "" {
+		jsonErr(w, http.StatusBadRequest, "请先在设置里保存 Cloudflare API Token")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	defer cancel()
+	cf := &certs.Cloudflare{Token: token, API: s.CFAPI}
+	domains, err := cf.ListHostNames(ctx, connectIP, publicHost)
+	if err != nil {
+		jsonErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if domains == nil {
+		domains = []certs.HostName{}
+	}
+	serverIP := strings.TrimSpace(connectIP)
+	if serverIP == "" {
+		serverIP = strings.TrimSpace(publicHost)
+	}
+	jsonOK(w, map[string]any{
+		"server_ip": serverIP,
+		"domains":   domains,
+	})
 }
 
 func (s *Server) handleServerInstall(w http.ResponseWriter, r *http.Request) {

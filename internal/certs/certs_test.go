@@ -151,3 +151,83 @@ func TestCloudflarePresentAndCleanup(t *testing.T) {
 		t.Fatalf("left %v", recs)
 	}
 }
+
+func TestCloudflareListHostNames(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer tok" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": false,
+				"errors":  []map[string]any{{"code": 9103, "message": "auth"}},
+			})
+			return
+		}
+		ok := func(result any, page, total int) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success":     true,
+				"result":      result,
+				"result_info": map[string]int{"page": page, "per_page": 50, "total_pages": total, "count": 1, "total_count": total},
+			})
+		}
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		if page < 1 {
+			page = 1
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/zones":
+			if page == 1 {
+				ok([]map[string]string{{"id": "z1", "name": "example.com", "status": "active"}}, 1, 2)
+				return
+			}
+			ok([]map[string]string{{"id": "z2", "name": "other.org", "status": "active"}}, 2, 2)
+		case r.URL.Path == "/zones/z1/dns_records" && r.URL.Query().Get("type") == "A":
+			ok([]map[string]any{
+				{"id": "r1", "type": "A", "name": "hk.example.com", "content": "31.40.214.186", "proxied": false},
+				{"id": "r2", "type": "A", "name": "*.example.com", "content": "1.1.1.1", "proxied": true},
+				{"id": "r3", "type": "A", "name": "_acme-challenge.example.com", "content": "x", "proxied": false},
+				{"id": "r4", "type": "A", "name": "www.example.com", "content": "9.9.9.9", "proxied": true},
+				{"id": "r5", "type": "A", "name": "example.com", "content": "31.40.214.186", "proxied": false},
+			}, 1, 1)
+		case strings.HasPrefix(r.URL.Path, "/zones/") && strings.HasSuffix(r.URL.Path, "/dns_records"):
+			ok([]map[string]any{}, 1, 1)
+		default:
+			http.Error(w, r.Method+" "+r.URL.Path, 404)
+		}
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	cf := &Cloudflare{Token: "tok", API: ts.URL, HTTP: ts.Client()}
+	got, err := cf.ListHostNames(context.Background(), "31.40.214.186", "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]HostName{}
+	for _, h := range got {
+		by[h.Name] = h
+	}
+	if _, ok := by["*.example.com"]; ok {
+		t.Fatal("wildcard")
+	}
+	if _, ok := by["_acme-challenge.example.com"]; ok {
+		t.Fatal("acme")
+	}
+	hk, ok := by["hk.example.com"]
+	if !ok || !hk.Matched || hk.Proxied || hk.Content != "31.40.214.186" {
+		t.Fatalf("hk %+v", hk)
+	}
+	apex, ok := by["example.com"]
+	if !ok || !apex.Matched {
+		t.Fatalf("apex %+v", apex)
+	}
+	www, ok := by["www.example.com"]
+	if !ok || !www.Proxied || www.Matched {
+		t.Fatalf("www %+v", www)
+	}
+	if _, ok := by["other.org"]; !ok {
+		t.Fatalf("missing paged zone: %v", got)
+	}
+	if len(got) < 2 || !got[0].Matched {
+		t.Fatalf("matched should sort first: %+v", got)
+	}
+}

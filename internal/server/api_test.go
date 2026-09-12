@@ -1228,3 +1228,147 @@ func TestHealthz(t *testing.T) {
 		t.Fatalf("health %d", r.Code)
 	}
 }
+
+func TestServerCFDomains(t *testing.T) {
+	cfMux := http.NewServeMux()
+	cfMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer secret-token" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": false,
+				"errors":  []map[string]any{{"code": 9103, "message": "auth"}},
+			})
+			return
+		}
+		ok := func(result any) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success":     true,
+				"result":      result,
+				"result_info": map[string]int{"page": 1, "per_page": 50, "total_pages": 1, "count": 1, "total_count": 1},
+			})
+		}
+		switch {
+		case r.URL.Path == "/zones":
+			ok([]map[string]string{{"id": "z1", "name": "example.com", "status": "active"}})
+		case r.URL.Path == "/zones/z1/dns_records" && r.URL.Query().Get("type") == "A":
+			ok([]map[string]any{
+				{"id": "r1", "type": "A", "name": "hk.example.com", "content": "31.40.214.186", "proxied": false},
+				{"id": "r2", "type": "A", "name": "*.example.com", "content": "1.1.1.1", "proxied": true},
+			})
+		case strings.HasPrefix(r.URL.Path, "/zones/") && strings.HasSuffix(r.URL.Path, "/dns_records"):
+			ok([]any{})
+		default:
+			http.Error(w, r.Method+" "+r.URL.Path, 404)
+		}
+	})
+	cfTS := httptest.NewServer(cfMux)
+	defer cfTS.Close()
+
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	srv.CFAPI = cfTS.URL
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	body, _ := json.Marshal(map[string]string{"name": "n1", "public_host": "31.40.214.186"})
+	res, err = c.Post(ts.URL+"/api/servers", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		Server struct {
+			ID int64 `json:"id"`
+		} `json:"server"`
+	}
+	decodeRes(t, res, &created)
+	if created.Server.ID == 0 {
+		t.Fatal("server")
+	}
+	if _, err := d.Exec(`UPDATE servers SET connect_ip=? WHERE id=?`, "31.40.214.186", created.Server.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err = c.Get(ts.URL + "/api/servers/" + strconv.FormatInt(created.Server.ID, 10) + "/cf-domains")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 400 {
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		t.Fatalf("no token %d %s", res.StatusCode, b)
+	}
+	res.Body.Close()
+
+	put, _ := json.Marshal(map[string]string{"cf_api_token": "secret-token"})
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/api/settings", bytes.NewReader(put))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	res, err = c.Get(ts.URL + "/api/servers/" + strconv.FormatInt(created.Server.ID, 10) + "/cf-domains")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed struct {
+		ServerIP string           `json:"server_ip"`
+		Domains  []certs.HostName `json:"domains"`
+	}
+	decodeRes(t, res, &listed)
+	if listed.ServerIP != "31.40.214.186" {
+		t.Fatalf("server_ip %q", listed.ServerIP)
+	}
+	by := map[string]certs.HostName{}
+	for _, h := range listed.Domains {
+		by[h.Name] = h
+	}
+	if _, ok := by["*.example.com"]; ok {
+		t.Fatal("wildcard leaked")
+	}
+	hk, ok := by["hk.example.com"]
+	if !ok || !hk.Matched {
+		t.Fatalf("hk %+v domains=%+v", hk, listed.Domains)
+	}
+	if _, ok := by["example.com"]; !ok {
+		t.Fatalf("apex missing %+v", listed.Domains)
+	}
+
+	res, err = c.Get(ts.URL + "/api/cf-domains")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all struct {
+		Domains []certs.HostName `json:"domains"`
+	}
+	decodeRes(t, res, &all)
+	if len(all.Domains) == 0 {
+		t.Fatal("cf-domains empty")
+	}
+}
