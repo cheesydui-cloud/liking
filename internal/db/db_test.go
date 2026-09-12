@@ -217,6 +217,63 @@ func TestPackageServersSelectInbounds(t *testing.T) {
 	}
 }
 
+func TestCreatePackageZeroCycle(t *testing.T) {
+	d, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	p, err := CreatePackage(d, "open", 0, 0, 0, "oneway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.CycleDays != 0 || p.TrafficBytes != 0 {
+		t.Fatalf("%+v", p)
+	}
+}
+
+func TestPackageExplicitInbounds(t *testing.T) {
+	d, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	tok, _ := RandomHex(8)
+	s1, err := CreateServer(d, "n1", "1.1.1.1", tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mkIn := func(name string, port int) *Inbound {
+		t.Helper()
+		in, err := CreateInbound(d, &Inbound{
+			ServerID: s1.ID, Name: name, Profile: "vless-reality", Protocol: "vless",
+			Network: "tcp", Security: "reality", Core: "xray", Listen: "0.0.0.0",
+			Port: port, Enabled: true, Settings: "{}", LineKind: "direct",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return in
+	}
+	a := mkIn("a", 443)
+	b := mkIn("b", 8443)
+	p, err := CreatePackage(d, "pick", 0, 0, 0, "oneway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetPackageInbounds(d, p.ID, []int64{a.ID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	p, err = GetPackage(d, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids, err := PackageInboundIDs(d, p)
+	if err != nil || len(ids) != 1 || ids[0] != a.ID {
+		t.Fatalf("ids %+v want %d not %d %v", ids, a.ID, b.ID, err)
+	}
+}
+
 func TestListUsersDoesNotDeadlock(t *testing.T) {
 	d, err := Open(":memory:")
 	if err != nil {

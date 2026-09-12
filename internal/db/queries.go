@@ -485,8 +485,8 @@ func CreatePackage(d *sql.DB, name string, trafficBytes int64, cycleDays, resetD
 	if direction == "" {
 		direction = "oneway"
 	}
-	if cycleDays <= 0 {
-		cycleDays = 30
+	if cycleDays < 0 {
+		cycleDays = 0
 	}
 	res, err := d.Exec(`INSERT INTO packages(name,traffic_bytes,cycle_days,reset_day,direction,created_at) VALUES(?,?,?,?,?,?)`,
 		name, trafficBytes, cycleDays, resetDay, direction, now())

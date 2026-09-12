@@ -40,13 +40,24 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := db.SetPackageServers(s.DB, p.ID, req.ServerIDs); err != nil {
-		jsonErr(w, http.StatusBadRequest, "节点无效")
-		return
-	}
-	if err := db.SetPackageInbounds(s.DB, p.ID, req.InboundIDs, req.Multipliers); err != nil {
-		jsonErr(w, http.StatusBadRequest, err.Error())
-		return
+	if req.InboundIDs != nil {
+		if err := db.SetPackageInbounds(s.DB, p.ID, req.InboundIDs, req.Multipliers); err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := db.SetPackageServers(s.DB, p.ID, nil); err != nil {
+			jsonErr(w, http.StatusBadRequest, "节点无效")
+			return
+		}
+	} else {
+		if err := db.SetPackageServers(s.DB, p.ID, req.ServerIDs); err != nil {
+			jsonErr(w, http.StatusBadRequest, "节点无效")
+			return
+		}
+		if err := db.SetPackageInbounds(s.DB, p.ID, nil, nil); err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	if _, err := corecfg.ProvisionAll(s.DB); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
@@ -101,18 +112,22 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if req.ServerIDs != nil {
+	if req.InboundIDs != nil {
+		if err := db.SetPackageInbounds(s.DB, p.ID, req.InboundIDs, req.Multipliers); err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := db.SetPackageServers(s.DB, p.ID, nil); err != nil {
+			jsonErr(w, http.StatusBadRequest, "节点无效")
+			return
+		}
+	} else if req.ServerIDs != nil {
 		if err := db.SetPackageServers(s.DB, p.ID, req.ServerIDs); err != nil {
 			jsonErr(w, http.StatusBadRequest, "节点无效")
 			return
 		}
 		if err := db.SetPackageInbounds(s.DB, p.ID, nil, nil); err != nil {
 			jsonErr(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	} else if req.InboundIDs != nil {
-		if err := db.SetPackageInbounds(s.DB, p.ID, req.InboundIDs, req.Multipliers); err != nil {
-			jsonErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}

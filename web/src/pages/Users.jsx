@@ -294,8 +294,8 @@ export default function Users() {
             <select className="input-field" value={f.package_id} onChange={e => setF({ ...f, package_id: e.target.value })}>
               <option value="">不绑定</option>
               {pkgs.map(p => {
-                const n = (p.server_ids || []).length
-                const tag = n ? `${n} 台服务器` : ((p.inbound_ids || []).length ? '指定线路' : '全部节点')
+                const n = (p.inbound_ids || []).length
+                const tag = n ? `${n} 个节点` : ((p.server_ids || []).length ? `${p.server_ids.length} 台服务器` : '全部节点')
                 return <option key={p.id} value={p.id}>{p.name} · {tag}</option>
               })}
             </select>

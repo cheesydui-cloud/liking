@@ -1543,3 +1543,107 @@ func TestBackupRestore(t *testing.T) {
 		t.Fatalf("servers %d", len(servers.Servers))
 	}
 }
+
+func TestPackageInboundIDs(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	body, _ := json.Marshal(map[string]string{"name": "hk", "public_host": "hk.example.com"})
+	res, err = c.Post(ts.URL+"/api/servers", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		Server struct {
+			ID int64 `json:"id"`
+		} `json:"server"`
+	}
+	decodeRes(t, res, &created)
+
+	mk := func(name string, port int) int64 {
+		t.Helper()
+		inBody, _ := json.Marshal(map[string]any{
+			"server_id": created.Server.ID, "name": name, "profile": "ss2022", "port": port,
+		})
+		res, err := c.Post(ts.URL+"/api/inbounds", "application/json", bytes.NewReader(inBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out struct {
+			Inbound struct {
+				ID int64 `json:"id"`
+			} `json:"inbound"`
+		}
+		decodeRes(t, res, &out)
+		return out.Inbound.ID
+	}
+	a := mk("a", 8443)
+	b := mk("b", 8444)
+
+	pkgBody, _ := json.Marshal(map[string]any{
+		"name": "pick", "traffic_bytes": 0, "cycle_days": 0, "direction": "oneway",
+		"inbound_ids": []int64{a},
+	})
+	res, err = c.Post(ts.URL+"/api/packages", "application/json", bytes.NewReader(pkgBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkg struct {
+		Package struct {
+			ID         int64   `json:"id"`
+			CycleDays  int     `json:"cycle_days"`
+			InboundIDs []int64 `json:"inbound_ids"`
+			ServerIDs  []int64 `json:"server_ids"`
+		} `json:"package"`
+	}
+	decodeRes(t, res, &pkg)
+	if pkg.Package.CycleDays != 0 {
+		t.Fatalf("cycle %d", pkg.Package.CycleDays)
+	}
+	if len(pkg.Package.InboundIDs) != 1 || pkg.Package.InboundIDs[0] != a {
+		t.Fatalf("inbounds %+v want %d not %d", pkg.Package.InboundIDs, a, b)
+	}
+	if len(pkg.Package.ServerIDs) != 0 {
+		t.Fatalf("servers %+v", pkg.Package.ServerIDs)
+	}
+
+	upd, _ := json.Marshal(map[string]any{"inbound_ids": []int64{a, b}})
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/api/packages/"+strconv.FormatInt(pkg.Package.ID, 10), bytes.NewReader(upd))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, &pkg)
+	if len(pkg.Package.InboundIDs) != 2 {
+		t.Fatalf("updated %+v", pkg.Package.InboundIDs)
+	}
+}
