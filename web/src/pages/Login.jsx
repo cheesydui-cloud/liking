@@ -7,6 +7,8 @@ import { BrandMark, Icon } from '../components/ui'
 export default function Login() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [totp, setTotp] = useState('')
+  const [needTotp, setNeedTotp] = useState(false)
   const [show, setShow] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -32,11 +34,18 @@ export default function Login() {
     setError('')
     setLoading(true)
     try {
-      const data = await api.post('/login', { username, password })
+      const body = { username, password }
+      if (needTotp) body.totp = totp
+      const data = await api.post('/login', body)
       applySession(data)
       navigate('/', { replace: true })
     } catch (err) {
-      setError(err.message || '登录失败')
+      if (err.need_totp) {
+        setNeedTotp(true)
+        setError(err.message || '请填写两步验证码')
+      } else {
+        setError(err.message || '登录失败')
+      }
     } finally {
       setLoading(false)
     }
@@ -71,6 +80,12 @@ export default function Login() {
               </button>
             </div>
           </label>
+          {needTotp && (
+            <label className="block">
+              <span className="block text-[12px] font-medium text-ink-soft mb-1.5">两步验证码</span>
+              <input className="input-field h-10 font-mono tracking-widest" value={totp} onChange={e => setTotp(e.target.value)} required autoFocus inputMode="numeric" autoComplete="one-time-code" placeholder="6 位数字" />
+            </label>
+          )}
           <button className="btn-primary h-10 mt-1" disabled={loading}>{loading ? '登录中…' : '登录'}</button>
         </form>
       </div>

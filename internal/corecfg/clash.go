@@ -93,6 +93,11 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 func ClashDocument(names []string, proxiesYAML string) string {
 	var b strings.Builder
 	b.WriteString("mixed-port: 7890\nallow-lan: false\nmode: rule\n")
+	b.WriteString("dns:\n  enable: true\n  ipv6: false\n  enhanced-mode: fake-ip\n")
+	b.WriteString("  fake-ip-range: 198.18.0.1/16\n")
+	b.WriteString("  nameserver:\n    - 1.1.1.1\n    - 8.8.8.8\n")
+	b.WriteString("  fallback:\n    - 1.0.0.1\n")
+	b.WriteString("  fake-ip-filter:\n    - '*.lan'\n    - localhost\n    - '*.local'\n")
 	b.WriteString("proxies:\n")
 	b.WriteString(proxiesYAML)
 	b.WriteString("proxy-groups:\n  - name: liking\n    type: select\n    proxies:\n")

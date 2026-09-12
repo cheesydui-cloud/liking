@@ -346,6 +346,52 @@ export default function Nodes() {
     } catch (e) { toast(e.message, 'error') }
   }
 
+  const upgradeAgent = async (s) => {
+    if (!(await dialog.confirm({
+      title: '升级 Agent',
+      message: `将 ${s.name} 的 Agent 升到面板版本。机器必须在线，大约几十秒。升级后会自动重启 Agent。`,
+      okText: '升级',
+    }))) return
+    setBusy(true)
+    try {
+      const d = await api.post(`/servers/${s.id}/upgrade-agent`)
+      toast(`已升级到 ${d.version || '当前版本'}，Agent 正在重启`)
+      setTimeout(load, 2500)
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  const uninstallAgent = async (s) => {
+    if (!(await dialog.confirm({
+      title: '卸载 Agent',
+      message: `停掉 ${s.name} 上的内核和 Agent。若与面板同机，不会删除面板程序和数据库。离线机器无法远程卸载。`,
+      danger: true,
+      okText: '卸载',
+    }))) return
+    setBusy(true)
+    try {
+      await api.post(`/servers/${s.id}/uninstall-agent`, { confirm: true })
+      toast('已卸载 Agent')
+      load()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  const rotateToken = async (s) => {
+    if (!(await dialog.confirm({
+      title: '轮换令牌',
+      message: `当前安装命令立刻失效。需要把新命令再跑一遍才能连上。`,
+      danger: true,
+      okText: '轮换',
+    }))) return
+    try {
+      const d = await api.post(`/servers/${s.id}/rotate-token`)
+      if (d.command) setCmd(d.command)
+      toast('令牌已更换')
+      load()
+    } catch (e) { toast(e.message, 'error') }
+  }
+
   const openCreateLine = (serverId) => {
     const sid = Number(serverId)
     setEditId(0)
@@ -528,6 +574,8 @@ export default function Nodes() {
                         <span className="text-[15px] font-semibold truncate">{s.name}</span>
                         <span className={`dot ${s.online ? 'dot-on' : 'dot-off'}`} />
                         {s.online ? <Badge tone="ok">在线</Badge> : <Badge tone="muted">离线</Badge>}
+                        {s.needs_upgrade ? <Badge tone="gold">可升级</Badge> : null}
+                        {s.over_quota ? <Badge tone="danger">流量已满</Badge> : null}
                       </div>
                       <div className="text-[12px] font-mono text-ink-mut mt-1 truncate">
                         {s.public_host || '未填公开地址'}
@@ -540,14 +588,26 @@ export default function Nodes() {
                       <div className="text-[12px] text-ink-mut mt-1.5">
                         Agent {s.agent_ver || '—'} · 心跳 {fmtAgo(s.last_seen)}
                         {s.os ? ` · ${[s.os, s.arch].filter(Boolean).join('/')}` : ''}
+                        {s.cores_running ? ` · 内核 ${s.cores_running}` : ''}
                       </div>
+                      {s.online && (s.disk_total || s.mem_total || s.conns || s.load_milli) ? (
+                        <div className="text-[12px] text-ink-mut mt-1">
+                          {s.disk_total ? `磁盘剩余 ${fmtBytes(s.disk_free)}` : ''}
+                          {s.mem_total ? `${s.disk_total ? ' · ' : ''}内存 ${fmtBytes(s.mem_avail)}` : ''}
+                          {s.load_milli ? ` · 负载 ${(Number(s.load_milli) / 1000).toFixed(2)}` : ''}
+                          {s.conns != null && s.conns !== '' ? ` · 连接 ${s.conns}` : ''}
+                        </div>
+                      ) : null}
                       {s.last_error ? (
                         <div className="text-[12px] mt-1" style={{ color: 'var(--color-danger)' }}>{s.last_error}</div>
                       ) : null}
                     </div>
                     <div className="flex flex-wrap gap-2.5 shrink-0">
                       <button type="button" className="row-act" onClick={() => showInstall(s.id)}>安装命令</button>
+                      <button type="button" className="row-act" disabled={!s.online || busy} onClick={() => upgradeAgent(s)}>一键升级</button>
                       <button type="button" className="row-act" onClick={() => sync(s.id)}>同步</button>
+                      <button type="button" className="row-act" onClick={() => rotateToken(s)}>轮换令牌</button>
+                      <button type="button" className="row-act is-danger" disabled={!s.online || busy} onClick={() => uninstallAgent(s)}>一键卸载</button>
                       <button type="button" className="row-act is-danger" onClick={() => delNode(s.id)}>删除服务器</button>
                     </div>
                   </div>

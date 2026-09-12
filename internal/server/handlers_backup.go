@@ -3,7 +3,12 @@ package server
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,22 +28,33 @@ func (s *Server) handleBackupSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBackupDownload(w http.ResponseWriter, r *http.Request) {
+	password := strings.TrimSpace(r.URL.Query().Get("password"))
+	if r.Method == http.MethodPost {
+		var req struct {
+			Password string `json:"password"`
+		}
+		_ = decodeJSON(r, &req)
+		if strings.TrimSpace(req.Password) != "" {
+			password = strings.TrimSpace(req.Password)
+		}
+	}
 	s.backupMu.Lock()
 	defer s.backupMu.Unlock()
-	snap, err := db.Export(s.DB, version.Version)
+	raw, name, err := s.encodeBackup(password)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "导出失败："+err.Error())
-		return
-	}
-	raw, err := snap.EncodeGzip()
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "压缩失败")
+		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	u := userFromCtx(r.Context())
 	db.AddAudit(s.DB, &u.ID, "backup.download", fmt.Sprintf("v%s %d bytes", version.Version, len(raw)))
-	name := "liking-backup-" + time.Now().UTC().Format("2006-01-02") + ".lkbak"
-	w.Header().Set("Content-Type", "application/gzip")
+	ct := "application/gzip"
+	if password != "" {
+		ct = "application/octet-stream"
+		if !strings.HasSuffix(name, ".lkbak") {
+			name += ".lkbak"
+		}
+	}
+	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 	w.Header().Set("X-Backup-Filename", name)
 	w.Header().Set("Cache-Control", "no-store")
@@ -46,20 +62,45 @@ func (s *Server) handleBackupDownload(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(raw)
 }
 
+func (s *Server) encodeBackup(password string) ([]byte, string, error) {
+	snap, err := db.Export(s.DB, version.Version)
+	if err != nil {
+		return nil, "", fmt.Errorf("导出失败：%s", err.Error())
+	}
+	raw, err := snap.EncodeGzip()
+	if err != nil {
+		return nil, "", fmt.Errorf("压缩失败")
+	}
+	name := "liking-backup-" + time.Now().UTC().Format("2006-01-02") + ".lkbak"
+	if password != "" {
+		enc, err := db.EncryptBackup(raw, password)
+		if err != nil {
+			return nil, "", err
+		}
+		raw = enc
+		name = "liking-backup-" + time.Now().UTC().Format("2006-01-02") + ".lkb1"
+	}
+	return raw, name, nil
+}
+
 func (s *Server) readUploadedBackup(r *http.Request) (*db.Snapshot, error) {
 	ct := r.Header.Get("Content-Type")
+	password := strings.TrimSpace(r.Header.Get("X-Liking-Backup-Password"))
 	if strings.HasPrefix(ct, "multipart/") {
 		if err := r.ParseMultipartForm(maxBackupUpload); err != nil {
 			return nil, fmt.Errorf("读备份失败")
+		}
+		if v := strings.TrimSpace(r.FormValue("file_password")); v != "" {
+			password = v
 		}
 		f, _, err := r.FormFile("file")
 		if err != nil {
 			return nil, fmt.Errorf("请选择备份文件")
 		}
 		defer f.Close()
-		return db.DecodeSnapshot(io.LimitReader(f, maxBackupUpload))
+		return db.DecodeSnapshotMaybeEncrypted(io.LimitReader(f, maxBackupUpload), password)
 	}
-	return db.DecodeSnapshot(io.LimitReader(r.Body, maxBackupUpload))
+	return db.DecodeSnapshotMaybeEncrypted(io.LimitReader(r.Body, maxBackupUpload), password)
 }
 
 func (s *Server) handleBackupPreview(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +156,13 @@ func (s *Server) restoreFrom(w http.ResponseWriter, r *http.Request, u *db.User,
 		jsonErr(w, http.StatusForbidden, "密码不对")
 		return
 	}
-	snap, err := db.DecodeSnapshot(body)
+	filePass := strings.TrimSpace(r.Header.Get("X-Liking-Backup-Password"))
+	if ct := r.Header.Get("Content-Type"); strings.HasPrefix(ct, "multipart/") {
+		if v := strings.TrimSpace(r.FormValue("file_password")); v != "" {
+			filePass = v
+		}
+	}
+	snap, err := db.DecodeSnapshotMaybeEncrypted(body, filePass)
 	if err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -133,4 +180,94 @@ func (s *Server) restoreFrom(w http.ResponseWriter, r *http.Request, u *db.User,
 	db.AddAudit(s.DB, nil, "backup.restore", fmt.Sprintf("from %s at %d", snap.AppVersion, snap.CreatedAt))
 	http.SetCookie(w, newSessionCookie(r, "", -1))
 	jsonOK(w, map[string]any{"ok": true, "relogin": true})
+}
+
+func (s *Server) backupLoop() {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	s.maybeScheduledBackup()
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-t.C:
+			s.maybeScheduledBackup()
+		}
+	}
+}
+
+func (s *Server) maybeScheduledBackup() {
+	hourRaw, _ := db.GetSetting(s.DB, "backup_hour")
+	hourRaw = strings.TrimSpace(hourRaw)
+	if hourRaw == "off" || hourRaw == "-" {
+		return
+	}
+	hour := 3
+	if hourRaw != "" {
+		n, err := strconv.Atoi(hourRaw)
+		if err != nil || n < 0 || n > 23 {
+			return
+		}
+		hour = n
+	}
+	now := db.ClockNow(s.DB)
+	if now.Hour() != hour {
+		return
+	}
+	day := now.Format("2006-01-02")
+	last, _ := db.GetSetting(s.DB, "backup_last_day")
+	if last == day {
+		return
+	}
+	s.backupMu.Lock()
+	defer s.backupMu.Unlock()
+	last, _ = db.GetSetting(s.DB, "backup_last_day")
+	if last == day {
+		return
+	}
+	dir := filepath.Join(s.DataDir, "backups")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		log.Printf("scheduled backup: mkdir: %v", err)
+		return
+	}
+	pw, _ := db.GetSetting(s.DB, "backup_password")
+	raw, name, err := s.encodeBackup(strings.TrimSpace(pw))
+	if err != nil {
+		log.Printf("scheduled backup: %v", err)
+		return
+	}
+	path := filepath.Join(dir, "auto-"+name)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		log.Printf("scheduled backup write: %v", err)
+		return
+	}
+	_ = db.SetSetting(s.DB, "backup_last_day", day)
+	pruneAutoBackups(dir, db.SettingInt(s.DB, "backup_keep", 7))
+}
+
+func pruneAutoBackups(dir string, keep int) {
+	if keep < 1 {
+		keep = 1
+	}
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	var names []string
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		n := e.Name()
+		if strings.HasPrefix(n, "auto-liking-backup-") {
+			names = append(names, n)
+		}
+	}
+	sort.Strings(names)
+	if len(names) <= keep {
+		return
+	}
+	for _, n := range names[:len(names)-keep] {
+		_ = os.Remove(filepath.Join(dir, n))
+	}
 }

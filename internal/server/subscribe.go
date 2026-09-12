@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -41,10 +42,12 @@ func (s *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "error", http.StatusInternalServerError)
 		return
 	}
+	writeSubInfo(w, u)
+	over := s.serverOverMap()
 
 	switch fmtName {
 	case "clash", "meta", "mihomo":
-		body, err := buildClash(s.DB, clients)
+		body, err := buildClash(s.DB, clients, over)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -53,7 +56,7 @@ func (s *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Profile-Title", "liking")
 		_, _ = w.Write([]byte(body))
 	case "singbox", "sing-box", "sfa":
-		body, err := buildSingboxSub(s.DB, clients)
+		body, err := buildSingboxSub(s.DB, clients, over)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -61,7 +64,7 @@ func (s *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body)
 	default:
-		body, err := buildURIList(s.DB, clients)
+		body, err := buildURIList(s.DB, clients, over)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -71,8 +74,30 @@ func (s *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func inboundLive(d *sql.DB, in *db.Inbound) bool {
+func writeSubInfo(w http.ResponseWriter, u *db.User) {
+	if u == nil {
+		return
+	}
+	w.Header().Set("Profile-Update-Interval", "24")
+	expire := u.ExpiresAt
+	if u.PkgExpires > expire {
+		expire = u.PkgExpires
+	}
+	info := "upload=0; download=" + strconv.FormatInt(u.BilledBytes, 10)
+	if u.TrafficCap > 0 {
+		info += "; total=" + strconv.FormatInt(u.TrafficCap, 10)
+	}
+	if expire > 0 {
+		info += "; expire=" + strconv.FormatInt(expire, 10)
+	}
+	w.Header().Set("Subscription-Userinfo", info)
+}
+
+func inboundLive(d *sql.DB, in *db.Inbound, over map[int64]bool) bool {
 	if in == nil || !in.Enabled {
+		return false
+	}
+	if over != nil && over[in.ServerID] {
 		return false
 	}
 	srv, err := db.GetServer(d, in.ServerID)
@@ -94,7 +119,7 @@ func detectSubFormat(ua string) string {
 	}
 }
 
-func buildURIList(d *sql.DB, clients []*db.Client) (string, error) {
+func buildURIList(d *sql.DB, clients []*db.Client, over map[int64]bool) (string, error) {
 	var lines []string
 	for _, c := range clients {
 		if c == nil || !c.Enabled {
@@ -104,7 +129,7 @@ func buildURIList(d *sql.DB, clients []*db.Client) (string, error) {
 		if err != nil {
 			continue
 		}
-		if !inboundLive(d, in) {
+		if !inboundLive(d, in, over) {
 			continue
 		}
 		uri, err := corecfg.ShareURI(in, c)
@@ -116,7 +141,7 @@ func buildURIList(d *sql.DB, clients []*db.Client) (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
-func buildClash(d *sql.DB, clients []*db.Client) (string, error) {
+func buildClash(d *sql.DB, clients []*db.Client, over map[int64]bool) (string, error) {
 	var names []string
 	var b strings.Builder
 	for _, c := range clients {
@@ -127,7 +152,7 @@ func buildClash(d *sql.DB, clients []*db.Client) (string, error) {
 		if err != nil {
 			continue
 		}
-		if !inboundLive(d, in) {
+		if !inboundLive(d, in, over) {
 			continue
 		}
 		name, yaml, err := corecfg.ClashProxyYAML(in, c)
@@ -140,7 +165,7 @@ func buildClash(d *sql.DB, clients []*db.Client) (string, error) {
 	return corecfg.ClashDocument(names, b.String()), nil
 }
 
-func buildSingboxSub(d *sql.DB, clients []*db.Client) ([]byte, error) {
+func buildSingboxSub(d *sql.DB, clients []*db.Client, over map[int64]bool) ([]byte, error) {
 	var tags []string
 	var outs []any
 	for _, c := range clients {
@@ -151,7 +176,7 @@ func buildSingboxSub(d *sql.DB, clients []*db.Client) ([]byte, error) {
 		if err != nil {
 			continue
 		}
-		if !inboundLive(d, in) {
+		if !inboundLive(d, in, over) {
 			continue
 		}
 		ob, err := corecfg.SingboxOutbound(in, c)

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -33,6 +35,43 @@ func SetSetting(d *sql.DB, key, value string) error {
 	return err
 }
 
+func SettingInt(d *sql.DB, key string, fallback int) int {
+	v, _ := GetSetting(d, key)
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+func FileDir(d *sql.DB) string {
+	rows, err := d.Query(`PRAGMA database_list`)
+	if err != nil {
+		return "data"
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var seq int
+		var name, file string
+		if err := rows.Scan(&seq, &name, &file); err != nil {
+			continue
+		}
+		if name != "main" {
+			continue
+		}
+		file = strings.TrimSpace(file)
+		if file == "" || strings.Contains(file, "mode=memory") {
+			return "data"
+		}
+		return filepath.Dir(file)
+	}
+	return "data"
+}
+
 func CountUsers(d *sql.DB) (int, error) {
 	var n int
 	err := d.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&n)
@@ -57,12 +96,14 @@ func GetUser(d *sql.DB, id int64) (*User, error) {
 	u := &User{}
 	var en int
 	var tlim sql.NullInt64
-	err := d.QueryRow(`SELECT id,username,password_hash,role,remark,enabled,expires_at,traffic_limit,used_up,used_down,cycle_start,sub_token,created_at FROM users WHERE id=?`, id).
-		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Remark, &en, &u.ExpiresAt, &tlim, &u.UsedUp, &u.UsedDown, &u.CycleStart, &u.SubToken, &u.CreatedAt)
+	var totpEn int
+	err := d.QueryRow(`SELECT id,username,password_hash,role,remark,enabled,expires_at,traffic_limit,used_up,used_down,cycle_start,sub_token,created_at,totp_secret,totp_enabled,traffic_reset_day FROM users WHERE id=?`, id).
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Remark, &en, &u.ExpiresAt, &tlim, &u.UsedUp, &u.UsedDown, &u.CycleStart, &u.SubToken, &u.CreatedAt, &u.TOTPSecret, &totpEn, &u.TrafficResetDay)
 	if err != nil {
 		return nil, err
 	}
 	u.Enabled = en == 1
+	u.TOTPEnabled = totpEn == 1
 	if tlim.Valid {
 		v := tlim.Int64
 		u.TrafficLimit = &v
@@ -114,6 +155,12 @@ func applyUserBilling(u *User, pkg *Package) {
 	}
 	u.TrafficCap = UserLimitBytes(u, pkg)
 	u.BilledBytes = UserBilledBytes(u, pkg)
+	if u.TrafficCap > 0 {
+		u.QuotaRatio = int(u.BilledBytes * 100 / u.TrafficCap)
+		if u.QuotaRatio > 100 {
+			u.QuotaRatio = 100
+		}
+	}
 }
 
 func queryIDs(d *sql.DB, q string, args ...any) ([]int64, error) {
@@ -157,9 +204,22 @@ func UpdateUser(d *sql.DB, u *User) error {
 	if u.Enabled {
 		en = 1
 	}
-	_, err := d.Exec(`UPDATE users SET username=?, remark=?, enabled=?, expires_at=?, traffic_limit=? WHERE id=?`,
-		u.Username, u.Remark, en, u.ExpiresAt, u.TrafficLimit, u.ID)
+	_, err := d.Exec(`UPDATE users SET username=?, remark=?, enabled=?, expires_at=?, traffic_limit=?, traffic_reset_day=? WHERE id=?`,
+		u.Username, u.Remark, en, u.ExpiresAt, u.TrafficLimit, u.TrafficResetDay, u.ID)
 	return err
+}
+
+func SetUserTOTP(d *sql.DB, id int64, secret string, enabled bool) error {
+	en := 0
+	if enabled {
+		en = 1
+	}
+	_, err := d.Exec(`UPDATE users SET totp_secret=?, totp_enabled=? WHERE id=?`, secret, en, id)
+	return err
+}
+
+func ClearUserTOTP(d *sql.DB, id int64) error {
+	return SetUserTOTP(d, id, "", false)
 }
 
 func SetUserPassword(d *sql.DB, id int64, hash string) error {
@@ -213,6 +273,41 @@ func DeleteSession(d *sql.DB, token string) error {
 	return err
 }
 
+func DeleteSessionsForUser(d *sql.DB, userID int64) error {
+	_, err := d.Exec(`DELETE FROM sessions WHERE user_id=?`, userID)
+	return err
+}
+
+type SessionCount struct {
+	UserID   int64  `json:"user_id"`
+	Username string `json:"username"`
+	Count    int    `json:"count"`
+}
+
+func ListSessionCounts(d *sql.DB) ([]SessionCount, error) {
+	rows, err := d.Query(`SELECT s.user_id, u.username, COUNT(*)
+		FROM sessions s JOIN users u ON u.id=s.user_id
+		WHERE s.expires_at>?
+		GROUP BY s.user_id
+		ORDER BY COUNT(*) DESC, s.user_id`, now())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SessionCount
+	for rows.Next() {
+		var c SessionCount
+		if err := rows.Scan(&c.UserID, &c.Username, &c.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	if out == nil {
+		out = []SessionCount{}
+	}
+	return out, rows.Err()
+}
+
 func CreateServer(d *sql.DB, name, publicHost, token string) (*Server, error) {
 	res, err := d.Exec(`INSERT INTO servers(name,public_host,token,created_at) VALUES(?,?,?,?)`, name, publicHost, token, now())
 	if err != nil {
@@ -259,6 +354,19 @@ func ListServers(d *sql.DB) ([]*Server, error) {
 func UpdateServer(d *sql.DB, s *Server) error {
 	_, err := d.Exec(`UPDATE servers SET name=?, public_host=?, traffic_limit=? WHERE id=?`, s.Name, s.PublicHost, s.TrafficLimit, s.ID)
 	return err
+}
+
+func RotateServerToken(d *sql.DB, id int64) (string, error) {
+	tok, err := RandomHex(20)
+	if err != nil {
+		return "", err
+	}
+	_, err = d.Exec(`UPDATE servers SET token=? WHERE id=?`, tok, id)
+	return tok, err
+}
+
+func ServerOverQuota(s *Server, used int64) bool {
+	return s != nil && s.TrafficLimit > 0 && used >= s.TrafficLimit
 }
 
 type TrafficSum struct {
@@ -887,8 +995,8 @@ func TrafficSeries(d *sql.DB, from, to string, userID, inboundID int64) ([]Traff
 }
 
 func FillTrafficDays(from, to string, got []TrafficPoint) []TrafficPoint {
-	start, err1 := time.ParseInLocation("2006-01-02", from, time.Local)
-	end, err2 := time.ParseInLocation("2006-01-02", to, time.Local)
+	start, err1 := time.ParseInLocation("2006-01-02", from, time.UTC)
+	end, err2 := time.ParseInLocation("2006-01-02", to, time.UTC)
 	if err1 != nil || err2 != nil || end.Before(start) {
 		if got == nil {
 			return []TrafficPoint{}

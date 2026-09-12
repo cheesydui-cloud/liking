@@ -98,8 +98,43 @@ func (s *Server) requireAdmin(next http.Handler) http.Handler {
 			jsonErr(w, http.StatusForbidden, "权限不足")
 			return
 		}
+		if !s.adminIPAllowed(r) {
+			jsonErr(w, http.StatusForbidden, "不在管理员 IP 白名单")
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) adminIPAllowed(r *http.Request) bool {
+	raw, _ := db.GetSetting(s.DB, "admin_cidrs")
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return true
+	}
+	ip := net.ParseIP(clientIP(r))
+	if ip == nil {
+		return false
+	}
+	for _, part := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r' || r == ' ' || r == ';'
+	}) {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if strings.Contains(part, "/") {
+			_, n, err := net.ParseCIDR(part)
+			if err == nil && n.Contains(ip) {
+				return true
+			}
+			continue
+		}
+		if p := net.ParseIP(part); p != nil && p.Equal(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) csrf(next http.Handler) http.Handler {
@@ -162,5 +197,7 @@ func ResetAdminPassword(d *sql.DB, username, pw string) (string, error) {
 	if err := db.SetUserPassword(d, u.ID, hash); err != nil {
 		return "", err
 	}
-	return "已重置 " + username + " 的密码", nil
+	_ = db.ClearUserTOTP(d, u.ID)
+	_ = db.DeleteSessionsForUser(d, u.ID)
+	return "已重置 " + username + " 的密码，并关闭两步验证", nil
 }

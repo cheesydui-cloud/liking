@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import QRCode from 'qrcode'
 import { api } from '../lib/api'
 import { useToast, useDialog, useUser } from '../components/Layout'
 import { Badge, Empty, Field, Icon, Modal, PageHead, Tabs, fmtBytes, fmtDate, fmtDateShort } from '../components/ui'
@@ -34,6 +35,95 @@ function expiryText(ts) {
   return fmtDateShort(ts)
 }
 
+function TotpBox() {
+  const toast = useToast()
+  const { user, refreshUser } = useUser()
+  const [secret, setSecret] = useState('')
+  const [uri, setUri] = useState('')
+  const [qr, setQr] = useState('')
+  const [code, setCode] = useState('')
+  const [pw, setPw] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!uri) { setQr(''); return }
+    QRCode.toDataURL(uri, { width: 200, margin: 1 }).then(setQr).catch(() => setQr(''))
+  }, [uri])
+
+  const begin = async () => {
+    setBusy(true)
+    try {
+      const d = await api.post('/totp/begin')
+      setSecret(d.secret || '')
+      setUri(d.uri || '')
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  const enable = async (e) => {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      await api.post('/totp/enable', { code })
+      toast('已开启两步验证')
+      setSecret(''); setUri(''); setCode('')
+      refreshUser()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  const disable = async (e) => {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      await api.post('/totp/disable', { password: pw, code })
+      toast('已关闭两步验证')
+      setPw(''); setCode('')
+      refreshUser()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  if (user?.totp_enabled) {
+    return (
+      <form onSubmit={disable} className="card p-5 max-w-md space-y-4 mt-4">
+        <div>
+          <div className="text-[15px] font-medium">两步验证</div>
+          <p className="text-[12.5px] text-ink-mut mt-1">已开启。关闭需要当前密码和验证器里的 6 位码。</p>
+        </div>
+        <Field label="当前密码">
+          <input className="input-field" type="password" value={pw} onChange={e => setPw(e.target.value)} required autoComplete="current-password" />
+        </Field>
+        <Field label="验证码">
+          <input className="input-field font-mono" value={code} onChange={e => setCode(e.target.value)} required inputMode="numeric" autoComplete="one-time-code" />
+        </Field>
+        <button className="btn-danger" disabled={busy}>{busy ? '关闭中…' : '关闭两步验证'}</button>
+      </form>
+    )
+  }
+
+  return (
+    <div className="card p-5 max-w-md space-y-4 mt-4">
+      <div>
+        <div className="text-[15px] font-medium">两步验证</div>
+        <p className="text-[12.5px] text-ink-mut mt-1">用验证器扫码后填 6 位码。管理员建议开启。</p>
+      </div>
+      {!secret ? (
+        <button type="button" className="btn-primary" disabled={busy} onClick={begin}>{busy ? '生成中…' : '开始绑定'}</button>
+      ) : (
+        <form onSubmit={enable} className="space-y-3">
+          {qr ? <img src={qr} alt="" width={160} height={160} className="rounded-md" /> : null}
+          <code className="block text-[12px] font-mono break-all">{secret}</code>
+          <Field label="验证码">
+            <input className="input-field font-mono" value={code} onChange={e => setCode(e.target.value)} required inputMode="numeric" autoComplete="one-time-code" autoFocus />
+          </Field>
+          <button className="btn-primary" disabled={busy}>{busy ? '验证中…' : '开启'}</button>
+        </form>
+      )}
+    </div>
+  )
+}
+
 function AccountForm() {
   const toast = useToast()
   const { user, applySession, refreshUser } = useUser()
@@ -64,21 +154,85 @@ function AccountForm() {
   }
 
   return (
-    <form onSubmit={submit} className="card p-5 max-w-md space-y-4">
-      <Field label="用户名">
-        <input className="input-field" value={username} onChange={e => setUsername(e.target.value)} required autoComplete="username" />
-      </Field>
-      <Field label="当前密码" hint="改用户名或密码都要填写。改完后当前会话仍然有效。">
-        <input className="input-field" type="password" value={oldP} onChange={e => setOld(e.target.value)} required autoComplete="current-password" />
-      </Field>
-      <Field label="新密码" hint="留空表示不改密码。至少 6 位。">
-        <input className="input-field" type="password" value={n} onChange={e => setN(e.target.value)} autoComplete="new-password" />
-      </Field>
-      <Field label="确认新密码">
-        <input className="input-field" type="password" value={n2} onChange={e => setN2(e.target.value)} autoComplete="new-password" disabled={!n} />
-      </Field>
-      <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
-    </form>
+    <div className="space-y-5">
+      <form onSubmit={submit} className="card p-5 max-w-md space-y-4">
+        <Field label="用户名">
+          <input className="input-field" value={username} onChange={e => setUsername(e.target.value)} required autoComplete="username" />
+        </Field>
+        <Field label="当前密码" hint="改用户名或密码都要填写。改完后当前会话仍然有效。">
+          <input className="input-field" type="password" value={oldP} onChange={e => setOld(e.target.value)} required autoComplete="current-password" />
+        </Field>
+        <Field label="新密码" hint="留空表示不改密码。至少 6 位。">
+          <input className="input-field" type="password" value={n} onChange={e => setN(e.target.value)} autoComplete="new-password" />
+        </Field>
+        <Field label="确认新密码">
+          <input className="input-field" type="password" value={n2} onChange={e => setN2(e.target.value)} autoComplete="new-password" disabled={!n} />
+        </Field>
+        <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
+      </form>
+      <TotpBox />
+    </div>
+  )
+}
+
+function AuditPanel() {
+  const toast = useToast()
+  const [rows, setRows] = useState(null)
+  const [sessions, setSessions] = useState([])
+  useEffect(() => {
+    api.get('/audit').then(d => setRows(d.audit || [])).catch(e => toast(e.message, 'error'))
+    api.get('/sessions').then(d => setSessions(d.sessions || [])).catch(() => {})
+  }, [])
+  return (
+    <div className="max-w-3xl space-y-5">
+      <div className="card overflow-hidden">
+        <div className="px-5 py-4">
+          <div className="text-[15px] font-medium">操作记录</div>
+          <p className="text-[12.5px] text-ink-mut mt-1">最近 200 条。只读。</p>
+        </div>
+        {!rows ? (
+          <div className="px-5 pb-5 text-[13px] text-ink-mut">加载中</div>
+        ) : rows.length === 0 ? (
+          <Empty title="还没有记录" />
+        ) : (
+          <div className="table-wrap">
+            <table className="data">
+              <thead><tr><th>时间</th><th>动作</th><th>详情</th></tr></thead>
+              <tbody>
+                {rows.map(a => (
+                  <tr key={a.id}>
+                    <td className="text-[12px] whitespace-nowrap">{fmtDate(a.at)}</td>
+                    <td className="font-mono text-[12px]">{a.action}</td>
+                    <td className="text-[12px] text-ink-mut">{a.detail}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      {sessions.length > 0 && (
+        <div className="card overflow-hidden">
+          <div className="px-5 py-4">
+            <div className="text-[15px] font-medium">在线会话</div>
+            <p className="text-[12.5px] text-ink-mut mt-1">只读。每个账号当前有效登录数。</p>
+          </div>
+          <div className="table-wrap">
+            <table className="data">
+              <thead><tr><th>用户</th><th>会话</th></tr></thead>
+              <tbody>
+                {sessions.map((s, i) => (
+                  <tr key={i}>
+                    <td>{s.username || s.user_id}</td>
+                    <td className="tabular-nums">{s.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -105,20 +259,53 @@ function BackupPanel() {
   const [previewErr, setPreviewErr] = useState('')
   const [reading, setReading] = useState(false)
   const [password, setPassword] = useState('')
+  const [filePass, setFilePass] = useState('')
+  const [encPass, setEncPass] = useState('')
   const [ack, setAck] = useState(false)
   const [restoring, setRestoring] = useState(false)
   const [over, setOver] = useState(false)
+  const [sched, setSched] = useState({ backup_hour: '3', backup_keep: 7, backup_password: '', backup_password_set: false })
+  const [schedBusy, setSchedBusy] = useState(false)
 
   const loadLive = () => api.get('/backup/summary').then(setLive).catch(e => toast(e.message, 'error'))
-  useEffect(() => { loadLive() }, [])
+  const loadSched = () => api.get('/settings').then(d => setSched({
+    backup_hour: d.backup_hour || '3',
+    backup_keep: d.backup_keep || 7,
+    backup_password: '',
+    backup_password_set: !!d.backup_password_set,
+  })).catch(() => {})
+  useEffect(() => { loadLive(); loadSched() }, [])
 
   const download = async () => {
     setBusy(true)
     try {
-      await api.download('/backup', 'liking-backup.lkbak')
+      const pw = encPass.trim()
+      if (pw) await api.downloadPost('/backup', { password: pw }, 'liking-backup.lkb1')
+      else await api.download('/backup', 'liking-backup.lkbak')
       toast('已开始下载')
     } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
+  }
+
+  const saveSched = async (e) => {
+    e.preventDefault()
+    setSchedBusy(true)
+    try {
+      const body = { backup_hour: String(sched.backup_hour || '3'), backup_keep: Number(sched.backup_keep) || 7 }
+      if (sched.backup_password !== '') body.backup_password = sched.backup_password
+      await api.put('/settings', body)
+      toast('已保存定时备份')
+      setSched(x => ({ ...x, backup_password: '' }))
+      loadSched()
+    } catch (err) { toast(err.message, 'error') }
+    finally { setSchedBusy(false) }
+  }
+
+  const previewFile = async (f, pass) => {
+    const fd = new FormData()
+    fd.append('file', f)
+    if (pass) fd.append('file_password', pass)
+    return api.postForm('/backup/preview', fd)
   }
 
   const pick = async (f) => {
@@ -128,12 +315,24 @@ function BackupPanel() {
     setPreviewErr('')
     setAck(false)
     setPassword('')
+    setFilePass('')
     if (!f) return
     setReading(true)
-    const fd = new FormData()
-    fd.append('file', f)
     try {
-      setPreview(await api.postForm('/backup/preview', fd))
+      setPreview(await previewFile(f, ''))
+    } catch (e) {
+      setPreviewErr(e.message)
+    } finally {
+      setReading(false)
+    }
+  }
+
+  const retryPreview = async () => {
+    if (!file) return
+    setReading(true)
+    setPreviewErr('')
+    try {
+      setPreview(await previewFile(file, filePass))
     } catch (e) {
       setPreviewErr(e.message)
     } finally {
@@ -148,6 +347,7 @@ function BackupPanel() {
       const fd = new FormData()
       fd.append('file', file)
       fd.append('password', password)
+      if (filePass) fd.append('file_password', filePass)
       await api.postForm('/backup/restore', fd)
       toast('已恢复，请用备份里的管理员账号重新登录')
       window.dispatchEvent(new CustomEvent('lk-unauthorized'))
@@ -177,13 +377,37 @@ function BackupPanel() {
           <BackupStat n={live?.users} label="用户" />
           <BackupStat n={live?.certs} label="证书" />
         </div>
+        <Field label="加密密码" hint="选填。填写后下载 .lkb1，恢复时要同一密码。">
+          <input className="input-field max-w-md" type="password" autoComplete="new-password" value={encPass} onChange={e => setEncPass(e.target.value)} placeholder="留空则不加密" />
+        </Field>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className="btn-primary" disabled={busy} onClick={download}>
-            <Icon name="download" size={15} /> {busy ? '正在打包…' : '下载备份'}
+            <Icon name="download" size={15} /> {busy ? '正在打包…' : (encPass.trim() ? '下载加密备份' : '下载备份')}
           </button>
-          <span className="text-[12px] text-ink-mut">文件名 liking-backup-日期.lkbak</span>
+          <span className="text-[12px] text-ink-mut">{encPass.trim() ? '文件名 liking-backup-日期.lkb1' : '文件名 liking-backup-日期.lkbak'}</span>
         </div>
       </div>
+
+      <form onSubmit={saveSched} className="card p-5 space-y-4">
+        <div>
+          <div className="text-[15px] font-medium">定时备份</div>
+          <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
+            按面板时区每天写一份到数据目录 backups/，只保留最近 N 份。填 off 关闭。升级面板前安装脚本也会另存一份。
+          </p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Field label="小时" hint="0–23，或 off">
+            <input className="input-field" value={sched.backup_hour} onChange={e => setSched({ ...sched, backup_hour: e.target.value })} placeholder="3" />
+          </Field>
+          <Field label="保留份数">
+            <input className="input-field" type="number" min="1" max="30" value={sched.backup_keep} onChange={e => setSched({ ...sched, backup_keep: e.target.value })} />
+          </Field>
+          <Field label="定时加密密码" hint={sched.backup_password_set ? '已保存。留空不改。' : '可选'}>
+            <input className="input-field" type="password" autoComplete="new-password" value={sched.backup_password} onChange={e => setSched({ ...sched, backup_password: e.target.value })} placeholder={sched.backup_password_set ? '••••••••' : ''} />
+          </Field>
+        </div>
+        <button className="btn-primary" disabled={schedBusy}>{schedBusy ? '保存中…' : '保存'}</button>
+      </form>
 
       <div className="card p-5 space-y-4">
         <div>
@@ -218,13 +442,13 @@ function BackupPanel() {
           <input
             type="file"
             className="sr-only"
-            accept=".lkbak,.gz,.json,application/gzip,application/json"
+            accept=".lkbak,.lkb1,.gz,.json,application/gzip,application/json,application/octet-stream"
             onChange={e => pick(e.target.files && e.target.files[0])}
           />
           <Icon name="upload" size={18} className="mx-auto mb-2 text-ink-mut" />
           <div className="text-[13px] font-medium">{file ? file.name : '选择备份文件'}</div>
           <div className="text-[12px] text-ink-mut mt-1">
-            {file ? fmtBytes(file.size) : '.lkbak，可点此或拖到此处'}
+            {file ? fmtBytes(file.size) : '.lkbak / .lkb1，可点此或拖到此处'}
           </div>
         </label>
         {file && (
@@ -234,7 +458,13 @@ function BackupPanel() {
         {reading ? (
           <div className="text-[13px] text-ink-mut">正在读取备份…</div>
         ) : previewErr ? (
-          <div className="notice" style={{ color: 'var(--color-danger)' }}>{previewErr}</div>
+          <div className="space-y-3">
+            <div className="notice" style={{ color: 'var(--color-danger)' }}>{previewErr}</div>
+            <Field label="备份文件密码" hint="加密备份（.lkb1）需要填写。">
+              <input className="input-field" type="password" autoComplete="off" value={filePass} onChange={e => setFilePass(e.target.value)} />
+            </Field>
+            <button type="button" className="btn-primary" disabled={!filePass} onClick={retryPreview}>用密码打开</button>
+          </div>
         ) : preview ? (
           <div className="rounded-lg px-3 py-2.5 space-y-1.5" style={{ background: 'var(--color-fill)' }}>
             <div className="text-[12px] text-ink-mut">当前　{backupLine(live)}</div>
@@ -275,8 +505,12 @@ const settingTabs = [
   { id: 'panel', label: '面板' },
   { id: 'certs', label: '证书' },
   { id: 'backup', label: '备份' },
+  { id: 'security', label: '安全' },
   { id: 'account', label: '账号' },
+  { id: 'audit', label: '审计' },
 ]
+
+const TZ_OPTIONS = ['Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Tokyo', 'Asia/Singapore', 'UTC', 'Europe/London', 'America/New_York']
 
 export default function Settings({ accountOnly = false }) {
   const toast = useToast()
@@ -285,8 +519,12 @@ export default function Settings({ accountOnly = false }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const requested = searchParams.get('tab')
   const tab = accountOnly ? 'account' : (settingTabs.some(t => t.id === requested) ? requested : 'panel')
-  const [f, setF] = useState({ panel_name: '', panel_url: '', acme_email: '', cf_api_token: '' })
+  const [f, setF] = useState({
+    panel_name: '', panel_url: '', acme_email: '', cf_api_token: '',
+    announce: '', admin_cidrs: '', timezone: 'Asia/Shanghai', panel_tls_cert_id: '',
+  })
   const [tokenSet, setTokenSet] = useState(false)
+  const [tlsActive, setTlsActive] = useState(false)
   const [busy, setBusy] = useState(false)
   const [certs, setCerts] = useState([])
   const [issue, setIssue] = useState(emptyIssue)
@@ -300,8 +538,13 @@ export default function Settings({ accountOnly = false }) {
       panel_url: d.panel_url || '',
       acme_email: d.acme_email || '',
       cf_api_token: '',
+      announce: d.announce || '',
+      admin_cidrs: d.admin_cidrs || '',
+      timezone: d.timezone || 'Asia/Shanghai',
+      panel_tls_cert_id: d.panel_tls_cert_id || '',
     })
     setTokenSet(!!d.cf_api_token_set)
+    setTlsActive(!!d.tls_active)
   }).catch(e => toast(e.message, 'error'))
 
   const loadCerts = () => api.get('/certs').then(d => setCerts(d.certs || [])).catch(e => toast(e.message, 'error'))
@@ -318,9 +561,27 @@ export default function Settings({ accountOnly = false }) {
     e.preventDefault()
     setBusy(true)
     try {
-      await api.put('/settings', { panel_name: f.panel_name, panel_url: f.panel_url })
-      toast('已保存')
+      const data = await api.put('/settings', {
+        panel_name: f.panel_name,
+        panel_url: f.panel_url,
+        announce: f.announce,
+        timezone: f.timezone,
+        panel_tls_cert_id: f.panel_tls_cert_id,
+      })
+      const needTLS = !!f.panel_tls_cert_id && !data?.tls_active
+      toast(needTLS ? '已保存。选择证书后请重启 liking-server 才会启用 HTTPS' : '已保存')
       refreshUser()
+      loadSettings()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  const saveSecurity = async (e) => {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      await api.put('/settings', { admin_cidrs: f.admin_cidrs })
+      toast('已保存')
       loadSettings()
     } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
@@ -387,7 +648,7 @@ export default function Settings({ accountOnly = false }) {
     : (issueBusy ? '保存中…' : '保存')
 
   const desc = accountOnly
-    ? '改用户名或登录密码。改完后当前会话仍然有效。'
+    ? '改用户名、登录密码或两步验证。改完后当前会话仍然有效。'
     : `当前版本 ${version || '—'}。VLESS+XHTTP、Trojan、AnyTLS 需要证书；REALITY 不需要。`
 
   return (
@@ -404,7 +665,24 @@ export default function Settings({ accountOnly = false }) {
           <Field label="面板 URL" hint="安装命令与订阅用。留空则按当前访问地址自动生成。">
             <input className="input-field" value={f.panel_url} onChange={e => setF({ ...f, panel_url: e.target.value })} placeholder="https://panel.example.com" />
           </Field>
+          <Field label="时区" hint="流量按日、定时备份按此时区。默认 Asia/Shanghai。">
+            <select className="input-field" value={TZ_OPTIONS.includes(f.timezone) ? f.timezone : f.timezone} onChange={e => setF({ ...f, timezone: e.target.value })}>
+              {!TZ_OPTIONS.includes(f.timezone) && f.timezone ? <option value={f.timezone}>{f.timezone}</option> : null}
+              {TZ_OPTIONS.map(z => <option key={z} value={z}>{z}</option>)}
+            </select>
+          </Field>
+          <Field label="面板 HTTPS 证书" hint={tlsActive ? '当前已启用 HTTPS。改证书后需重启 liking-server。' : '选好后重启 liking-server 才会启用 HTTPS / WSS。'}>
+            <select className="input-field" value={f.panel_tls_cert_id} onChange={e => setF({ ...f, panel_tls_cert_id: e.target.value })}>
+              <option value="">不启用（明文 HTTP）</option>
+              {certs.map(c => (
+                <option key={c.id} value={String(c.id)}>{c.name} · {c.domains || '无域名'}</option>
+              ))}
+            </select>
+          </Field>
         </div>
+        <Field label="公告" hint="登录后所有账号顶部可见。留空则不显示。">
+          <textarea className="input-field min-h-[88px]" value={f.announce} onChange={e => setF({ ...f, announce: e.target.value })} placeholder="维护通知、套餐说明…" />
+        </Field>
         <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
       </form>
       )}
@@ -479,7 +757,24 @@ export default function Settings({ accountOnly = false }) {
 
       {tab === 'backup' && <BackupPanel />}
 
+      {tab === 'security' && (
+      <form onSubmit={saveSecurity} className="card p-5 max-w-3xl space-y-4">
+        <div>
+          <div className="text-[15px] font-medium">管理员 IP 白名单</div>
+          <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
+            逗号或换行分隔 CIDR / IP。留空不限制。写上之后，不在名单里的地址不能登录管理员，也不能调管理接口。先把自己的 IP 写进去。
+          </p>
+        </div>
+        <Field label="CIDR">
+          <textarea className="input-field font-mono text-[12px] min-h-[88px]" value={f.admin_cidrs} onChange={e => setF({ ...f, admin_cidrs: e.target.value })} placeholder="127.0.0.1&#10;10.0.0.0/8" />
+        </Field>
+        <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
+      </form>
+      )}
+
       {tab === 'account' && <AccountForm />}
+
+      {tab === 'audit' && <AuditPanel />}
 
       <Modal open={formOpen} title="签发证书" onClose={() => !issueBusy && setFormOpen(false)} size="lg" footer={
         <>

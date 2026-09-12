@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,13 +37,20 @@ type Cores struct {
 	singboxAPI string
 	clashLast  map[string]clashSnap
 	mitaLast   map[string]bytePair
+	crashes    map[string][]time.Time
+	stopWatch  chan struct{}
+	stopOnce   sync.Once
 }
 
 func NewCores(dir string) *Cores {
-	return &Cores{
+	c := &Cores{
 		dir: dir, procs: map[string]*proc{}, last: map[string]json.RawMessage{}, lastReq: map[string]json.RawMessage{},
 		clashLast: map[string]clashSnap{}, mitaLast: map[string]bytePair{},
+		crashes:   map[string][]time.Time{},
+		stopWatch: make(chan struct{}),
 	}
+	go c.watchLoop()
+	return c
 }
 
 func detectedCores() []string {
@@ -113,6 +121,15 @@ func (c *Cores) applyJSON(name, file string, raw json.RawMessage, bin string, pr
 	if err := os.WriteFile(path, filtered, 0o640); err != nil {
 		c.rollbackJSON(name, file, prev, bin, prefix)
 		c.lastReq[name] = prevReq
+		return err
+	}
+	if err := testCoreConfig(name, bin, path); err != nil {
+		c.rollbackJSON(name, file, prev, bin, prefix)
+		if !hasCfg(prev) {
+			delete(c.lastReq, name)
+		} else {
+			c.lastReq[name] = prevReq
+		}
 		return err
 	}
 	args := append(append([]string{}, prefix...), path)
@@ -308,10 +325,50 @@ func waitListenHeld(raw json.RawMessage, d time.Duration) bool {
 	}
 }
 
+func testCoreConfig(name, bin, path string) error {
+	if bin == "" || path == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	var cmd *exec.Cmd
+	switch name {
+	case "xray":
+		cmd = exec.CommandContext(ctx, bin, "run", "-test", "-c", path)
+	case "singbox":
+		cmd = exec.CommandContext(ctx, bin, "check", "-c", path)
+	default:
+		return nil
+	}
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	msg := strings.TrimSpace(string(out))
+	low := strings.ToLower(msg + " " + err.Error())
+	if strings.Contains(low, "unknown flag") || strings.Contains(low, "unknown command") || strings.Contains(low, "not found") {
+		return nil
+	}
+	if msg == "" {
+		msg = err.Error()
+	}
+	return fmt.Errorf("%s 配置检查失败: %s", name, msg)
+}
+
+func rotateLog(path string) {
+	st, err := os.Stat(path)
+	if err != nil || st.Size() < 8<<20 {
+		return
+	}
+	_ = os.Rename(path, path+".1")
+}
+
 func (c *Cores) startLocked(name, bin string, args []string) error {
 	cmd := exec.Command(bin, args...)
 	cmd.Env = append(os.Environ(), "GOMEMLIMIT=256MiB")
-	logf, err := os.OpenFile(filepath.Join(c.dir, name+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
+	logPath := filepath.Join(c.dir, name+".log")
+	rotateLog(logPath)
+	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
 	if err == nil {
 		cmd.Stdout = logf
 		cmd.Stderr = logf
@@ -375,6 +432,124 @@ func (c *Cores) StopAll() {
 	for name := range c.procs {
 		c.stopLocked(name)
 	}
+	if bin := lookBin("mita"); bin != "" {
+		_ = exec.Command(bin, "stop").Run()
+	}
+}
+
+func (c *Cores) Close() {
+	c.stopOnce.Do(func() {
+		if c.stopWatch != nil {
+			close(c.stopWatch)
+		}
+	})
+	c.StopAll()
+}
+
+func (c *Cores) watchLoop() {
+	t := time.NewTicker(4 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-c.stopWatch:
+			return
+		case <-t.C:
+			c.watchOnce()
+		}
+	}
+}
+
+func (c *Cores) watchOnce() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	for name, raw := range c.last {
+		if !hasCfg(raw) {
+			continue
+		}
+		if name == "mita" {
+			bin := lookBin("mita")
+			if bin == "" || mitaIsRunning(bin) {
+				continue
+			}
+			if c.tooManyCrashes(name, now) {
+				continue
+			}
+			path := filepath.Join(c.dir, "mita.json")
+			if err := mitaApply(bin, path); err != nil {
+				c.noteCrash(name, now)
+				log.Printf("agent watchdog: mita: %v", err)
+			}
+			continue
+		}
+		if c.aliveLocked(name) {
+			continue
+		}
+		if c.tooManyCrashes(name, now) {
+			continue
+		}
+		bin := lookBin(name)
+		if name == "singbox" {
+			bin = lookBin("sing-box", "singbox")
+		}
+		if name == "xray" && c.xrayBin != "" {
+			bin = c.xrayBin
+		}
+		if bin == "" {
+			continue
+		}
+		path := filepath.Join(c.dir, name+".json")
+		prefix := []string{"run", "-c"}
+		if err := c.startLocked(name, bin, append(append([]string{}, prefix...), path)); err != nil {
+			c.noteCrash(name, now)
+			log.Printf("agent watchdog: %s: %v", name, err)
+		}
+	}
+}
+
+func (c *Cores) tooManyCrashes(name string, now time.Time) bool {
+	cut := now.Add(-2 * time.Minute)
+	keep := c.crashes[name][:0]
+	for _, t := range c.crashes[name] {
+		if t.After(cut) {
+			keep = append(keep, t)
+		}
+	}
+	c.crashes[name] = keep
+	return len(keep) >= 5
+}
+
+func (c *Cores) noteCrash(name string, now time.Time) {
+	c.crashes[name] = append(c.crashes[name], now)
+}
+
+func (c *Cores) ListenPorts() []int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	seen := map[int]struct{}{}
+	var out []int
+	add := func(raw json.RawMessage) {
+		tcp, udp := publicListenSpecs(raw)
+		for _, a := range append(tcp, udp...) {
+			_, p, err := net.SplitHostPort(a)
+			if err != nil {
+				continue
+			}
+			n, _ := strconv.Atoi(p)
+			if n <= 0 {
+				continue
+			}
+			if _, ok := seen[n]; ok {
+				continue
+			}
+			seen[n] = struct{}{}
+			out = append(out, n)
+		}
+	}
+	for _, raw := range c.last {
+		add(raw)
+	}
+	return out
 }
 
 func (c *Cores) Running() []string {
@@ -387,6 +562,20 @@ func (c *Cores) Running() []string {
 			case <-p.done:
 			default:
 				out = append(out, name)
+			}
+		}
+	}
+	if hasCfg(c.last["mita"]) {
+		if bin := lookBin("mita"); bin != "" && mitaIsRunning(bin) {
+			found := false
+			for _, n := range out {
+				if n == "mita" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				out = append(out, "mita")
 			}
 		}
 	}

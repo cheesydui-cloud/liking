@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -348,20 +349,40 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	url, _ := db.GetSetting(s.DB, "panel_url")
 	email, _ := db.GetSetting(s.DB, "acme_email")
 	token, _ := db.GetSetting(s.DB, "cf_api_token")
+	announce, _ := db.GetSetting(s.DB, "announce")
+	cidrs, _ := db.GetSetting(s.DB, "admin_cidrs")
+	tlsID, _ := db.GetSetting(s.DB, "panel_tls_cert_id")
+	backupHour, _ := db.GetSetting(s.DB, "backup_hour")
+	backupPass, _ := db.GetSetting(s.DB, "backup_password")
 	jsonOK(w, map[string]any{
-		"panel_name":       name,
-		"panel_url":        url,
-		"acme_email":       email,
-		"cf_api_token_set": strings.TrimSpace(token) != "",
+		"panel_name":          name,
+		"panel_url":           url,
+		"acme_email":          email,
+		"cf_api_token_set":    strings.TrimSpace(token) != "",
+		"announce":            announce,
+		"admin_cidrs":         cidrs,
+		"timezone":            db.Timezone(s.DB),
+		"panel_tls_cert_id":   tlsID,
+		"backup_hour":         backupHour,
+		"backup_keep":         db.SettingInt(s.DB, "backup_keep", 7),
+		"backup_password_set": strings.TrimSpace(backupPass) != "",
+		"tls_active":          s.TLSActive,
 	})
 }
 
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		PanelName *string `json:"panel_name"`
-		PanelURL  *string `json:"panel_url"`
-		AcmeEmail *string `json:"acme_email"`
-		CFToken   *string `json:"cf_api_token"`
+		PanelName      *string `json:"panel_name"`
+		PanelURL       *string `json:"panel_url"`
+		AcmeEmail      *string `json:"acme_email"`
+		CFToken        *string `json:"cf_api_token"`
+		Announce       *string `json:"announce"`
+		AdminCIDRs     *string `json:"admin_cidrs"`
+		Timezone       *string `json:"timezone"`
+		PanelTLSCertID *string `json:"panel_tls_cert_id"`
+		BackupHour     *string `json:"backup_hour"`
+		BackupKeep     *int    `json:"backup_keep"`
+		BackupPassword *string `json:"backup_password"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -379,5 +400,49 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	if req.CFToken != nil && strings.TrimSpace(*req.CFToken) != "" {
 		_ = db.SetSetting(s.DB, "cf_api_token", strings.TrimSpace(*req.CFToken))
 	}
-	jsonOK(w, map[string]any{"ok": true})
+	if req.Announce != nil {
+		_ = db.SetSetting(s.DB, "announce", strings.TrimSpace(*req.Announce))
+	}
+	if req.AdminCIDRs != nil {
+		_ = db.SetSetting(s.DB, "admin_cidrs", strings.TrimSpace(*req.AdminCIDRs))
+	}
+	if req.Timezone != nil {
+		tz := strings.TrimSpace(*req.Timezone)
+		if tz == "" {
+			tz = db.DefaultTimezone
+		}
+		if _, err := time.LoadLocation(tz); err != nil {
+			jsonErr(w, http.StatusBadRequest, "时区无效")
+			return
+		}
+		_ = db.SetSetting(s.DB, "timezone", tz)
+	}
+	if req.PanelTLSCertID != nil {
+		_ = db.SetSetting(s.DB, "panel_tls_cert_id", strings.TrimSpace(*req.PanelTLSCertID))
+	}
+	if req.BackupHour != nil {
+		h := strings.TrimSpace(*req.BackupHour)
+		if h != "" && h != "off" && h != "-" {
+			n, err := strconv.Atoi(h)
+			if err != nil || n < 0 || n > 23 {
+				jsonErr(w, http.StatusBadRequest, "备份小时无效")
+				return
+			}
+		}
+		_ = db.SetSetting(s.DB, "backup_hour", h)
+	}
+	if req.BackupKeep != nil {
+		n := *req.BackupKeep
+		if n < 1 {
+			n = 1
+		}
+		if n > 30 {
+			n = 30
+		}
+		_ = db.SetSetting(s.DB, "backup_keep", strconv.Itoa(n))
+	}
+	if req.BackupPassword != nil {
+		_ = db.SetSetting(s.DB, "backup_password", *req.BackupPassword)
+	}
+	jsonOK(w, map[string]any{"ok": true, "tls_active": s.TLSActive})
 }

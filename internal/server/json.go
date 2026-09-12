@@ -14,9 +14,17 @@ func jsonOK(w http.ResponseWriter, data any) {
 }
 
 func jsonErr(w http.ResponseWriter, code int, msg string) {
+	jsonErrExtra(w, code, msg, nil)
+}
+
+func jsonErrExtra(w http.ResponseWriter, code int, msg string, extra map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+	m := map[string]any{"error": msg}
+	for k, v := range extra {
+		m[k] = v
+	}
+	_ = json.NewEncoder(w).Encode(m)
 }
 
 func decodeJSON(r *http.Request, v any) error {

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -68,14 +69,18 @@ func run(args []string) int {
 	if err != nil {
 		log.Fatalf("server: %v", err)
 	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalf("listen: %v", err)
+	}
+	ln = srv.WrapListener(ln)
 	httpSrv := &http.Server{
-		Addr:              addr,
 		Handler:           srv.Router(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
 		log.Printf("liking-server %s listening on %s", version.Version, addr)
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
 	}()

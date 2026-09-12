@@ -57,6 +57,7 @@ func main() {
 	if err := agent.Run(ctx, agent.Config{
 		ConnectURL: connect,
 		Token:      token,
+		TokenFile:  tokenFile,
 		Dir:        dir,
 		Insecure:   insecure,
 	}); err != nil && err != context.Canceled {

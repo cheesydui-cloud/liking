@@ -42,11 +42,38 @@ func (s *Server) decorateServers(list []*db.Server) {
 			x.UsedUp = t.Up
 			x.UsedDown = t.Down
 		}
+		x.OverQuota = db.ServerOverQuota(x, x.UsedUp+x.UsedDown)
+		x.NeedsUpgrade = x.Online == 1 && x.AgentVer != "" && x.AgentVer != version.Version
 		if up, down, ok := s.Hub.Live(x.ID); ok {
 			x.NetUpBps = up
 			x.NetDownBps = down
 		}
+		if h, ok := s.Hub.Health(x.ID); ok {
+			x.DiskFree = h.DiskFree
+			x.DiskTotal = h.DiskTotal
+			x.MemAvail = h.MemAvail
+			x.MemTotal = h.MemTotal
+			x.LoadMilli = h.LoadMilli
+			x.Conns = h.Conns
+			if len(h.CoresRunning) > 0 {
+				x.CoresRunning = strings.Join(h.CoresRunning, ",")
+			}
+		}
 	}
+}
+
+func (s *Server) serverOverMap() map[int64]bool {
+	list, err := db.ListServers(s.DB)
+	if err != nil {
+		return nil
+	}
+	totals, _ := db.ServerTrafficTotals(s.DB)
+	out := map[int64]bool{}
+	for _, x := range list {
+		t := totals[x.ID]
+		out[x.ID] = db.ServerOverQuota(x, t.Up+t.Down)
+	}
+	return out
 }
 
 func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {

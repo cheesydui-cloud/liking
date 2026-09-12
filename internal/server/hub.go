@@ -53,6 +53,7 @@ func NewHub(d *sql.DB) *Hub {
 
 type agentConn struct {
 	serverID  int64
+	osName    string
 	arch      string
 	ws        *websocket.Conn
 	writeCh   chan []byte
@@ -62,10 +63,17 @@ type agentConn struct {
 	pending   map[string]chan json.RawMessage
 	idSeq     atomic.Uint64
 
-	liveMu      sync.Mutex
-	upBps       int64
-	downBps     int64
-	lastStatsAt time.Time
+	liveMu       sync.Mutex
+	upBps        int64
+	downBps      int64
+	lastStatsAt  time.Time
+	diskFree     int64
+	diskTotal    int64
+	memAvail     int64
+	memTotal     int64
+	loadMilli    int64
+	conns        int
+	coresRunning string
 }
 
 func (a *agentConn) nextID() string {
@@ -117,6 +125,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	ac := &agentConn{
 		serverID: srv.ID,
 		arch:     hello.Arch,
+		osName:   hello.OS,
 		ws:       ws,
 		writeCh:  make(chan []byte, 16),
 		closed:   make(chan struct{}),
@@ -261,7 +270,7 @@ func (h *Hub) readerLoop(parent context.Context, ac *agentConn) {
 			}
 			h.noteLive(ac, st)
 			h.applyStats(st.Samples)
-		case wsproto.TypeApplyAck, wsproto.TypeHelloAck:
+		case wsproto.TypeApplyAck, wsproto.TypeHelloAck, wsproto.TypeUpgradeAck, wsproto.TypeUninstallAck:
 			ac.dispatchAck(env)
 		default:
 			log.Printf("hub: server %d unknown frame %q", ac.serverID, env.Type)
@@ -292,12 +301,15 @@ func (ac *agentConn) dispatchAck(env wsproto.Envelope) {
 	}
 }
 
-func (h *Hub) SendApply(serverID int64, cfg wsproto.ApplyConfig) error {
+func (h *Hub) SendRPC(serverID int64, typ string, payload any, timeout time.Duration) (json.RawMessage, error) {
 	h.mu.RLock()
 	ac, ok := h.conns[serverID]
 	h.mu.RUnlock()
 	if !ok {
-		return fmt.Errorf("server %d not connected", serverID)
+		return nil, fmt.Errorf("Agent 不在线")
+	}
+	if timeout <= 0 {
+		timeout = applyAckTimeout
 	}
 	id := ac.nextID()
 	ch := make(chan json.RawMessage, 1)
@@ -310,31 +322,82 @@ func (h *Hub) SendApply(serverID int64, cfg wsproto.ApplyConfig) error {
 		ac.pendMu.Unlock()
 	}()
 
-	payload, _ := json.Marshal(cfg)
-	ac.enqueueWrite(wsproto.Envelope{Type: wsproto.TypeApply, ID: id, Payload: payload})
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	ac.enqueueWrite(wsproto.Envelope{Type: typ, ID: id, Payload: raw})
 
 	select {
-	case raw := <-ch:
-		var ack wsproto.ApplyAck
-		if err := json.Unmarshal(raw, &ack); err != nil {
-			return fmt.Errorf("malformed apply_ack: %w", err)
-		}
-		if len(ack.Cores) > 0 {
-			_ = db.SetServerCores(h.DB, serverID, ack.Cores)
-		}
-		if !ack.OK {
-			msg := strings.TrimSpace(ack.Error)
-			if msg == "" {
-				return fmt.Errorf("配置下发被拒绝")
-			}
-			return fmt.Errorf("%s", msg)
-		}
-		return nil
-	case <-time.After(applyAckTimeout):
-		return errors.New("apply_ack timeout")
+	case ack := <-ch:
+		return ack, nil
+	case <-time.After(timeout):
+		return nil, errors.New("等待 Agent 回复超时")
 	case <-ac.closed:
-		return errors.New("connection closed before ack")
+		return nil, errors.New("连接在回复前断开")
 	}
+}
+
+func (h *Hub) SendApply(serverID int64, cfg wsproto.ApplyConfig) error {
+	raw, err := h.SendRPC(serverID, wsproto.TypeApply, cfg, applyAckTimeout)
+	if err != nil {
+		if err.Error() == "Agent 不在线" {
+			return fmt.Errorf("server %d not connected", serverID)
+		}
+		return err
+	}
+	var ack wsproto.ApplyAck
+	if err := json.Unmarshal(raw, &ack); err != nil {
+		return fmt.Errorf("malformed apply_ack: %w", err)
+	}
+	if len(ack.Cores) > 0 {
+		_ = db.SetServerCores(h.DB, serverID, ack.Cores)
+	}
+	if !ack.OK {
+		msg := strings.TrimSpace(ack.Error)
+		if msg == "" {
+			return fmt.Errorf("配置下发被拒绝")
+		}
+		return fmt.Errorf("%s", msg)
+	}
+	return nil
+}
+
+func (h *Hub) ConnMeta(id int64) (osName, arch string, ok bool) {
+	h.mu.RLock()
+	ac, exists := h.conns[id]
+	h.mu.RUnlock()
+	if !exists {
+		return "", "", false
+	}
+	return ac.osName, ac.arch, true
+}
+
+func (h *Hub) Health(id int64) (wsproto.Stats, bool) {
+	h.mu.RLock()
+	ac, exists := h.conns[id]
+	h.mu.RUnlock()
+	if !exists {
+		return wsproto.Stats{}, false
+	}
+	ac.liveMu.Lock()
+	defer ac.liveMu.Unlock()
+	if ac.lastStatsAt.IsZero() || time.Since(ac.lastStatsAt) > 90*time.Second {
+		return wsproto.Stats{}, false
+	}
+	var running []string
+	if ac.coresRunning != "" {
+		running = strings.Split(ac.coresRunning, ",")
+	}
+	return wsproto.Stats{
+		DiskFree:     ac.diskFree,
+		DiskTotal:    ac.diskTotal,
+		MemAvail:     ac.memAvail,
+		MemTotal:     ac.memTotal,
+		LoadMilli:    ac.loadMilli,
+		Conns:        ac.conns,
+		CoresRunning: running,
+	}, true
 }
 
 func (h *Hub) Live(id int64) (up, down int64, ok bool) {
@@ -356,6 +419,15 @@ func (h *Hub) noteLive(ac *agentConn, st wsproto.Stats) {
 	now := time.Now()
 	ac.liveMu.Lock()
 	defer ac.liveMu.Unlock()
+	ac.diskFree = st.DiskFree
+	ac.diskTotal = st.DiskTotal
+	ac.memAvail = st.MemAvail
+	ac.memTotal = st.MemTotal
+	ac.loadMilli = st.LoadMilli
+	ac.conns = st.Conns
+	if len(st.CoresRunning) > 0 {
+		ac.coresRunning = strings.Join(st.CoresRunning, ",")
+	}
 	if st.HasNet {
 		ac.upBps = st.NetUp
 		ac.downBps = st.NetDown
@@ -378,7 +450,7 @@ func (h *Hub) noteLive(ac *agentConn, st wsproto.Stats) {
 }
 
 func (h *Hub) applyStats(samples []wsproto.Sample) {
-	day := time.Now().Format("2006-01-02")
+	day := db.ClockDay(h.DB)
 	touched := map[int64]struct{}{}
 	for _, s := range samples {
 		if s.Email == "" || strings.HasPrefix(s.Email, "relay.") {

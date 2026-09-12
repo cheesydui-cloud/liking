@@ -15,6 +15,7 @@ export function UserProvider({ children }) {
   const [panelName, setPanelName] = useState('liking')
   const [version, setVersion] = useState('')
   const [sub, setSub] = useState(null)
+  const [announce, setAnnounce] = useState('')
   const [toasts, setToasts] = useState([])
   const [dialog, setDialog] = useState(null)
 
@@ -25,6 +26,7 @@ export function UserProvider({ children }) {
       if (data?.panel_name) setPanelName(data.panel_name)
       if (data?.version) setVersion(data.version)
       setSub(data?.sub || null)
+      if (data?.announce != null) setAnnounce(data.announce)
       return data
     } catch {
       setUser(null)
@@ -35,6 +37,7 @@ export function UserProvider({ children }) {
   useEffect(() => {
     api.get('/branding').then(d => {
       if (d?.panel_name) setPanelName(d.panel_name)
+      if (d?.announce != null) setAnnounce(d.announce)
     }).catch(() => {})
     refreshUser()
   }, [refreshUser])
@@ -60,6 +63,7 @@ export function UserProvider({ children }) {
     if (data?.panel_name) setPanelName(data.panel_name)
     if (data?.version) setVersion(data.version)
     setSub(data?.sub || null)
+    if (data?.announce != null) setAnnounce(data.announce)
   }, [])
 
   const confirm = useCallback((opts) => new Promise(resolve => {
@@ -74,7 +78,7 @@ export function UserProvider({ children }) {
   }
 
   return (
-    <UserCtx.Provider value={{ user, setUser, panelName, version, sub, refreshUser, applySession }}>
+    <UserCtx.Provider value={{ user, setUser, panelName, version, sub, announce, refreshUser, applySession }}>
       <ToastCtx.Provider value={toast}>
         <DialogCtx.Provider value={{ confirm, prompt }}>
           {children}
@@ -132,7 +136,7 @@ function SideLink({ to, end, icon, children }) {
 }
 
 export function Layout({ children }) {
-  const { user, panelName, version, setUser } = useUser()
+  const { user, panelName, version, announce, setUser } = useUser()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const isAdmin = user?.role === 'admin'
@@ -227,7 +231,12 @@ export function Layout({ children }) {
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 sm:py-5">
-          <div className="max-w-[1280px] mx-auto">{children}</div>
+          <div className="max-w-[1280px] mx-auto">
+            {(announce || '').trim() ? (
+              <div className="notice mb-4">{announce}</div>
+            ) : null}
+            {children}
+          </div>
         </div>
       </main>
     </div>

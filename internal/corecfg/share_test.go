@@ -108,6 +108,19 @@ func TestClashAndSingboxSkipMieru(t *testing.T) {
 	}
 }
 
+func TestClashDocumentDNS(t *testing.T) {
+	doc := ClashDocument([]string{"a"}, "  - name: \"a\"\n    type: ss\n")
+	if !strings.Contains(doc, "enhanced-mode: fake-ip") {
+		t.Fatalf("missing fake-ip\n%s", doc)
+	}
+	if !strings.Contains(doc, "fake-ip-range: 198.18.0.1/16") {
+		t.Fatalf("missing range\n%s", doc)
+	}
+	if !strings.Contains(doc, "fake-ip-filter") {
+		t.Fatalf("missing filter\n%s", doc)
+	}
+}
+
 func TestShareHostFallsBackToConnectIP(t *testing.T) {
 	in := &db.Inbound{ConnectIP: "177.5.54.5"}
 	if ShareHost(in) != "177.5.54.5" {

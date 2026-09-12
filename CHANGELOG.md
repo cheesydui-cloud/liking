@@ -2,6 +2,24 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.1.32 — 2026-09-13
+
+面板缺运维能力：Agent 不能远程升级/卸载，流量超量不断连，备份不能加密，管理员没有 2FA。
+
+### 改进
+- 服务器管理一键升级 / 一键卸载 Agent（在线机器通过 WSS 拉面板 `/v1/agent-bin`，校验 sha256 后替换并重启；同机卸载不删面板和数据库）。可轮换 Agent 令牌
+- `liking-upgrade` 升级前备份 `panel.db`（保留 7 份），并重启本机 `liking-agent`
+- 面板可选 HTTPS（设置里选证书后重启 liking-server）；订阅带 `Subscription-Userinfo` 和 `Profile-Update-Interval`
+- 时区默认 Asia/Shanghai；公告；管理员 IP 白名单；管理员 TOTP 两步验证；操作审计和在线会话只读
+- 备份可加密为 `.lkb1`，定时备份保留 N 份；流量页 CSV / 本月 / 计费·原始·网卡三行数；套餐按节点设倍率；用户批量开户、流量重置日、80% 预警
+- 服务器流量上限真正生效（超量停入站并摘掉客户端）；内核崩溃 watchdog、apply 前 `xray -test` / `sing-box check`；Clash 订阅 DNS 用 conservative fake-ip
+- Agent 上报磁盘 / 内存 / 负载 / 连接数 / 正在跑的内核
+
+### 升级注意
+- 升面板。同机 Agent 会随 `liking-upgrade` 一起重启；其它机器在服务器管理点「一键升级」，或再跑一次安装命令
+- 选择面板证书后必须重启 `liking-server` 才会变成 HTTPS
+- 回滚：`liking-upgrade --release v0.1.31`
+
 ## v0.1.31 — 2026-09-13
 
 Agent 只采 Xray 用户流量，AnyTLS / Mieru 不计费；日表有数据但管理端看不到，用户进度条也不按双向计费。

@@ -3,7 +3,7 @@ import { api } from '../lib/api'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, Icon, Modal, PageHead, SearchInput } from '../components/ui'
 
-const emptyForm = { name: '', gb: '', direction: 'oneway', inbound_ids: [] }
+const emptyForm = { name: '', gb: '', direction: 'oneway', inbound_ids: [], multipliers: {} }
 
 function protoShort(profile) {
   switch (profile) {
@@ -106,6 +106,7 @@ export default function Packages() {
       gb: p.traffic_bytes ? String(Math.round((p.traffic_bytes / 1024 / 1024 / 1024) * 1000) / 1000) : '',
       direction: p.direction || 'oneway',
       inbound_ids: selectedInboundIds(p, ins),
+      multipliers: Object.fromEntries((selectedInboundIds(p, ins) || []).map((id, i) => [id, p.multipliers?.[i] ?? 1])),
     })
     setFormOpen(true)
   }
@@ -137,6 +138,10 @@ export default function Packages() {
       cycle_days: 0,
       direction: f.direction,
       inbound_ids: f.inbound_ids,
+      multipliers: f.inbound_ids.map(id => {
+        const n = Number(f.multipliers?.[id])
+        return Number.isFinite(n) && n > 0 ? n : 1
+      }),
     }
     const wasEdit = !!editId
     try {
@@ -330,6 +335,19 @@ export default function Packages() {
                               <span className="block text-[12px] text-ink-soft">{protoShort(n.profile)}</span>
                               <span className="block text-[12px] text-ink-mut font-mono tabular-nums">:{n.port}</span>
                             </span>
+                            {on ? (
+                              <label className="shrink-0 text-[11px] text-ink-mut ml-2" onClick={e => e.stopPropagation()}>
+                                倍率
+                                <input
+                                  className="input-field h-7 w-14 ml-1 text-[12px] tabular-nums"
+                                  type="number"
+                                  min="0.1"
+                                  step="0.1"
+                                  value={f.multipliers?.[n.id] ?? 1}
+                                  onChange={e => setF(prev => ({ ...prev, multipliers: { ...prev.multipliers, [n.id]: e.target.value } }))}
+                                />
+                              </label>
+                            ) : null}
                           </button>
                         )
                       })}

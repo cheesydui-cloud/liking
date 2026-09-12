@@ -18,8 +18,12 @@ type User struct {
 	PackageName  string `json:"package_name,omitempty"`
 	PkgExpires   int64  `json:"package_expires_at,omitempty"`
 	TrafficCap   int64  `json:"traffic_cap,omitempty"`
-	BilledBytes  int64  `json:"billed_bytes"`
-	Direction    string `json:"direction,omitempty"`
+	BilledBytes      int64  `json:"billed_bytes"`
+	Direction        string `json:"direction,omitempty"`
+	TOTPEnabled      bool   `json:"totp_enabled"`
+	TOTPSecret       string `json:"-"`
+	TrafficResetDay  int    `json:"traffic_reset_day"`
+	QuotaRatio       int    `json:"quota_ratio,omitempty"`
 }
 
 type Server struct {
@@ -41,8 +45,17 @@ type Server struct {
 	TrafficLimit int64  `json:"traffic_limit"`
 	UsedUp       int64  `json:"used_up"`
 	UsedDown     int64  `json:"used_down"`
-	NetUpBps     int64  `json:"net_up_bps"`
-	NetDownBps   int64  `json:"net_down_bps"`
+	NetUpBps       int64  `json:"net_up_bps"`
+	NetDownBps     int64  `json:"net_down_bps"`
+	DiskFree       int64  `json:"disk_free,omitempty"`
+	DiskTotal      int64  `json:"disk_total,omitempty"`
+	MemAvail       int64  `json:"mem_avail,omitempty"`
+	MemTotal       int64  `json:"mem_total,omitempty"`
+	LoadMilli      int64  `json:"load_milli,omitempty"`
+	Conns          int    `json:"conns,omitempty"`
+	CoresRunning   string `json:"cores_running,omitempty"`
+	OverQuota      bool   `json:"over_quota,omitempty"`
+	NeedsUpgrade   bool   `json:"needs_upgrade,omitempty"`
 }
 
 type Certificate struct {

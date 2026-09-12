@@ -50,7 +50,7 @@ export function BrandMark({ size = 28, className = '' }) {
 
 export function fmtBytes(n) {
   if (!n) return '0 B'
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']
+  const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
   let i = 0, x = Number(n)
   while (x >= 1024 && i < u.length - 1) { x /= 1024; i++ }
   return (i ? x.toFixed(1) : String(Math.round(x))) + ' ' + u[i]
@@ -58,7 +58,7 @@ export function fmtBytes(n) {
 
 export function fmtBps(n) {
   const x = Math.max(0, Number(n) || 0)
-  const u = ['B/s', 'KB/s', 'MB/s', 'GB/s']
+  const u = ['B/s', 'KiB/s', 'MiB/s', 'GiB/s']
   let i = 0, v = x
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
   const num = i === 0 ? String(Math.round(v)) : (v >= 10 ? v.toFixed(1) : v.toFixed(2))

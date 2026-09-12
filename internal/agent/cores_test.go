@@ -81,16 +81,16 @@ func TestApplyMissingMitaStillStartsXray(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := filepath.Join(binDir, "xray")
-	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nif [ \"$1\" = run ] && [ \"$2\" = -test ]; then exit 0; fi\nexec sleep 30\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+"/usr/bin:/bin")
 
 	c := NewCores(filepath.Join(dir, "data"))
+	defer c.Close()
 	if err := os.MkdirAll(c.dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	defer c.StopAll()
 
 	xrayCfg, _ := json.Marshal(map[string]any{
 		"inbounds": []any{
@@ -313,10 +313,10 @@ func TestApplyMitaReusesOwnPort(t *testing.T) {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	c := NewCores(filepath.Join(dir, "data"))
+	defer c.Close()
 	if err := os.MkdirAll(c.dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	defer c.StopAll()
 	t.Cleanup(func() {
 		if bin := lookBin("mita"); bin != "" {
 			_ = exec.Command(bin, "stop").Run()
@@ -372,10 +372,10 @@ func TestApplyMitaSkipsIdenticalWithoutStop(t *testing.T) {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	c := NewCores(filepath.Join(dir, "data"))
+	defer c.Close()
 	if err := os.MkdirAll(c.dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	defer c.StopAll()
 	t.Cleanup(func() {
 		if bin := lookBin("mita"); bin != "" {
 			_ = exec.Command(bin, "stop").Run()
@@ -420,10 +420,11 @@ func TestCollectTimesOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := filepath.Join(binDir, "xray")
-	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nif [ \"$1\" = run ] && [ \"$2\" = -test ]; then exit 0; fi\nexec sleep 30\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	c := NewCores(filepath.Join(dir, "data"))
+	defer c.Close()
 	c.xrayBin = fake
 	c.xrayAPI = "127.0.0.1:9"
 	start := time.Now()

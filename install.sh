@@ -371,6 +371,48 @@ copy_from_dir() {
   match_sha "$dest" "$asset" "$src/SHA256SUMS"
 }
 
+backup_db_before_upgrade() {
+  [[ -f "$DATA_DIR/panel.db" ]] || return 0
+  mkdir -p "$DATA_DIR/backups"
+  if systemctl is-active --quiet liking-server.service; then
+    systemctl stop liking-server.service || true
+  fi
+  local stamp
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  cp -a "$DATA_DIR/panel.db" "$DATA_DIR/backups/pre-upgrade-$stamp.db"
+  [[ -f "$DATA_DIR/panel.db-wal" ]] && cp -a "$DATA_DIR/panel.db-wal" "$DATA_DIR/backups/pre-upgrade-$stamp.db-wal" || true
+  [[ -f "$DATA_DIR/panel.db-shm" ]] && cp -a "$DATA_DIR/panel.db-shm" "$DATA_DIR/backups/pre-upgrade-$stamp.db-shm" || true
+  local i=0 f
+  while IFS= read -r f; do
+    i=$((i + 1))
+    if [[ $i -gt 7 ]]; then
+      rm -f "$f" "${f}-wal" "${f}-shm"
+    fi
+  done < <(ls -1t "$DATA_DIR/backups"/pre-upgrade-*.db 2>/dev/null || true)
+  note "升级前已备份数据库: $DATA_DIR/backups/pre-upgrade-$stamp.db"
+}
+
+restart_local_agent() {
+  if ! systemctl cat liking-agent.service >/dev/null 2>&1; then
+    return 0
+  fi
+  local src=""
+  if [[ -f "$INSTALL_DIR/liking-agent-linux-${HOST_GOARCH}" ]]; then
+    src="$INSTALL_DIR/liking-agent-linux-${HOST_GOARCH}"
+  elif [[ -f "$INSTALL_DIR/liking-agent" ]]; then
+    src="$INSTALL_DIR/liking-agent"
+  fi
+  if [[ -z "$src" ]]; then
+    warn "本机有 Agent 服务，但没有对应架构的 liking-agent 二进制"
+    return 0
+  fi
+  install -m 0755 "$src" "$INSTALL_DIR/liking-agent"
+  if systemctl is-enabled --quiet liking-agent.service 2>/dev/null || systemctl is-active --quiet liking-agent.service; then
+    systemctl restart liking-agent.service || warn "重启 liking-agent 失败"
+    note "已更新并重启本机 Agent"
+  fi
+}
+
 install_or_update() {
   detect_arch
   ensure_curl
@@ -424,6 +466,7 @@ install_or_update() {
   if [[ -f "$INSTALL_DIR/liking-server" ]]; then
     cp -a "$INSTALL_DIR/liking-server" "$tmp/liking-server.bak" || true
   fi
+  backup_db_before_upgrade
   install -m 0755 "$tmp/liking-server" "$INSTALL_DIR/liking-server"
   for f in liking-agent-linux-amd64 liking-agent-linux-arm64 liking-agent; do
     if [[ -f "$tmp/$f" && $(wc -c < "$tmp/$f" | tr -d ' ') -gt 1048576 ]]; then
@@ -473,6 +516,7 @@ EOF
     systemctl daemon-reload
   fi
   systemctl --no-pager --full status liking-server.service | head -20 || true
+  restart_local_agent
   local shown_pw=""
   if [[ "$first_install" -eq 1 ]]; then
     shown_pw="$BOOTSTRAP_PW"

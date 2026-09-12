@@ -4,11 +4,13 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"liking/internal/db"
+	"liking/internal/totp"
 	"liking/internal/version"
 )
 
@@ -35,6 +37,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		TOTP     string `json:"totp"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -50,6 +53,22 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !u.Enabled {
 		jsonErr(w, http.StatusForbidden, "账号已被禁用")
 		return
+	}
+	if u.Role == "admin" && !s.adminIPAllowed(r) {
+		jsonErr(w, http.StatusForbidden, "不在管理员 IP 白名单")
+		return
+	}
+	if u.TOTPEnabled {
+		code := totp.ParseCode(req.TOTP)
+		if code == "" {
+			jsonErrExtra(w, http.StatusUnauthorized, "需要两步验证码", map[string]any{"need_totp": true})
+			return
+		}
+		if !totp.Verify(u.TOTPSecret, code) {
+			s.loginLimiter.Fail(ip)
+			jsonErrExtra(w, http.StatusUnauthorized, "两步验证码错误", map[string]any{"need_totp": true})
+			return
+		}
 	}
 	tok, err := db.RandomHex(24)
 	if err != nil {
@@ -194,6 +213,9 @@ func (s *Server) sessionPayload(u *db.User, r *http.Request) map[string]any {
 		"panel_name": name,
 		"version":    version.Version,
 	}
+	announce, _ := db.GetSetting(s.DB, "announce")
+	out["announce"] = announce
+	out["timezone"] = db.Timezone(s.DB)
 	if u != nil && u.Role != "admin" {
 		base := panelURL(s.DB, r)
 		out["sub"] = map[string]string{
@@ -235,13 +257,15 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		raw += u.UsedUp + u.UsedDown
 		used += u.BilledBytes
 	}
-	from, to := dayRange(14)
+	from, to := dayRangeDB(s.DB, 14)
 	days, _ := db.TrafficSeries(s.DB, from, to, 0, 0)
 	days = db.FillTrafficDays(from, to, days)
 	var today int64
 	if n := len(days); n > 0 {
 		today = days[n-1].Up + days[n-1].Down
 	}
+	alerts := dashboardAlerts(s.DB, servers, users)
+	announce, _ := db.GetSetting(s.DB, "announce")
 	jsonOK(w, map[string]any{
 		"version":     version.Version,
 		"servers":     len(servers),
@@ -255,7 +279,46 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"today_bytes": today,
 		"days":        days,
 		"server_list": servers,
+		"alerts":      alerts,
+		"announce":    announce,
+		"timezone":    db.Timezone(s.DB),
 	})
+}
+
+func dashboardAlerts(d *sql.DB, servers []*db.Server, users []*db.User) []string {
+	var out []string
+	for _, x := range servers {
+		if x.LastError != "" {
+			out = append(out, x.Name+" 下发失败")
+		}
+		if x.NeedsUpgrade {
+			out = append(out, x.Name+" Agent 可升级到 "+version.Version)
+		}
+		if x.OverQuota {
+			out = append(out, x.Name+" 已达流量上限，节点已停用")
+		}
+	}
+	for _, u := range users {
+		if u == nil || u.Role == "admin" {
+			continue
+		}
+		if u.QuotaRatio >= 100 {
+			out = append(out, u.Username+" 流量已用尽")
+		} else if u.QuotaRatio >= 80 {
+			out = append(out, u.Username+" 流量已用 "+strconv.Itoa(u.QuotaRatio)+"%")
+		}
+	}
+	certs, _ := db.ListCerts(d)
+	now := time.Now().Unix()
+	for _, c := range certs {
+		if c.ExpiresAt > 0 && c.ExpiresAt < now+30*86400 {
+			out = append(out, "证书 "+c.Name+" 即将到期")
+		}
+	}
+	if len(out) > 12 {
+		out = out[:12]
+	}
+	return out
 }
 
 func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {

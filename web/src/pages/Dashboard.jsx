@@ -37,9 +37,9 @@ export default function Dashboard() {
           </Link>
         ))}
       </div>
-      {(d.server_list || []).some(s => s.last_error) && (
-        <div className="notice mb-4">
-          有服务器配置下发失败，打开「服务器管理」查看原因。常见原因：端口被占用、内核未安装。
+      {(d.alerts || []).length > 0 && (
+        <div className="notice mb-4 space-y-1">
+          {(d.alerts || []).map((a, i) => <div key={i}>{a}</div>)}
         </div>
       )}
       {(d.days || []).some(x => (x.up || 0) + (x.down || 0) > 0) && (
@@ -71,6 +71,8 @@ export default function Dashboard() {
                       <span className={`dot ${s.online ? 'dot-on' : 'dot-off'}`} />
                       <span className="ml-2">{s.online ? '在线' : '离线'}</span>
                       {s.last_error ? <Badge tone="danger" className="ml-2">下发失败</Badge> : null}
+                      {s.needs_upgrade ? <Badge tone="gold" className="ml-2">可升级</Badge> : null}
+                      {s.over_quota ? <Badge tone="danger" className="ml-2">流量已满</Badge> : null}
                     </td>
                     <td className="tabular-nums text-[12px] whitespace-nowrap">{s.online ? fmtBps(s.net_up_bps) : '—'}</td>
                     <td className="tabular-nums text-[12px] whitespace-nowrap">{s.online ? fmtBps(s.net_down_bps) : '—'}</td>

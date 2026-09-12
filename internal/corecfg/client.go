@@ -28,6 +28,7 @@ func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
 	if err := db.DeleteClientsNotIn(d, u.ID, ids); err != nil {
 		return nil, err
 	}
+	totals, _ := db.ServerTrafficTotals(d)
 	servers := map[int64]struct{}{}
 	for _, iid := range ids {
 		in, err := db.GetInbound(d, iid)
@@ -44,7 +45,10 @@ func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
 		} else if err != nil {
 			return nil, err
 		}
-		c.Enabled = ok && in.Enabled
+		srv, _ := db.GetServer(d, in.ServerID)
+		used := totals[in.ServerID]
+		over := db.ServerOverQuota(srv, used.Up+used.Down)
+		c.Enabled = ok && in.Enabled && !over
 		c.Email = db.EmailFor(u.ID, in.ID)
 		if err := db.UpsertClient(d, c); err != nil {
 			return nil, err

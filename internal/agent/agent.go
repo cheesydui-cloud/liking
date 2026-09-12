@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,9 +21,15 @@ import (
 	"liking/internal/wsproto"
 )
 
+var (
+	errSelfRestart = errors.New("self-restart")
+	errUninstalled = errors.New("uninstalled")
+)
+
 type Config struct {
 	ConnectURL string
 	Token      string
+	TokenFile  string
 	Dir        string
 	Insecure   bool
 }
@@ -32,18 +40,26 @@ type Agent struct {
 	lastRev string
 	revMu   sync.Mutex
 	writeMu sync.Mutex
+	exit    func(int)
 }
 
 func Run(ctx context.Context, cfg Config) error {
 	if err := os.MkdirAll(cfg.Dir, 0o750); err != nil {
 		return err
 	}
-	a := &Agent{cfg: cfg, cores: NewCores(cfg.Dir)}
+	a := &Agent{cfg: cfg, cores: NewCores(cfg.Dir), exit: os.Exit}
+	defer a.cores.Close()
 	backoff := time.Second
 	for {
 		err := a.session(ctx)
+		if errors.Is(err, errSelfRestart) {
+			a.exit(0)
+			return nil
+		}
+		if errors.Is(err, errUninstalled) {
+			return nil
+		}
 		if ctx.Err() != nil {
-			a.cores.StopAll()
 			return ctx.Err()
 		}
 		if err != nil {
@@ -51,7 +67,6 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 		select {
 		case <-ctx.Done():
-			a.cores.StopAll()
 			return ctx.Err()
 		case <-time.After(backoff):
 		}
@@ -158,6 +173,15 @@ func (a *Agent) session(ctx context.Context) error {
 				}(env)
 				continue
 			}
+			if env.Type == wsproto.TypeUpgrade || env.Type == wsproto.TypeUninstall {
+				if err := a.handle(ctx, ws, env); err != nil {
+					if errors.Is(err, errSelfRestart) || errors.Is(err, errUninstalled) {
+						return err
+					}
+					log.Printf("agent handle: %v", err)
+				}
+				continue
+			}
 			if err := a.handle(ctx, ws, env); err != nil {
 				log.Printf("agent handle: %v", err)
 			}
@@ -169,12 +193,21 @@ func (a *Agent) session(ctx context.Context) error {
 		case <-stats.C:
 			samples := a.cores.Collect()
 			up, down, hasNet := snapshotNet()
+			diskFree, diskTotal := snapshotDisk()
+			memAvail, memTotal := snapshotMem()
 			st, _ := json.Marshal(wsproto.Stats{
-				Samples: samples,
-				NetUp:   up,
-				NetDown: down,
-				HasNet:  hasNet,
-				Cores:   detectedCores(),
+				Samples:      samples,
+				NetUp:        up,
+				NetDown:      down,
+				HasNet:       hasNet,
+				Cores:        detectedCores(),
+				CoresRunning: a.cores.Running(),
+				DiskFree:     diskFree,
+				DiskTotal:    diskTotal,
+				MemAvail:     memAvail,
+				MemTotal:     memTotal,
+				LoadMilli:    snapshotLoadMilli(),
+				Conns:        countEstablished(a.cores.ListenPorts()),
 			})
 			if err := a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeStats, Payload: st}); err != nil {
 				return err
@@ -187,9 +220,52 @@ func (a *Agent) handle(ctx context.Context, ws *websocket.Conn, env wsproto.Enve
 	switch env.Type {
 	case wsproto.TypePong, wsproto.TypePing:
 		return nil
+	case wsproto.TypeUpgrade:
+		return a.handleUpgrade(ctx, ws, env)
+	case wsproto.TypeUninstall:
+		return a.handleUninstall(ctx, ws, env)
 	default:
 		return nil
 	}
+}
+
+func (a *Agent) handleUpgrade(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {
+	var req wsproto.Upgrade
+	if err := json.Unmarshal(env.Payload, &req); err != nil {
+		return a.ackUpgrade(ctx, ws, env.ID, false, "malformed upgrade")
+	}
+	if strings.TrimSpace(req.URL) == "" {
+		return a.ackUpgrade(ctx, ws, env.ID, false, "缺少下载地址")
+	}
+	upCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	if err := a.replaceSelf(upCtx, req); err != nil {
+		return a.ackUpgrade(ctx, ws, env.ID, false, err.Error())
+	}
+	if err := a.ackUpgrade(ctx, ws, env.ID, true, ""); err != nil {
+		return err
+	}
+	return errSelfRestart
+}
+
+func (a *Agent) handleUninstall(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {
+	if err := a.ackUninstall(ctx, ws, env.ID, true, ""); err != nil {
+		return err
+	}
+	if err := a.uninstall(); err != nil {
+		log.Printf("agent uninstall: %v", err)
+	}
+	return errUninstalled
+}
+
+func (a *Agent) ackUpgrade(ctx context.Context, ws *websocket.Conn, id string, ok bool, errMsg string) error {
+	p, _ := json.Marshal(wsproto.UpgradeAck{OK: ok, Error: errMsg, Version: version.Version})
+	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeUpgradeAck, ID: id, Payload: p})
+}
+
+func (a *Agent) ackUninstall(ctx context.Context, ws *websocket.Conn, id string, ok bool, errMsg string) error {
+	p, _ := json.Marshal(wsproto.UninstallAck{OK: ok, Error: errMsg})
+	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeUninstallAck, ID: id, Payload: p})
 }
 
 func (a *Agent) handleApply(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {

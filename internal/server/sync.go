@@ -127,7 +127,8 @@ func (s *Server) enforceOnce() {
 		return
 	}
 	touched := map[int64]struct{}{}
-	now := time.Now().Unix()
+	nowT := db.ClockNow(s.DB)
+	now := nowT.Unix()
 	for _, u := range users {
 		if u.Role == "admin" {
 			continue
@@ -136,7 +137,7 @@ func (s *Server) enforceOnce() {
 		if u.PackageID != nil {
 			pkg, _ = db.GetPackage(s.DB, *u.PackageID)
 		}
-		if pkg != nil && shouldReset(u, pkg, now) {
+		if shouldResetAt(u, pkg, nowT) {
 			_ = db.ResetUserTraffic(s.DB, u.ID)
 			u.UsedUp, u.UsedDown = 0, 0
 			u.CycleStart = now
@@ -199,22 +200,34 @@ func (s *Server) renewDueCerts() {
 }
 
 func shouldReset(u *db.User, pkg *db.Package, now int64) bool {
-	if pkg == nil {
+	return shouldResetAt(u, pkg, time.Unix(now, 0))
+}
+
+func shouldResetAt(u *db.User, pkg *db.Package, t time.Time) bool {
+	if u == nil {
 		return false
 	}
-	if pkg.ResetDay > 0 {
-		t := time.Unix(now, 0)
-		if t.Day() != pkg.ResetDay {
+	day := 0
+	cycle := 0
+	if pkg != nil {
+		day = pkg.ResetDay
+		cycle = pkg.CycleDays
+	}
+	if u.TrafficResetDay > 0 {
+		day = u.TrafficResetDay
+	}
+	if day > 0 {
+		if t.Day() != day {
 			return false
 		}
 		if u.CycleStart == 0 {
 			return true
 		}
-		prev := time.Unix(u.CycleStart, 0)
+		prev := time.Unix(u.CycleStart, 0).In(t.Location())
 		return prev.Year() != t.Year() || prev.Month() != t.Month()
 	}
-	if pkg.CycleDays > 0 && u.CycleStart > 0 {
-		return now >= u.CycleStart+int64(pkg.CycleDays)*86400
+	if cycle > 0 && u.CycleStart > 0 {
+		return t.Unix() >= u.CycleStart+int64(cycle)*86400
 	}
 	return false
 }

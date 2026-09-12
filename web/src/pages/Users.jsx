@@ -48,7 +48,7 @@ function bytesFromGB(s) {
   return Math.round(n * 1024 * 1024 * 1024)
 }
 
-const emptyForm = { username: '', password: '', remark: '', package_id: '', days: 30, expires: '', traffic_gb: '', enabled: true }
+const emptyForm = { username: '', password: '', remark: '', package_id: '', days: 30, expires: '', traffic_gb: '', enabled: true, traffic_reset_day: 0 }
 
 export default function Users() {
   const toast = useToast()
@@ -64,6 +64,11 @@ export default function Users() {
   const [trafficDetail, setTrafficDetail] = useState(null)
   const [q, setQ] = useState('')
   const [pkgFilter, setPkgFilter] = useState('')
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkText, setBulkText] = useState('')
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkPkg, setBulkPkg] = useState('')
+  const [bulkDays, setBulkDays] = useState(30)
 
   const load = async () => {
     try {
@@ -97,6 +102,7 @@ export default function Users() {
       expires: ymd(u.expires_at),
       traffic_gb: gbFromBytes(u.traffic_limit),
       enabled: u.enabled !== false,
+      traffic_reset_day: u.traffic_reset_day || 0,
     })
     setFormOpen(true)
   }
@@ -136,6 +142,7 @@ export default function Users() {
           enabled: f.enabled !== false,
           expires_at: ymdToUnix(f.expires),
           traffic_limit: bytesFromGB(f.traffic_gb),
+          traffic_reset_day: Number(f.traffic_reset_day) || 0,
         }
         if (!f.package_id) body.unbind_package = true
         else body.package_id = Number(f.package_id)
@@ -223,9 +230,12 @@ export default function Users() {
         title="用户"
         desc="一人一套餐。点「编辑」改用户名、套餐、到期、流量和登录密码；到期或超量会从内核配置里摘掉客户端。"
         actions={
-          <button type="button" className="btn-primary" onClick={openCreate}>
-            <Icon name="plus" size={15} /> 新建用户
-          </button>
+          <div className="flex gap-2">
+            <button type="button" className="btn-ghost" onClick={() => setBulkOpen(true)}>批量开户</button>
+            <button type="button" className="btn-primary" onClick={openCreate}>
+              <Icon name="plus" size={15} /> 新建用户
+            </button>
+          </div>
         }
       />
       <div className="flex flex-col sm:flex-row gap-2 mb-3">
@@ -268,6 +278,7 @@ export default function Users() {
                     <td>
                       {u.expires_at && u.expires_at * 1000 < Date.now() ? <Badge tone="danger">到期</Badge>
                         : (u.traffic_cap > 0 && billedBytes(u) >= u.traffic_cap) ? <Badge tone="danger">超量</Badge>
+                        : (u.quota_ratio >= 80) ? <Badge tone="gold">{u.quota_ratio}%</Badge>
                         : u.enabled ? <Badge tone="ok">启用</Badge> : <Badge tone="muted">停用</Badge>}
                     </td>
                     <td className="whitespace-nowrap">
@@ -337,6 +348,11 @@ export default function Users() {
             </Field>
           )}
           {editing && (
+            <Field label="流量重置日" hint="0 跟随套餐 / 每月周期。1–31 表示每月这一天清零。">
+              <input className="input-field" type="number" min="0" max="31" value={f.traffic_reset_day} onChange={e => setF({ ...f, traffic_reset_day: e.target.value })} />
+            </Field>
+          )}
+          {editing && (
             <Field label="状态">
               <select className="input-field" value={f.enabled ? '1' : '0'} onChange={e => setF({ ...f, enabled: e.target.value === '1' })}>
                 <option value="1">启用</option>
@@ -396,6 +412,49 @@ export default function Users() {
             ) : <div className="text-[13px] text-ink-mut">加载中</div>}
           </div>
         )}
+      </Modal>
+      <Modal open={bulkOpen} title="批量开户" onClose={() => setBulkOpen(false)} size="lg" footer={
+        <>
+          <button type="button" className="btn-ghost" onClick={() => setBulkOpen(false)}>取消</button>
+          <button type="button" className="btn-primary" disabled={bulkBusy} onClick={async () => {
+            const lines = bulkText.split('\n').map(x => x.trim()).filter(Boolean)
+            if (!lines.length) { toast('请填写用户名，一行一个', 'error'); return }
+            setBulkBusy(true)
+            try {
+              const users = lines.map(line => {
+                const [username, password] = line.split(/[\s,]+/).filter(Boolean)
+                return { username, password: password || '', package_id: bulkPkg ? Number(bulkPkg) : undefined, days: Number(bulkDays) || 0 }
+              })
+              const d = await api.post('/users/bulk', { users })
+              const pw = (d.users || []).filter(x => x.ok && x.password).map(x => `${x.username} ${x.password}`).join('\n')
+              toast(`成功 ${d.ok}/${d.total}`)
+              if (pw) {
+                try { await copyText(pw); toast('随机密码已复制') } catch {}
+              }
+              setBulkOpen(false)
+              setBulkText('')
+              load()
+            } catch (e) { toast(e.message, 'error') }
+            finally { setBulkBusy(false) }
+          }}>{bulkBusy ? '创建中…' : '创建'}</button>
+        </>
+      }>
+        <div className="space-y-3">
+          <Field label="用户名" hint="一行一个。可写成「用户名 密码」，密码留空则随机。">
+            <textarea className="input-field font-mono text-[12px] min-h-40" value={bulkText} onChange={e => setBulkText(e.target.value)} placeholder={'alice\nbob secret12'} />
+          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="套餐">
+              <select className="input-field" value={bulkPkg} onChange={e => setBulkPkg(e.target.value)}>
+                <option value="">不绑定</option>
+                {pkgs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </Field>
+            <Field label="天数" hint="0 表示不限期">
+              <input className="input-field" type="number" min="0" value={bulkDays} onChange={e => setBulkDays(e.target.value)} />
+            </Field>
+          </div>
+        </div>
       </Modal>
     </div>
   )

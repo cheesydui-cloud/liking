@@ -17,6 +17,7 @@ import (
 
 	"liking/internal/certs"
 	"liking/internal/db"
+	"liking/internal/totp"
 )
 
 func decodeRes(t *testing.T, res *http.Response, v any) {
@@ -944,6 +945,9 @@ func TestCertsAndSettings(t *testing.T) {
 	if st["cf_api_token_set"] != false {
 		t.Fatalf("token set %+v", st)
 	}
+	if st["timezone"] != "Asia/Shanghai" {
+		t.Fatalf("timezone %+v", st)
+	}
 	if _, ok := st["cf_api_token"]; ok {
 		t.Fatal("token leaked")
 	}
@@ -1733,7 +1737,7 @@ func TestTrafficAPI(t *testing.T) {
 	if err := db.AddUserTraffic(d, createdU.User.ID, 10, 15); err != nil {
 		t.Fatal(err)
 	}
-	day := time.Now().Format("2006-01-02")
+	day := db.ClockDay(d)
 	if err := db.AddDailyTraffic(d, day, createdU.User.ID, inb.Inbound.ID, 40, 60); err != nil {
 		t.Fatal(err)
 	}
@@ -1851,5 +1855,237 @@ func TestTrafficAPI(t *testing.T) {
 	}
 	if !okIn {
 		t.Fatalf("inbound traffic %+v", ins.Inbounds)
+	}
+}
+
+func TestTOTPLoginAndAdminCIDR(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := db.CreateUser(d, "admin", hash, "admin", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := totp.RandomSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetUserTOTP(d, admin.ID, secret, true); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	c := &http.Client{}
+
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 401 {
+		t.Fatalf("want 401 got %d %s", res.StatusCode, body)
+	}
+	var fail map[string]any
+	if err := json.Unmarshal(body, &fail); err != nil {
+		t.Fatal(err)
+	}
+	if fail["need_totp"] != true {
+		t.Fatalf("need_totp %+v", fail)
+	}
+
+	code := totp.MustCode(secret, time.Now())
+	okLogin, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12", "totp": code})
+	res, err = c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(okLogin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	if err := db.SetSetting(d, "admin_cidrs", "10.0.0.0/8"); err != nil {
+		t.Fatal(err)
+	}
+	res, err = c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(okLogin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 403 {
+		t.Fatalf("cidr want 403 got %d %s", res.StatusCode, b)
+	}
+
+	if err := db.SetSetting(d, "admin_cidrs", "127.0.0.1"); err != nil {
+		t.Fatal(err)
+	}
+	jar, _ := cookiejar.New(nil)
+	c2 := &http.Client{Jar: jar}
+	res, err = c2.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(okLogin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+	res, err = c2.Get(ts.URL + "/api/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+}
+
+func TestEncryptedBackupAndSubUserinfo(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	put, _ := json.Marshal(map[string]any{"announce": "维护", "backup_hour": "4", "backup_keep": 3})
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/api/settings", bytes.NewReader(put))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	encBody, _ := json.Marshal(map[string]string{"password": "backup-pw"})
+	req, err = http.NewRequest(http.MethodPost, ts.URL+"/api/backup", bytes.NewReader(encBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(res.Body)
+	res.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		t.Fatalf("backup %d %s", res.StatusCode, raw)
+	}
+	if !bytes.HasPrefix(raw, []byte("LKB1")) {
+		t.Fatalf("not encrypted magic %q", raw[:min(8, len(raw))])
+	}
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	fw, err := w.CreateFormFile("file", "liking-backup.lkb1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write(raw); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	res, err = c.Post(ts.URL+"/api/backup/preview", w.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 400 {
+		t.Fatalf("preview without pw %d %s", res.StatusCode, b)
+	}
+
+	buf.Reset()
+	w = multipart.NewWriter(&buf)
+	fw, err = w.CreateFormFile("file", "liking-backup.lkb1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteField("file_password", "backup-pw"); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	res, err = c.Post(ts.URL+"/api/backup/preview", w.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sum db.BackupSummary
+	decodeRes(t, res, &sum)
+	if sum.Users < 1 {
+		t.Fatalf("preview %+v", sum)
+	}
+
+	pkgBody, _ := json.Marshal(map[string]any{"name": "p1", "traffic_bytes": 0, "cycle_days": 0, "direction": "oneway"})
+	res, err = c.Post(ts.URL+"/api/packages", "application/json", bytes.NewReader(pkgBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkg struct {
+		Package struct {
+			ID int64 `json:"id"`
+		} `json:"package"`
+	}
+	decodeRes(t, res, &pkg)
+	uBody, _ := json.Marshal(map[string]any{"username": "bob", "password": "passpass", "package_id": pkg.Package.ID})
+	res, err = c.Post(ts.URL+"/api/users", "application/json", bytes.NewReader(uBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		User struct {
+			SubToken string `json:"sub_token"`
+		} `json:"user"`
+	}
+	decodeRes(t, res, &created)
+	if created.User.SubToken == "" {
+		t.Fatal("missing sub token")
+	}
+	res, err = http.Get(ts.URL + "/api/sub/" + created.User.SubToken + "/uri")
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := res.Header.Get("Subscription-Userinfo")
+	interval := res.Header.Get("Profile-Update-Interval")
+	res.Body.Close()
+	if interval != "24" {
+		t.Fatalf("interval %q", interval)
+	}
+	if !strings.Contains(info, "upload=0") || !strings.Contains(info, "download=") {
+		t.Fatalf("userinfo %q", info)
 	}
 }

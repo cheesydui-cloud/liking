@@ -137,8 +137,9 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		PackageID    *int64          `json:"package_id"`
 		Unbind       bool            `json:"unbind_package"`
 		TrafficLimit json.RawMessage `json:"traffic_limit"`
-		ExtendDays   *int            `json:"extend_days"`
-		Password     *string         `json:"password"`
+		ExtendDays       *int            `json:"extend_days"`
+		Password         *string         `json:"password"`
+		TrafficResetDay  *int            `json:"traffic_reset_day"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -200,6 +201,13 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		u.TrafficLimit = &n
 	} else if string(req.TrafficLimit) == "null" {
 		u.TrafficLimit = nil
+	}
+	if req.TrafficResetDay != nil {
+		if *req.TrafficResetDay < 0 || *req.TrafficResetDay > 31 {
+			jsonErr(w, http.StatusBadRequest, "重置日无效")
+			return
+		}
+		u.TrafficResetDay = *req.TrafficResetDay
 	}
 	if err := db.UpdateUser(s.DB, u); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {

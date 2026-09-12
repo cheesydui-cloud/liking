@@ -18,6 +18,8 @@ import (
 type Server struct {
 	DB           *sql.DB
 	Hub          *Hub
+	DataDir      string
+	TLSActive    bool
 	loginLimiter *loginLimiter
 	stop         chan struct{}
 	stopOnce     sync.Once
@@ -38,10 +40,14 @@ func New(d *sql.DB) (*Server, error) {
 	s := &Server{
 		DB:           d,
 		Hub:          hub,
+		DataDir:      db.FileDir(d),
 		loginLimiter: newLoginLimiter(),
 		stop:         make(chan struct{}),
 		kickWant:     map[int64]bool{},
 		kickRun:      map[int64]bool{},
+	}
+	if tz, _ := db.GetSetting(d, "timezone"); strings.TrimSpace(tz) == "" {
+		_ = db.SetSetting(d, "timezone", db.DefaultTimezone)
 	}
 	hub.OnTrafficUpdate = func(userID int64) {
 		u, err := db.GetUser(d, userID)
@@ -53,6 +59,7 @@ func New(d *sql.DB) (*Server, error) {
 	hub.Redispatch = func(ids []int64) { s.syncServers(ids...) }
 	go s.enforceLoop()
 	go s.certRenewLoop()
+	go s.backupLoop()
 	return s, nil
 }
 
@@ -86,12 +93,18 @@ func (s *Server) Router() http.Handler {
 		r.Get("/api/me", s.handleMe)
 		r.Put("/api/me", s.handleProfile)
 		r.Get("/api/me/traffic", s.handleMeTraffic)
+		r.Get("/api/me/nodes", s.handleMeNodes)
 		r.Post("/api/password", s.handlePassword)
+		r.Post("/api/totp/begin", s.handleTOTPBegin)
+		r.Post("/api/totp/enable", s.handleTOTPEnable)
+		r.Post("/api/totp/disable", s.handleTOTPDisable)
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAdmin)
 			r.Get("/api/dashboard", s.handleDashboard)
 			r.Get("/api/traffic", s.handleTraffic)
+			r.Get("/api/traffic.csv", s.handleTrafficCSV)
+			r.Get("/api/traffic/month", s.handleTrafficMonth)
 			r.Get("/api/profiles", s.handleProfiles)
 
 			r.Get("/api/servers", s.handleListServers)
@@ -100,6 +113,9 @@ func (s *Server) Router() http.Handler {
 			r.Delete("/api/servers/{id}", s.handleDeleteServer)
 			r.Post("/api/servers/{id}/sync", s.handleSyncServer)
 			r.Get("/api/servers/{id}/install", s.handleServerInstall)
+			r.Post("/api/servers/{id}/upgrade-agent", s.handleUpgradeAgent)
+			r.Post("/api/servers/{id}/uninstall-agent", s.handleUninstallAgent)
+			r.Post("/api/servers/{id}/rotate-token", s.handleRotateToken)
 			r.Get("/api/servers/{id}/cf-domains", s.handleServerCFDomains)
 			r.Get("/api/cf-domains", s.handleCFDomains)
 
@@ -111,6 +127,7 @@ func (s *Server) Router() http.Handler {
 
 			r.Get("/api/users", s.handleListUsers)
 			r.Post("/api/users", s.handleCreateUser)
+			r.Post("/api/users/bulk", s.handleBulkUsers)
 			r.Put("/api/users/{id}", s.handleUpdateUser)
 			r.Delete("/api/users/{id}", s.handleDeleteUser)
 			r.Get("/api/users/{id}/traffic", s.handleUserTraffic)
@@ -135,10 +152,12 @@ func (s *Server) Router() http.Handler {
 			r.Get("/api/settings", s.handleGetSettings)
 			r.Put("/api/settings", s.handlePutSettings)
 			r.Get("/api/backup", s.handleBackupDownload)
+			r.Post("/api/backup", s.handleBackupDownload)
 			r.Get("/api/backup/summary", s.handleBackupSummary)
 			r.Post("/api/backup/preview", s.handleBackupPreview)
 			r.Post("/api/backup/restore", s.handleBackupRestore)
 			r.Get("/api/audit", s.handleAudit)
+			r.Get("/api/sessions", s.handleSessions)
 		})
 	})
 
@@ -151,7 +170,8 @@ func (s *Server) handleBranding(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = "liking"
 	}
-	jsonOK(w, map[string]any{"panel_name": name, "version": version.Version})
+	announce, _ := db.GetSetting(s.DB, "announce")
+	jsonOK(w, map[string]any{"panel_name": name, "version": version.Version, "announce": announce})
 }
 
 func (s *Server) handleInstallAgent(w http.ResponseWriter, r *http.Request) {

@@ -29,7 +29,9 @@ async function request(method, path, body) {
   if (res.status === 401) {
     const isLogin = path === '/login'
     if (!isLogin) window.dispatchEvent(new CustomEvent('lk-unauthorized'))
-    throw new Error((data && data.error) || (isLogin ? '用户名或密码错误' : '登录已过期'))
+    const err = new Error((data && data.error) || (isLogin ? '用户名或密码错误' : '登录已过期'))
+    if (data && data.need_totp) err.need_totp = true
+    throw err
   }
   if (res.status === 204) return null
   if (!res.ok) throw new Error((data && data.error) || httpErrorMessage(res.status))
@@ -77,6 +79,37 @@ export const api = {
     let res
     try {
       res = await fetch(BASE + path, { credentials: 'same-origin' })
+    } catch {
+      throw new Error('网络错误')
+    }
+    if (res.status === 401) {
+      window.dispatchEvent(new CustomEvent('lk-unauthorized'))
+      throw new Error('登录已过期')
+    }
+    if (!res.ok) throw new Error(await parseError(res))
+    const blob = await res.blob()
+    let name = fallbackName || 'download'
+    const cd = res.headers.get('Content-Disposition') || ''
+    const m = cd.match(/filename="([^"]+)"/)
+    if (m) name = m[1]
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  },
+  downloadPost: async (path, body, fallbackName) => {
+    let res
+    try {
+      res = await fetch(BASE + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {}),
+        credentials: 'same-origin',
+      })
     } catch {
       throw new Error('网络错误')
     }
