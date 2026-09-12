@@ -262,6 +262,11 @@ func MarkServerOnline(d *sql.DB, id int64, ver, osName, arch, ip string, cores [
 	return err
 }
 
+func SetServerCores(d *sql.DB, id int64, cores []string) error {
+	_, err := d.Exec(`UPDATE servers SET cores=? WHERE id=?`, joinCores(cores), id)
+	return err
+}
+
 func joinCores(cores []string) string {
 	seen := map[string]struct{}{}
 	var out []string

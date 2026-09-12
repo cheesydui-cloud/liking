@@ -43,6 +43,13 @@ func TestOpenMigrateAndCRUD(t *testing.T) {
 	if s.Cores != "xray" || !ServerHasCore(s, "xray") || ServerHasCore(s, "mita") {
 		t.Fatalf("cores %+v", s)
 	}
+	if err := SetServerCores(d, s.ID, []string{"xray", "mita"}); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = GetServer(d, s.ID)
+	if !ServerHasCore(s, "mita") {
+		t.Fatalf("set cores %+v", s)
+	}
 	if err := SetServerApplyError(d, s.ID, simpleErr("xray 未安装")); err != nil {
 		t.Fatal(err)
 	}

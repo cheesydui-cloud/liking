@@ -34,7 +34,7 @@ export default function Settings() {
         <button className="btn-primary" disabled={busy}>保存</button>
       </form>
       <div className="mt-5 text-[13px] text-ink-mut max-w-xl leading-relaxed">
-        节点按入站协议自行安装内核到 PATH：Xray（默认）、sing-box（AnyTLS，≥ 1.12）、mita（Mieru）。Agent 只在有对应入站时才拉起该内核。
+        第一次下发对应线路时，节点会自行从 GitHub 安装内核到 PATH：Xray（默认）、sing-box（AnyTLS，≥ 1.12）、mita（Mieru）。Agent 只在有对应入站时才拉起该内核。访问不了 GitHub 时可在节点设置环境变量 LIKING_GITHUB_PROXY。
       </div>
     </div>
   )

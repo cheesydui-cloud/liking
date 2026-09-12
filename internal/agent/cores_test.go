@@ -2,9 +2,11 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,16 +100,21 @@ func TestApplyMissingMitaStillStartsXray(t *testing.T) {
 			map[string]any{"port": 8444, "protocol": "TCP"},
 		},
 	})
-	if err := c.Apply(wsproto.ApplyConfig{Xray: xrayCfg, Mita: mitaCfg}); err != nil {
-		t.Fatalf("missing mita must not fail apply: %v", err)
+	old := ensureCore
+	ensureCore = func(string) (string, error) { return "", fmt.Errorf("no mita") }
+	defer func() { ensureCore = old }()
+	if err := c.Apply(wsproto.ApplyConfig{Xray: xrayCfg, Mita: mitaCfg}); err == nil {
+		t.Fatal("expected mita error")
+	} else if !strings.Contains(err.Error(), "mita") {
+		t.Fatalf("err %v", err)
 	}
 	run := c.Running()
 	if len(run) != 1 || run[0] != "xray" {
 		t.Fatalf("running %v", run)
 	}
 	pid := c.procs["xray"].cmd.Process.Pid
-	if err := c.Apply(wsproto.ApplyConfig{Xray: xrayCfg, Mita: mitaCfg}); err != nil {
-		t.Fatalf("second apply: %v", err)
+	if err := c.Apply(wsproto.ApplyConfig{Xray: xrayCfg, Mita: mitaCfg}); err == nil {
+		t.Fatal("expected mita error on second apply")
 	}
 	if !c.aliveLocked("xray") {
 		t.Fatal("xray should stay up")

@@ -77,7 +77,7 @@ func TestBuildXrayAndMita(t *testing.T) {
 	}
 }
 
-func TestBuildOmitsMissingCores(t *testing.T) {
+func TestBuildIncludesMitaWhenCoreNotReported(t *testing.T) {
 	d, err := db.Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -117,7 +117,7 @@ func TestBuildOmitsMissingCores(t *testing.T) {
 	if len(b.Apply.Xray) == 0 {
 		t.Fatal("xray")
 	}
-	if len(b.Apply.Mita) != 0 {
-		t.Fatalf("mita should be omitted, got %s", b.Apply.Mita)
+	if len(b.Apply.Mita) == 0 {
+		t.Fatal("mita config must be sent so the agent can install the core")
 	}
 }

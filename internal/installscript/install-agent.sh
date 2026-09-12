@@ -125,5 +125,5 @@ systemctl daemon-reload
 systemctl enable liking-agent.service
 systemctl restart liking-agent.service
 ok "liking-agent 已启动"
-note "请在节点安装 xray / sing-box / mita 到 PATH（按入站协议需要）"
+note "内核会在第一次下发对应入站时自动安装（Xray / sing-box / mita），节点需要能访问 GitHub"
 systemctl --no-pager --full status liking-agent.service || true

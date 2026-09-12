@@ -17,15 +17,13 @@ type Bundle struct {
 }
 
 func Build(d *sql.DB, serverID int64) (*Bundle, error) {
-	srv, err := db.GetServer(d, serverID)
-	if err != nil {
+	if _, err := db.GetServer(d, serverID); err != nil {
 		return nil, err
 	}
 	ins, err := db.ListInboundsByServer(d, serverID)
 	if err != nil {
 		return nil, err
 	}
-	ins = filterInboundsForServer(ins, srv)
 	all, err := db.ListInbounds(d)
 	if err != nil {
 		return nil, err
@@ -101,23 +99,6 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 	b.Rev = hex.EncodeToString(sum.Sum(nil))[:16]
 	b.Apply.Rev = b.Rev
 	return b, nil
-}
-
-func filterInboundsForServer(ins []*db.Inbound, srv *db.Server) []*db.Inbound {
-	if len(ins) == 0 {
-		return ins
-	}
-	out := make([]*db.Inbound, 0, len(ins))
-	for _, in := range ins {
-		if in == nil {
-			continue
-		}
-		if !db.ServerHasCore(srv, in.Core) {
-			continue
-		}
-		out = append(out, in)
-	}
-	return out
 }
 
 func pickAPIPort(ins []*db.Inbound, start int) int {

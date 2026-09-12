@@ -226,10 +226,6 @@ export default function Nodes() {
       toast('端口范围 1–65535', 'error')
       return
     }
-    if (missingCore) {
-      toast(`节点未安装 ${meta.core}，换协议或先装内核`, 'error')
-      return
-    }
     const wasEdit = !!editId
     setBusy(true)
     try {
@@ -488,7 +484,7 @@ export default function Nodes() {
             <div className="notice sm:col-span-2">443 很容易被 Nginx / 其它面板占用。建议改成 8443 或其它空闲端口。</div>
           )}
           {missingCore && (
-            <div className="notice sm:col-span-2">这台节点没有 {meta.core}，该协议下发后不会生效。请换 VLESS / SS2022，或先安装内核。</div>
+            <div className="notice sm:col-span-2">这台节点还没有 {meta.core}。创建后会自动从 GitHub 下载并拉起，第一次可能要等一会儿。节点需要能访问 GitHub。</div>
           )}
         </form>
       </Modal>

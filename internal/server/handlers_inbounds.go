@@ -209,11 +209,6 @@ func (s *Server) prepareInbound(in *db.Inbound) error {
 	if corecfg.NeedTLS(in.Profile) && in.CertID == nil {
 		return errNeedCert
 	}
-	if in.Enabled {
-		if srv, err := db.GetServer(s.DB, in.ServerID); err == nil && !db.ServerHasCore(srv, in.Core) {
-			return simpleError("节点未安装 " + in.Core + "，无法使用该协议")
-		}
-	}
 	used, err := db.UsedPortsOnServer(s.DB, in.ServerID, in.ID)
 	if err != nil {
 		return err

@@ -44,9 +44,10 @@ type ApplyConfig struct {
 }
 
 type ApplyAck struct {
-	Rev   string `json:"rev"`
-	OK    bool   `json:"ok"`
-	Error string `json:"error,omitempty"`
+	Rev   string   `json:"rev"`
+	OK    bool     `json:"ok"`
+	Error string   `json:"error,omitempty"`
+	Cores []string `json:"cores,omitempty"`
 }
 
 type Stats struct {

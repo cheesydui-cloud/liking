@@ -90,10 +90,11 @@ func (c *Cores) applyJSON(name, file string, raw json.RawMessage, bin string, pr
 		return nil
 	}
 	if bin == "" {
-		if name == "xray" {
-			return fmt.Errorf("xray 未安装：请将二进制放到 PATH（/usr/local/bin）")
+		got, err := ensureCore(name)
+		if err != nil {
+			return fmt.Errorf("%s 未安装：%v", name, err)
 		}
-		return nil
+		bin = got
 	}
 	if name == "xray" {
 		c.xrayBin = bin
@@ -149,6 +150,9 @@ func (c *Cores) rollbackJSON(name, file string, prev json.RawMessage, bin string
 func (c *Cores) applyMita(raw json.RawMessage) error {
 	path := filepath.Join(c.dir, "mita.json")
 	if !hasCfg(raw) {
+		if bin := lookBin("mita"); bin != "" {
+			_ = exec.Command(bin, "stop").Run()
+		}
 		c.stopLocked("mita")
 		_ = os.Remove(path)
 		delete(c.last, "mita")
@@ -157,7 +161,11 @@ func (c *Cores) applyMita(raw json.RawMessage) error {
 	}
 	bin := lookBin("mita")
 	if bin == "" {
-		return nil
+		got, err := ensureCore("mita")
+		if err != nil {
+			return fmt.Errorf("mita 未安装：%v", err)
+		}
+		bin = got
 	}
 	if bytes.Equal(raw, c.lastReq["mita"]) {
 		return nil
@@ -168,14 +176,26 @@ func (c *Cores) applyMita(raw json.RawMessage) error {
 	if err := os.WriteFile(path, raw, 0o640); err != nil {
 		return err
 	}
-	cmd := exec.Command(bin, "apply", "config", path)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("mita apply: %v (%s)", err, strings.TrimSpace(string(out)))
+	if err := mitaApply(bin, path); err != nil {
+		return err
 	}
-	_ = exec.Command(bin, "start").Run()
 	c.last["mita"] = append(json.RawMessage(nil), raw...)
 	c.lastReq["mita"] = append(json.RawMessage(nil), raw...)
 	return nil
+}
+
+func mitaApply(bin, path string) error {
+	var last error
+	for i := 0; i < 10; i++ {
+		out, err := exec.Command(bin, "apply", "config", path).CombinedOutput()
+		if err == nil {
+			_ = exec.Command(bin, "start").Run()
+			return nil
+		}
+		last = fmt.Errorf("mita apply: %v (%s)", err, strings.TrimSpace(string(out)))
+		time.Sleep(300 * time.Millisecond)
+	}
+	return last
 }
 
 func (c *Cores) startLocked(name, bin string, args []string) error {

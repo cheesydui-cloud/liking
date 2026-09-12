@@ -228,6 +228,64 @@ func TestLoginAndServerAndInbound(t *testing.T) {
 	}
 }
 
+func TestCreateMieruWhenOnlyXrayReported(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	body, _ := json.Marshal(map[string]string{"name": "n1", "public_host": "10.0.0.1"})
+	res, err = c.Post(ts.URL+"/api/servers", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		Server struct {
+			ID int64 `json:"id"`
+		} `json:"server"`
+	}
+	decodeRes(t, res, &created)
+	if err := db.MarkServerOnline(d, created.Server.ID, "0.1.9", "linux", "amd64", "10.0.0.1", []string{"xray"}); err != nil {
+		t.Fatal(err)
+	}
+
+	inBody, _ := json.Marshal(map[string]any{
+		"server_id": created.Server.ID,
+		"name":      "mieru-1",
+		"profile":   "mieru",
+		"port":      8444,
+		"settings":  map[string]any{"transport": "TCP"},
+	})
+	res, err = c.Post(ts.URL+"/api/inbounds", "application/json", bytes.NewReader(inBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+}
+
 func TestParseBusyPorts(t *testing.T) {
 	got := parseBusyPorts("已跳过占用端口: 443, 26011")
 	if len(got) != 2 || got[0] != 443 || got[1] != 26011 {

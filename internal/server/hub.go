@@ -24,7 +24,7 @@ import (
 const (
 	hubWriteTimeout    = 10 * time.Second
 	hubReadTimeout     = 30 * time.Second
-	applyAckTimeout    = 60 * time.Second
+	applyAckTimeout    = 2 * time.Minute
 	hubMaxReadBytes    = 4 << 20
 	hubWriteTimeoutMax = 5 * time.Minute
 )
@@ -237,6 +237,9 @@ func (h *Hub) readerLoop(parent context.Context, ac *agentConn) {
 			if err := json.Unmarshal(env.Payload, &st); err != nil {
 				continue
 			}
+			if len(st.Cores) > 0 {
+				_ = db.SetServerCores(h.DB, ac.serverID, st.Cores)
+			}
 			h.applyStats(st.Samples)
 		case wsproto.TypeApplyAck, wsproto.TypeHelloAck:
 			ac.dispatchAck(env)
@@ -295,6 +298,9 @@ func (h *Hub) SendApply(serverID int64, cfg wsproto.ApplyConfig) error {
 		var ack wsproto.ApplyAck
 		if err := json.Unmarshal(raw, &ack); err != nil {
 			return fmt.Errorf("malformed apply_ack: %w", err)
+		}
+		if len(ack.Cores) > 0 {
+			_ = db.SetServerCores(h.DB, serverID, ack.Cores)
 		}
 		if !ack.OK {
 			msg := strings.TrimSpace(ack.Error)
