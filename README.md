@@ -44,7 +44,7 @@ bash <(curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/cheesyd
   --gh-proxy https://gh-proxy.com/
 ```
 
-浏览器打开 `http://服务器IP:8899`。首次安装若未指定密码，终端会打印 admin 密码。配置下发失败会显示在「服务器管理」页。
+浏览器打开安装结束时打印的地址。首次安装会打印用户名 `admin` 和密码；未指定时随机生成。忘记密码：`liking-upgrade reset-password`。配置下发失败会显示在「服务器管理」页。
 
 ## 升级
 
@@ -55,7 +55,7 @@ liking-upgrade
 指定版本：
 
 ```bash
-liking-upgrade --release v0.1.20
+liking-upgrade --release v0.1.21
 ```
 
 只更新安装脚本本身：

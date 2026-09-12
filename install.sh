@@ -144,6 +144,71 @@ unit_quote() {
   printf '"%s"' "$s"
 }
 
+rand_admin_pw() {
+  local pw=""
+  if command -v openssl >/dev/null 2>&1; then
+    pw="$(openssl rand -hex 6 2>/dev/null || true)"
+  fi
+  if [[ -z "$pw" ]]; then
+    pw="$(head -c 6 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  fi
+  [[ -n "$pw" ]] || die "无法生成管理员密码"
+  printf '%s' "$pw"
+}
+
+guess_panel_url() {
+  local port host h
+  port="${PANEL_ADDR##*:}"
+  if [[ -z "$port" || "$port" == "$PANEL_ADDR" ]]; then
+    port="8899"
+  fi
+  host=""
+  if [[ "$PANEL_ADDR" == *:* ]]; then
+    h="${PANEL_ADDR%:*}"
+    h="${h#[}"
+    h="${h%]}"
+    if [[ -n "$h" && "$h" != "0.0.0.0" && "$h" != "::" && "$h" != "*" ]]; then
+      host="$h"
+    fi
+  fi
+  if [[ -z "$host" ]] && command -v ip >/dev/null 2>&1; then
+    host="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}')"
+  fi
+  if [[ -z "$host" ]]; then
+    host="$(hostname -I 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i !~ /^127\./ && $i !~ /:/) { print $i; exit }}')"
+  fi
+  [[ -n "$host" ]] || host="服务器IP"
+  printf 'http://%s:%s' "$host" "$port"
+}
+
+scrape_boot_pw() {
+  journalctl -u liking-server -n 120 --no-pager -o cat 2>/dev/null \
+    | awk '/密[[:space:]]*码:/{ print $NF; found=1 } END { if (!found) exit 1 }'
+}
+
+print_install_done() {
+  local url pw
+  url="$(guess_panel_url)"
+  pw="${1:-}"
+  echo
+  echo "================================================"
+  if [[ -n "$pw" ]]; then
+    ok "面板安装成功"
+    printf '  地址:   %s\n' "$url"
+    printf '  用户名: %s\n' "admin"
+    printf '  密码:   %s\n' "$pw"
+    echo "================================================"
+    note "请妥善保存。忘记密码: liking-upgrade reset-password"
+  else
+    ok "liking-server 已启动（$PANEL_ADDR）"
+    printf '  地址:   %s\n' "$url"
+    echo "================================================"
+    note "已有数据库，账号未改。忘记密码: liking-upgrade reset-password"
+  fi
+  note "升级: liking-upgrade"
+  note "卸载: liking-uninstall"
+}
+
 is_elf() {
   local sig
   [[ -s "$1" ]] || return 1
@@ -366,13 +431,16 @@ install_or_update() {
     fi
   done
 
-  local extra=()
-  if [[ ! -f "$DATA_DIR/panel.db" && -n "$BOOTSTRAP_PW" ]]; then
-    extra+=(--bootstrap-admin-password "$BOOTSTRAP_PW")
+  local first_install=0
+  if [[ ! -f "$DATA_DIR/panel.db" ]]; then
+    first_install=1
+    if [[ -z "$BOOTSTRAP_PW" ]]; then
+      BOOTSTRAP_PW="$(rand_admin_pw)"
+    fi
   fi
   write_server_unit "$PANEL_ADDR"
-  # 把 bootstrap 写进一次性 drop-in，避免密码进 unit 文件长期保存
-  if [[ ${#extra[@]} -gt 0 ]]; then
+  # 一次性 drop-in：启动时传入密码，起来后再删，避免密码长期留在 unit
+  if [[ "$first_install" -eq 1 && -n "$BOOTSTRAP_PW" ]]; then
     mkdir -p "$SYSTEMD_DIR/liking-server.service.d"
     cat >"$SYSTEMD_DIR/liking-server.service.d/bootstrap.conf" <<EOF
 [Service]
@@ -382,12 +450,6 @@ EOF
   fi
   systemctl daemon-reload
   systemctl enable liking-server.service
-  if [[ -f "$SYSTEMD_DIR/liking-server.service.d/bootstrap.conf" ]]; then
-    rm -f "$SYSTEMD_DIR/liking-server.service.d/bootstrap.conf"
-    rmdir "$SYSTEMD_DIR/liking-server.service.d" 2>/dev/null || true
-    write_server_unit "$PANEL_ADDR"
-    systemctl daemon-reload
-  fi
   # enable --now 不会重启已在跑的进程，升级必须 restart 才能载入新二进制
   systemctl restart liking-server.service
   persist_script
@@ -405,11 +467,20 @@ EOF
     fi
     die "服务未能启动，请看: journalctl -u liking-server -n 80 --no-pager"
   fi
-  echo
-  note "浏览器打开: http://服务器IP:8899"
-  note "升级: liking-upgrade"
-  note "卸载: liking-uninstall"
+  if [[ -f "$SYSTEMD_DIR/liking-server.service.d/bootstrap.conf" ]]; then
+    rm -f "$SYSTEMD_DIR/liking-server.service.d/bootstrap.conf"
+    rmdir "$SYSTEMD_DIR/liking-server.service.d" 2>/dev/null || true
+    systemctl daemon-reload
+  fi
   systemctl --no-pager --full status liking-server.service | head -20 || true
+  local shown_pw=""
+  if [[ "$first_install" -eq 1 ]]; then
+    shown_pw="$BOOTSTRAP_PW"
+    if [[ -z "$shown_pw" ]]; then
+      shown_pw="$(scrape_boot_pw || true)"
+    fi
+  fi
+  print_install_done "$shown_pw"
 }
 
 do_uninstall() {
@@ -447,7 +518,12 @@ do_reset_password() {
   systemctl stop liking-server.service 2>/dev/null || true
   "$INSTALL_DIR/liking-server" --db "$DATA_DIR/panel.db" --reset-admin-password "$pw"
   systemctl start liking-server.service
+  echo
+  echo "================================================"
   ok "已重置 admin 密码"
+  printf '  用户名: %s\n' "admin"
+  printf '  密码:   %s\n' "$pw"
+  echo "================================================"
 }
 
 do_update_script() {
