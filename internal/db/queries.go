@@ -756,7 +756,7 @@ func UserAccessOK(u *User, pkg *Package) bool {
 
 func InboundIDsForUser(d *sql.DB, u *User) ([]int64, error) {
 	if u.Role == "admin" {
-		rows, err := d.Query(`SELECT id FROM inbounds WHERE enabled=1`)
+		rows, err := d.Query(`SELECT id FROM inbounds`)
 		if err != nil {
 			return nil, err
 		}
@@ -787,7 +787,7 @@ func PackageInboundIDs(d *sql.DB, p *Package) ([]int64, error) {
 	}
 	if len(p.ServerIDs) > 0 {
 		ph, args := intPlaceholders(p.ServerIDs)
-		ids, err := queryIDs(d, `SELECT id FROM inbounds WHERE enabled=1 AND server_id IN (`+ph+`) ORDER BY id`, args...)
+		ids, err := queryIDs(d, `SELECT id FROM inbounds WHERE server_id IN (`+ph+`) ORDER BY id`, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -797,7 +797,7 @@ func PackageInboundIDs(d *sql.DB, p *Package) ([]int64, error) {
 		return ids, nil
 	}
 	if len(p.InboundIDs) == 0 {
-		ids, err := queryIDs(d, `SELECT id FROM inbounds WHERE enabled=1 ORDER BY id`)
+		ids, err := queryIDs(d, `SELECT id FROM inbounds ORDER BY id`)
 		if err != nil {
 			return nil, err
 		}

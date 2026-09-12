@@ -149,8 +149,9 @@ func (c *Cores) rollbackJSON(name, file string, prev json.RawMessage, bin string
 
 func (c *Cores) applyMita(raw json.RawMessage) error {
 	path := filepath.Join(c.dir, "mita.json")
+	bin := lookBin("mita")
 	if !hasCfg(raw) {
-		if bin := lookBin("mita"); bin != "" {
+		if bin != "" {
 			_ = exec.Command(bin, "stop").Run()
 		}
 		c.stopLocked("mita")
@@ -159,7 +160,6 @@ func (c *Cores) applyMita(raw json.RawMessage) error {
 		delete(c.lastReq, "mita")
 		return nil
 	}
-	bin := lookBin("mita")
 	if bin == "" {
 		got, err := ensureCore("mita")
 		if err != nil {
@@ -167,17 +167,39 @@ func (c *Cores) applyMita(raw json.RawMessage) error {
 		}
 		bin = got
 	}
-	if bytes.Equal(raw, c.lastReq["mita"]) {
+	if bytes.Equal(raw, c.lastReq["mita"]) && mitaIsRunning(bin) && listenHeld(raw) {
 		return nil
 	}
-	if skipped := busyPorts(raw); len(skipped) > 0 {
+
+	prev := append(json.RawMessage(nil), c.last["mita"]...)
+	prevReq := append(json.RawMessage(nil), c.lastReq["mita"]...)
+	restore := func() {
+		if !hasCfg(prev) {
+			_ = exec.Command(bin, "stop").Run()
+			return
+		}
+		_ = os.WriteFile(path, prev, 0o640)
+		_ = mitaApply(bin, path)
+		c.last["mita"] = append(json.RawMessage(nil), prev...)
+		c.lastReq["mita"] = append(json.RawMessage(nil), prevReq...)
+	}
+
+	// Stop first so mita's own sockets are not reported as "occupied".
+	_ = exec.Command(bin, "stop").Run()
+	if skipped := waitPortsFree(raw, 2*time.Second); len(skipped) > 0 {
+		restore()
 		return fmt.Errorf("已跳过占用端口: %s", joinPorts(skipped))
 	}
 	if err := os.WriteFile(path, raw, 0o640); err != nil {
 		return err
 	}
 	if err := mitaApply(bin, path); err != nil {
+		restore()
 		return err
+	}
+	if !waitListenHeld(raw, 3*time.Second) {
+		restore()
+		return fmt.Errorf("mita 已启动但未监听配置端口")
 	}
 	c.last["mita"] = append(json.RawMessage(nil), raw...)
 	c.lastReq["mita"] = append(json.RawMessage(nil), raw...)
@@ -194,14 +216,88 @@ func mitaApply(bin, path string) error {
 			time.Sleep(300 * time.Millisecond)
 			continue
 		}
-		if out, err := exec.Command(bin, "start").CombinedOutput(); err != nil {
+		out, err = exec.Command(bin, "start").CombinedOutput()
+		if err != nil {
 			last = fmt.Errorf("mita start: %v (%s)", err, strings.TrimSpace(string(out)))
+			time.Sleep(300 * time.Millisecond)
+			continue
+		}
+		if !mitaIsRunning(bin) {
+			last = fmt.Errorf("mita start 后状态不是 RUNNING（%s）", strings.TrimSpace(string(out)))
 			time.Sleep(300 * time.Millisecond)
 			continue
 		}
 		return nil
 	}
 	return last
+}
+
+func mitaIsRunning(bin string) bool {
+	out, err := exec.Command(bin, "status").CombinedOutput()
+	if err != nil {
+		return false
+	}
+	u := strings.ToUpper(string(out))
+	return strings.Contains(u, "RUNNING") && !strings.Contains(u, "IDLE")
+}
+
+func waitPortsFree(raw json.RawMessage, d time.Duration) []int {
+	deadline := time.Now().Add(d)
+	var skipped []int
+	for {
+		skipped = busyPorts(raw)
+		if len(skipped) == 0 {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return skipped
+		}
+		time.Sleep(80 * time.Millisecond)
+	}
+}
+
+func listenHeld(raw json.RawMessage) bool {
+	tcp, udp := publicListenSpecs(raw)
+	if len(tcp)+len(udp) == 0 {
+		return true
+	}
+	// Prefer connecting to 127.0.0.1: macOS SO_REUSEADDR lets a second bind
+	// succeed even when the port is already taken, so a bind probe is not enough.
+	for _, a := range tcp {
+		_, port, err := net.SplitHostPort(a)
+		if err != nil {
+			return false
+		}
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", port), 250*time.Millisecond)
+		if err != nil {
+			return false
+		}
+		_ = conn.Close()
+	}
+	if len(tcp) > 0 {
+		return true
+	}
+	for _, a := range udp {
+		pc, err := net.ListenPacket("udp", a)
+		if err == nil {
+			_ = pc.Close()
+			return false
+		}
+	}
+	return true
+}
+
+func waitListenHeld(raw json.RawMessage, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for {
+		if listenHeld(raw) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(80 * time.Millisecond)
+	}
 }
 
 func (c *Cores) startLocked(name, bin string, args []string) error {

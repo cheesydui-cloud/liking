@@ -77,6 +77,81 @@ func TestBuildXrayAndMita(t *testing.T) {
 	}
 }
 
+func TestProvisionKeepsMieruPasswordWhenDisabled(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	srv, err := db.CreateServer(d, "n1", "10.0.0.1", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &db.Inbound{
+		ServerID: srv.ID, Name: "m1", Profile: ProfileMieru,
+		Port: 54675, Enabled: true, LineKind: "direct", Settings: "{}",
+	}
+	if err := Normalize(in, nil); err != nil {
+		t.Fatal(err)
+	}
+	created, err := db.CreateInbound(d, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := db.CreatePackage(d, "std", 0, 30, 0, "oneway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetPackageServers(d, pkg.ID, []int64{srv.ID}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := db.CreateUser(d, "alice", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.BindUserPackage(d, u.ID, pkg.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	u, _ = db.GetUser(d, u.ID)
+	if _, err := ProvisionUser(d, u); err != nil {
+		t.Fatal(err)
+	}
+	c, err := db.GetClient(d, created.ID, u.ID)
+	if err != nil || c.Password == "" || !c.Enabled {
+		t.Fatalf("client %+v %v", c, err)
+	}
+	pw := c.Password
+	user := c.Username
+	created.Enabled = false
+	if err := db.UpdateInbound(d, created); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ProvisionUser(d, u); err != nil {
+		t.Fatal(err)
+	}
+	c, err = db.GetClient(d, created.ID, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Password != pw || c.Username != user {
+		t.Fatalf("password rotated on disable: %s/%s -> %s/%s", user, pw, c.Username, c.Password)
+	}
+	if c.Enabled {
+		t.Fatal("disabled inbound should disable client")
+	}
+	created.Enabled = true
+	if err := db.UpdateInbound(d, created); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ProvisionUser(d, u); err != nil {
+		t.Fatal(err)
+	}
+	c, err = db.GetClient(d, created.ID, u.ID)
+	if err != nil || !c.Enabled || c.Password != pw || c.Username != user {
+		t.Fatalf("after enable %+v %v", c, err)
+	}
+}
+
 func TestBuildIncludesMitaWhenCoreNotReported(t *testing.T) {
 	d, err := db.Open(":memory:")
 	if err != nil {
