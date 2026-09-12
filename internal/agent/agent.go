@@ -96,6 +96,7 @@ func (a *Agent) session(ctx context.Context) error {
 		OS:           runtime.GOOS,
 		Arch:         runtime.GOARCH,
 		LastRev:      a.lastRev,
+		Cores:        detectedCores(),
 	})
 	if err := writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeHello, ID: "hello", Payload: hello}); err != nil {
 		return err

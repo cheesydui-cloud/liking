@@ -29,6 +29,7 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		Direction    string    `json:"direction"`
 		InboundIDs   []int64   `json:"inbound_ids"`
 		Multipliers  []float64 `json:"multipliers"`
+		ServerIDs    []int64   `json:"server_ids"`
 	}
 	if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
 		jsonErr(w, http.StatusBadRequest, "需要套餐名")
@@ -39,10 +40,19 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if err := db.SetPackageServers(s.DB, p.ID, req.ServerIDs); err != nil {
+		jsonErr(w, http.StatusBadRequest, "节点无效")
+		return
+	}
 	if err := db.SetPackageInbounds(s.DB, p.ID, req.InboundIDs, req.Multipliers); err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if _, err := corecfg.ProvisionAll(s.DB); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.syncAll()
 	p, _ = db.GetPackage(s.DB, p.ID)
 	jsonOK(w, map[string]any{"package": p})
 }
@@ -66,6 +76,7 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 		Direction    string    `json:"direction"`
 		InboundIDs   []int64   `json:"inbound_ids"`
 		Multipliers  []float64 `json:"multipliers"`
+		ServerIDs    []int64   `json:"server_ids"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -90,7 +101,16 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if req.InboundIDs != nil {
+	if req.ServerIDs != nil {
+		if err := db.SetPackageServers(s.DB, p.ID, req.ServerIDs); err != nil {
+			jsonErr(w, http.StatusBadRequest, "节点无效")
+			return
+		}
+		if err := db.SetPackageInbounds(s.DB, p.ID, nil, nil); err != nil {
+			jsonErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else if req.InboundIDs != nil {
 		if err := db.SetPackageInbounds(s.DB, p.ID, req.InboundIDs, req.Multipliers); err != nil {
 			jsonErr(w, http.StatusBadRequest, err.Error())
 			return

@@ -2,12 +2,15 @@ package server
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
+	"strings"
 	"testing"
 
 	"liking/internal/db"
@@ -82,7 +85,7 @@ func TestLoginAndServerAndInbound(t *testing.T) {
 		"server_id": created.Server.ID,
 		"name":      "vless-1",
 		"profile":   "vless-reality-vision",
-		"port":      443,
+		"port":      8443,
 	})
 	res, err = c.Post(ts.URL+"/api/inbounds", "application/json", bytes.NewReader(inBody))
 	if err != nil {
@@ -106,17 +109,24 @@ func TestLoginAndServerAndInbound(t *testing.T) {
 		t.Fatalf("settings %+v", st)
 	}
 
-	pkgBody, _ := json.Marshal(map[string]any{"name": "std", "traffic_bytes": 0, "cycle_days": 30, "direction": "oneway"})
+	pkgBody, _ := json.Marshal(map[string]any{
+		"name": "std", "traffic_bytes": 0, "cycle_days": 30, "direction": "oneway",
+		"server_ids": []int64{created.Server.ID},
+	})
 	res, err = c.Post(ts.URL+"/api/packages", "application/json", bytes.NewReader(pkgBody))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var pkg struct {
 		Package struct {
-			ID int64 `json:"id"`
+			ID        int64   `json:"id"`
+			ServerIDs []int64 `json:"server_ids"`
 		} `json:"package"`
 	}
 	decodeRes(t, res, &pkg)
+	if len(pkg.Package.ServerIDs) != 1 || pkg.Package.ServerIDs[0] != created.Server.ID {
+		t.Fatalf("package servers %+v", pkg.Package.ServerIDs)
+	}
 
 	uBody, _ := json.Marshal(map[string]any{
 		"username": "alice", "password": "alice12", "package_id": pkg.Package.ID, "days": 30,
@@ -140,11 +150,46 @@ func TestLoginAndServerAndInbound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer res.Body.Close()
 	if res.StatusCode != 200 {
 		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
 		t.Fatalf("sub %d %s", res.StatusCode, b)
 	}
+	subBody, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	decoded, err := base64.StdEncoding.DecodeString(string(subBody))
+	if err != nil {
+		t.Fatalf("sub b64 %v %s", err, subBody)
+	}
+	if !strings.Contains(string(decoded), "vless://") || !strings.Contains(string(decoded), ":8443") {
+		t.Fatalf("sub uri %s", decoded)
+	}
+
+	var listed struct {
+		Inbounds []struct {
+			ID   int64 `json:"id"`
+			Port int   `json:"port"`
+		} `json:"inbounds"`
+	}
+	res, err = c.Get(ts.URL + "/api/inbounds")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, &listed)
+	if len(listed.Inbounds) != 1 {
+		t.Fatalf("inbounds %d", len(listed.Inbounds))
+	}
+	upBody, _ := json.Marshal(map[string]any{"port": 9443, "name": "vless-1"})
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/api/inbounds/"+strconv.FormatInt(listed.Inbounds[0].ID, 10), bytes.NewReader(upBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
 
 	head, err := http.NewRequest(http.MethodHead, ts.URL+"/v1/agent-bin?os=linux&arch=amd64", nil)
 	if err != nil {
@@ -180,6 +225,17 @@ func TestLoginAndServerAndInbound(t *testing.T) {
 	u, _ := url.Parse(ts.URL)
 	if len(jar.Cookies(u)) == 0 {
 		t.Fatal("no session cookie")
+	}
+}
+
+func TestParseBusyPorts(t *testing.T) {
+	got := parseBusyPorts("已跳过占用端口: 443, 26011")
+	if len(got) != 2 || got[0] != 443 || got[1] != 26011 {
+		t.Fatalf("%v", got)
+	}
+	got = parseBusyPorts("端口 443 已被占用")
+	if len(got) != 1 || got[0] != 443 {
+		t.Fatalf("%v", got)
 	}
 }
 

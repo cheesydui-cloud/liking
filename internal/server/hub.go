@@ -125,7 +125,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		ws.Close(websocket.StatusInternalError, "ack write failed")
 		return
 	}
-	if err := db.MarkServerOnline(h.DB, srv.ID, hello.AgentVersion, hello.OS, hello.Arch, extractIP(r)); err != nil {
+	if err := db.MarkServerOnline(h.DB, srv.ID, hello.AgentVersion, hello.OS, hello.Arch, extractIP(r), hello.Cores); err != nil {
 		log.Printf("hub: MarkServerOnline: %v", err)
 	}
 	h.reconcileOnConnect(srv.ID, hello.LastRev)

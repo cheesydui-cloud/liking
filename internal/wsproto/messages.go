@@ -4,14 +4,14 @@ package wsproto
 import "encoding/json"
 
 const (
-	TypeHello     = "hello"
-	TypeHelloAck  = "hello_ack"
-	TypeApply     = "apply_config"
-	TypeApplyAck  = "apply_ack"
-	TypeStats     = "stats"
-	TypePing      = "ping"
-	TypePong      = "pong"
-	TypeError     = "error"
+	TypeHello    = "hello"
+	TypeHelloAck = "hello_ack"
+	TypeApply    = "apply_config"
+	TypeApplyAck = "apply_ack"
+	TypeStats    = "stats"
+	TypePing     = "ping"
+	TypePong     = "pong"
+	TypeError    = "error"
 )
 
 type Envelope struct {
@@ -21,11 +21,12 @@ type Envelope struct {
 }
 
 type Hello struct {
-	Token        string `json:"token"`
-	AgentVersion string `json:"agent_version"`
-	OS           string `json:"os"`
-	Arch         string `json:"arch"`
-	LastRev      string `json:"last_rev,omitempty"`
+	Token        string   `json:"token"`
+	AgentVersion string   `json:"agent_version"`
+	OS           string   `json:"os"`
+	Arch         string   `json:"arch"`
+	LastRev      string   `json:"last_rev,omitempty"`
+	Cores        []string `json:"cores,omitempty"`
 }
 
 type HelloAck struct {

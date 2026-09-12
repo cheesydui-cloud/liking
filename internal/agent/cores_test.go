@@ -5,7 +5,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -99,24 +98,61 @@ func TestApplyMissingMitaStillStartsXray(t *testing.T) {
 			map[string]any{"port": 8444, "protocol": "TCP"},
 		},
 	})
-	err := c.Apply(wsproto.ApplyConfig{Xray: xrayCfg, Mita: mitaCfg})
-	if err == nil || !strings.Contains(err.Error(), "mita") {
-		t.Fatalf("want mita error, got %v", err)
+	if err := c.Apply(wsproto.ApplyConfig{Xray: xrayCfg, Mita: mitaCfg}); err != nil {
+		t.Fatalf("missing mita must not fail apply: %v", err)
 	}
 	run := c.Running()
 	if len(run) != 1 || run[0] != "xray" {
 		t.Fatalf("running %v", run)
 	}
 	pid := c.procs["xray"].cmd.Process.Pid
-	err = c.Apply(wsproto.ApplyConfig{Xray: xrayCfg, Mita: mitaCfg})
-	if err == nil || !strings.Contains(err.Error(), "mita") {
-		t.Fatalf("want mita error on second apply, got %v", err)
+	if err := c.Apply(wsproto.ApplyConfig{Xray: xrayCfg, Mita: mitaCfg}); err != nil {
+		t.Fatalf("second apply: %v", err)
 	}
 	if !c.aliveLocked("xray") {
 		t.Fatal("xray should stay up")
 	}
 	if c.procs["xray"].cmd.Process.Pid != pid {
 		t.Fatalf("xray restarted pid %d -> %d", pid, c.procs["xray"].cmd.Process.Pid)
+	}
+}
+
+func TestDropOccupiedListenKeepsFreePort(t *testing.T) {
+	hold, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hold.Close()
+	busy := hold.Addr().(*net.TCPAddr).Port
+	freeLn, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	free := freeLn.Addr().(*net.TCPAddr).Port
+	_ = freeLn.Close()
+
+	raw, _ := json.Marshal(map[string]any{
+		"inbounds": []any{
+			map[string]any{"tag": "api", "listen": "127.0.0.1", "port": 10085},
+			map[string]any{"tag": "busy", "listen": "0.0.0.0", "port": busy},
+			map[string]any{"tag": "ok", "listen": "0.0.0.0", "port": free},
+		},
+	})
+	filtered, skipped := dropOccupiedListen(raw)
+	if len(skipped) != 1 || skipped[0] != busy {
+		t.Fatalf("skipped %v", skipped)
+	}
+	var top map[string]any
+	if err := json.Unmarshal(filtered, &top); err != nil {
+		t.Fatal(err)
+	}
+	ins := top["inbounds"].([]any)
+	tags := map[string]bool{}
+	for _, x := range ins {
+		tags[x.(map[string]any)["tag"].(string)] = true
+	}
+	if !tags["api"] || !tags["ok"] || tags["busy"] {
+		t.Fatalf("tags %v", tags)
 	}
 }
 

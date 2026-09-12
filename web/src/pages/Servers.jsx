@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
+import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, Icon, Modal, PageHead } from '../components/ui'
 
@@ -107,7 +108,10 @@ export default function Servers() {
       <Modal open={!!cmd} title="一键安装 Agent" onClose={() => setCmd('')} wide footer={
         <>
           <button type="button" className="btn-ghost" onClick={() => setCmd('')}>关闭</button>
-          <button type="button" className="btn-primary" onClick={() => navigator.clipboard.writeText(cmd).then(() => toast('已复制'))}>
+          <button type="button" className="btn-primary" onClick={async () => {
+            try { await copyText(cmd); toast('已复制') }
+            catch { toast('浏览器不允许自动复制，请手动选中命令', 'error') }
+          }}>
             <Icon name="copy" size={15} /> 复制
           </button>
         </>

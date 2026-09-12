@@ -209,8 +209,8 @@ func CreateServer(d *sql.DB, name, publicHost, token string) (*Server, error) {
 
 func GetServer(d *sql.DB, id int64) (*Server, error) {
 	s := &Server{}
-	err := d.QueryRow(`SELECT id,name,public_host,token,online,last_seen,agent_ver,os,arch,connect_ip,config_rev,last_error,last_error_at,created_at FROM servers WHERE id=?`, id).
-		Scan(&s.ID, &s.Name, &s.PublicHost, &s.Token, &s.Online, &s.LastSeen, &s.AgentVer, &s.OS, &s.Arch, &s.ConnectIP, &s.ConfigRev, &s.LastError, &s.LastErrorAt, &s.CreatedAt)
+	err := d.QueryRow(`SELECT id,name,public_host,token,online,last_seen,agent_ver,os,arch,connect_ip,config_rev,last_error,last_error_at,cores,created_at FROM servers WHERE id=?`, id).
+		Scan(&s.ID, &s.Name, &s.PublicHost, &s.Token, &s.Online, &s.LastSeen, &s.AgentVer, &s.OS, &s.Arch, &s.ConnectIP, &s.ConfigRev, &s.LastError, &s.LastErrorAt, &s.Cores, &s.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -256,10 +256,72 @@ func MarkAllServersOffline(d *sql.DB) error {
 	return err
 }
 
-func MarkServerOnline(d *sql.DB, id int64, ver, osName, arch, ip string) error {
-	_, err := d.Exec(`UPDATE servers SET online=1, last_seen=?, agent_ver=?, os=?, arch=?, connect_ip=? WHERE id=?`,
-		now(), ver, osName, arch, ip, id)
+func MarkServerOnline(d *sql.DB, id int64, ver, osName, arch, ip string, cores []string) error {
+	_, err := d.Exec(`UPDATE servers SET online=1, last_seen=?, agent_ver=?, os=?, arch=?, connect_ip=?, cores=? WHERE id=?`,
+		now(), ver, osName, arch, ip, joinCores(cores), id)
 	return err
+}
+
+func joinCores(cores []string) string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, c := range cores {
+		c = normalizeCoreName(c)
+		if c == "" {
+			continue
+		}
+		if _, ok := seen[c]; ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		out = append(out, c)
+	}
+	return strings.Join(out, ",")
+}
+
+func normalizeCoreName(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "sing-box", "singbox":
+		return "singbox"
+	default:
+		return s
+	}
+}
+
+func ServerHasCore(s *Server, core string) bool {
+	if s == nil {
+		return false
+	}
+	if strings.TrimSpace(s.Cores) == "" {
+		return true
+	}
+	want := normalizeCoreName(core)
+	if want == "" {
+		return true
+	}
+	for _, c := range strings.Split(s.Cores, ",") {
+		if normalizeCoreName(c) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func DisableInboundsOnPorts(d *sql.DB, serverID int64, ports []int) (int, error) {
+	n := 0
+	for _, p := range ports {
+		if p < 1 || p > 65535 {
+			continue
+		}
+		res, err := d.Exec(`UPDATE inbounds SET enabled=0 WHERE server_id=? AND port=? AND enabled=1`, serverID, p)
+		if err != nil {
+			return n, err
+		}
+		k, _ := res.RowsAffected()
+		n += int(k)
+	}
+	return n, nil
 }
 
 func MarkServerOffline(d *sql.DB, id int64) error {
@@ -353,17 +415,35 @@ func GetPackage(d *sql.DB, id int64) (*Package, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var iid int64
 		var m float64
 		if err := rows.Scan(&iid, &m); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		p.InboundIDs = append(p.InboundIDs, iid)
 		p.Multipliers = append(p.Multipliers, m)
 	}
-	return p, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	srows, err := d.Query(`SELECT server_id FROM package_servers WHERE package_id=? ORDER BY server_id`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer srows.Close()
+	p.ServerIDs = []int64{}
+	for srows.Next() {
+		var sid int64
+		if err := srows.Scan(&sid); err != nil {
+			return nil, err
+		}
+		p.ServerIDs = append(p.ServerIDs, sid)
+	}
+	return p, srows.Err()
 }
 
 func ListPackages(d *sql.DB) ([]*Package, error) {
@@ -397,6 +477,31 @@ func SetPackageInbounds(d *sql.DB, pkgID int64, inboundIDs []int64, multipliers 
 			m = multipliers[i]
 		}
 		if _, err := tx.Exec(`INSERT INTO package_inbounds(package_id,inbound_id,multiplier) VALUES(?,?,?)`, pkgID, iid, m); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func SetPackageServers(d *sql.DB, pkgID int64, serverIDs []int64) error {
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM package_servers WHERE package_id=?`, pkgID); err != nil {
+		return err
+	}
+	seen := map[int64]struct{}{}
+	for _, sid := range serverIDs {
+		if sid == 0 {
+			continue
+		}
+		if _, ok := seen[sid]; ok {
+			continue
+		}
+		seen[sid] = struct{}{}
+		if _, err := tx.Exec(`INSERT INTO package_servers(package_id,server_id,multiplier) VALUES(?,?,1)`, pkgID, sid); err != nil {
 			return err
 		}
 	}
@@ -659,23 +764,45 @@ func InboundIDsForUser(d *sql.DB, u *User) ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(p.InboundIDs) == 0 {
-		rows, err := d.Query(`SELECT id FROM inbounds WHERE enabled=1`)
+	return PackageInboundIDs(d, p)
+}
+
+func PackageInboundIDs(d *sql.DB, p *Package) ([]int64, error) {
+	if p == nil {
+		return nil, nil
+	}
+	if len(p.ServerIDs) > 0 {
+		ph, args := intPlaceholders(p.ServerIDs)
+		ids, err := queryIDs(d, `SELECT id FROM inbounds WHERE enabled=1 AND server_id IN (`+ph+`) ORDER BY id`, args...)
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
-		var ids []int64
-		for rows.Next() {
-			var id int64
-			if err := rows.Scan(&id); err != nil {
-				return nil, err
-			}
-			ids = append(ids, id)
+		if ids == nil {
+			ids = []int64{}
 		}
-		return ids, rows.Err()
+		return ids, nil
 	}
-	return p.InboundIDs, nil
+	if len(p.InboundIDs) == 0 {
+		ids, err := queryIDs(d, `SELECT id FROM inbounds WHERE enabled=1 ORDER BY id`)
+		if err != nil {
+			return nil, err
+		}
+		if ids == nil {
+			ids = []int64{}
+		}
+		return ids, nil
+	}
+	return append([]int64(nil), p.InboundIDs...), nil
+}
+
+func intPlaceholders(ids []int64) (string, []any) {
+	ph := make([]string, 0, len(ids))
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		ph = append(ph, "?")
+		args = append(args, id)
+	}
+	return strings.Join(ph, ","), args
 }
 
 func AddAudit(d *sql.DB, userID *int64, action, detail string) {

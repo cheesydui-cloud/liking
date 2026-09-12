@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"liking/internal/corecfg"
@@ -207,6 +209,11 @@ func (s *Server) prepareInbound(in *db.Inbound) error {
 	if corecfg.NeedTLS(in.Profile) && in.CertID == nil {
 		return errNeedCert
 	}
+	if in.Enabled {
+		if srv, err := db.GetServer(s.DB, in.ServerID); err == nil && !db.ServerHasCore(srv, in.Core) {
+			return simpleError("节点未安装 " + in.Core + "，无法使用该协议")
+		}
+	}
 	used, err := db.UsedPortsOnServer(s.DB, in.ServerID, in.ID)
 	if err != nil {
 		return err
@@ -240,6 +247,7 @@ func exitServerID(s *Server, in *db.Inbound) int64 {
 func (s *Server) respondAfterApply(w http.ResponseWriter, payload map[string]any, ids ...int64) {
 	var applyErr error
 	seen := map[int64]struct{}{}
+	var uniq []int64
 	for _, id := range ids {
 		if id == 0 {
 			continue
@@ -248,12 +256,85 @@ func (s *Server) respondAfterApply(w http.ResponseWriter, payload map[string]any
 			continue
 		}
 		seen[id] = struct{}{}
+		uniq = append(uniq, id)
 		if err := s.pushServer(id); err != nil && applyErr == nil {
 			applyErr = err
 		}
 	}
 	if applyErr != nil {
 		payload["apply_error"] = applyErr.Error()
+		ports := parseBusyPorts(applyErr.Error())
+		if len(ports) > 0 {
+			changed := 0
+			for _, id := range uniq {
+				n, err := db.DisableInboundsOnPorts(s.DB, id, ports)
+				if err == nil {
+					changed += n
+				}
+			}
+			if changed > 0 {
+				_, _ = corecfg.ProvisionAll(s.DB)
+				for _, id := range uniq {
+					_ = s.pushServer(id)
+				}
+				if raw, ok := payload["inbound"].(map[string]any); ok {
+					if n, ok := asInt64(raw["id"]); ok {
+						if fresh, err := db.GetInbound(s.DB, n); err == nil {
+							payload["inbound"] = inboundJSON(fresh)
+						}
+					}
+				}
+			}
+		}
 	}
 	jsonOK(w, payload)
+}
+
+func asInt64(v any) (int64, bool) {
+	switch t := v.(type) {
+	case int64:
+		return t, true
+	case int:
+		return int64(t), true
+	case float64:
+		return int64(t), true
+	case json.Number:
+		n, err := t.Int64()
+		return n, err == nil
+	default:
+		return 0, false
+	}
+}
+
+var busyPortRe = regexp.MustCompile(`(?:端口|占用端口)[^\d]{0,12}(\d{1,5})`)
+
+func parseBusyPorts(msg string) []int {
+	seen := map[int]struct{}{}
+	var out []int
+	add := func(p int) {
+		if p < 1 || p > 65535 {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	if i := strings.Index(msg, "已跳过占用端口:"); i >= 0 {
+		rest := msg[i+len("已跳过占用端口:"):]
+		for _, part := range strings.FieldsFunc(rest, func(r rune) bool {
+			return r == ',' || r == ';' || r == ' ' || r == '、' || r == '/'
+		}) {
+			p, err := strconv.Atoi(strings.TrimSpace(part))
+			if err == nil {
+				add(p)
+			}
+		}
+	}
+	for _, m := range busyPortRe.FindAllStringSubmatch(msg, -1) {
+		p, _ := strconv.Atoi(m[1])
+		add(p)
+	}
+	return out
 }

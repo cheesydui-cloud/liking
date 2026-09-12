@@ -10,7 +10,7 @@
 
 - 管理员登录、服务器列表、反向 WSS 纳管 Agent
 - 七组入站：VLESS+REALITY、VLESS+REALITY+Vision、VLESS+XHTTP+TLS、Trojan+TLS、SS2022、AnyTLS+TLS、Mieru
-- 用户 / 套餐；到期或超量从内核配置摘掉客户端
+- 用户 / 套餐（套餐勾选节点；不选表示全部）；到期或超量从内核配置摘掉客户端
 - 订阅：Clash Meta、sing-box JSON、URI（base64）
 - 链式转发：入口 → 另一台落地。**Mieru / AnyTLS 不能当链式落地**；Mieru 可以直出，也可以当链式入口
 
@@ -53,7 +53,7 @@ liking-upgrade
 指定版本：
 
 ```bash
-liking-upgrade --release v0.1.4
+liking-upgrade --release v0.1.6
 ```
 
 只更新安装脚本本身：
@@ -96,7 +96,7 @@ liking-upgrade reset-password --password '新密码'
 
 Agent 只在有对应入站时才拉起该内核。数据目录：`/var/lib/liking/agent`。
 
-升级面板后请重新执行节点安装命令。443 已被占用时不要强开 443 入站，换端口即可。
+升级面板后请重新执行节点安装命令。入站端口可自定义；443 已被占用时改用 8443 或其它空闲口。
 
 ## 本地开发
 

@@ -71,6 +71,17 @@ func (s *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func inboundLive(d *sql.DB, in *db.Inbound) bool {
+	if in == nil || !in.Enabled {
+		return false
+	}
+	srv, err := db.GetServer(d, in.ServerID)
+	if err != nil {
+		return false
+	}
+	return db.ServerHasCore(srv, in.Core)
+}
+
 func detectSubFormat(ua string) string {
 	l := strings.ToLower(ua)
 	switch {
@@ -93,6 +104,9 @@ func buildURIList(d *sql.DB, clients []*db.Client) (string, error) {
 		if err != nil {
 			continue
 		}
+		if !inboundLive(d, in) {
+			continue
+		}
 		uri, err := corecfg.ShareURI(in, c)
 		if err != nil {
 			continue
@@ -111,6 +125,9 @@ func buildClash(d *sql.DB, clients []*db.Client) (string, error) {
 		}
 		in, err := db.GetInbound(d, c.InboundID)
 		if err != nil {
+			continue
+		}
+		if !inboundLive(d, in) {
 			continue
 		}
 		name, yaml, err := corecfg.ClashProxyYAML(in, c)
@@ -132,6 +149,9 @@ func buildSingboxSub(d *sql.DB, clients []*db.Client) ([]byte, error) {
 		}
 		in, err := db.GetInbound(d, c.InboundID)
 		if err != nil {
+			continue
+		}
+		if !inboundLive(d, in) {
 			continue
 		}
 		ob, err := corecfg.SingboxOutbound(in, c)

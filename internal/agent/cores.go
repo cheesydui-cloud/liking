@@ -31,12 +31,27 @@ type Cores struct {
 	collectMu sync.Mutex
 	procs     map[string]*proc
 	last      map[string]json.RawMessage
+	lastReq   map[string]json.RawMessage
 	xrayAPI   string
 	xrayBin   string
 }
 
 func NewCores(dir string) *Cores {
-	return &Cores{dir: dir, procs: map[string]*proc{}, last: map[string]json.RawMessage{}}
+	return &Cores{dir: dir, procs: map[string]*proc{}, last: map[string]json.RawMessage{}, lastReq: map[string]json.RawMessage{}}
+}
+
+func detectedCores() []string {
+	var out []string
+	if lookBin("xray") != "" {
+		out = append(out, "xray")
+	}
+	if lookBin("sing-box", "singbox") != "" {
+		out = append(out, "singbox")
+	}
+	if lookBin("mita") != "" {
+		out = append(out, "mita")
+	}
+	return out
 }
 
 func (c *Cores) Apply(cfg wsproto.ApplyConfig) error {
@@ -66,35 +81,48 @@ func hasCfg(raw json.RawMessage) bool {
 func (c *Cores) applyJSON(name, file string, raw json.RawMessage, bin string, prefix []string) error {
 	path := filepath.Join(c.dir, file)
 	prev := c.last[name]
+	prevReq := c.lastReq[name]
 	if !hasCfg(raw) {
 		c.stopLocked(name)
 		_ = os.Remove(path)
 		delete(c.last, name)
+		delete(c.lastReq, name)
 		return nil
 	}
 	if bin == "" {
-		return fmt.Errorf("%s 未安装：请将二进制放到 PATH（/usr/local/bin）", name)
+		if name == "xray" {
+			return fmt.Errorf("xray 未安装：请将二进制放到 PATH（/usr/local/bin）")
+		}
+		return nil
 	}
 	if name == "xray" {
 		c.xrayBin = bin
 	}
-	if bytes.Equal(raw, prev) && c.aliveLocked(name) {
+	if bytes.Equal(raw, prevReq) && c.aliveLocked(name) {
 		return nil
 	}
-	if err := os.WriteFile(path, raw, 0o640); err != nil {
-		return err
-	}
 	c.stopLocked(name)
-	if err := checkPublicPorts(raw); err != nil {
+	filtered, skipped := dropOccupiedListen(raw)
+	if err := os.WriteFile(path, filtered, 0o640); err != nil {
 		c.rollbackJSON(name, file, prev, bin, prefix)
+		c.lastReq[name] = prevReq
 		return err
 	}
 	args := append(append([]string{}, prefix...), path)
 	if err := c.startLocked(name, bin, args); err != nil {
 		c.rollbackJSON(name, file, prev, bin, prefix)
+		if !hasCfg(prev) {
+			delete(c.lastReq, name)
+		} else {
+			c.lastReq[name] = prevReq
+		}
 		return err
 	}
-	c.last[name] = append(json.RawMessage(nil), raw...)
+	c.last[name] = append(json.RawMessage(nil), filtered...)
+	c.lastReq[name] = append(json.RawMessage(nil), raw...)
+	if len(skipped) > 0 {
+		return fmt.Errorf("已跳过占用端口: %s", joinPorts(skipped))
+	}
 	return nil
 }
 
@@ -124,17 +152,18 @@ func (c *Cores) applyMita(raw json.RawMessage) error {
 		c.stopLocked("mita")
 		_ = os.Remove(path)
 		delete(c.last, "mita")
-		return nil
-	}
-	if bytes.Equal(raw, c.last["mita"]) {
+		delete(c.lastReq, "mita")
 		return nil
 	}
 	bin := lookBin("mita")
 	if bin == "" {
-		return fmt.Errorf("mita 未安装：Mieru 入站需要 mita")
+		return nil
 	}
-	if err := checkPublicPorts(raw); err != nil {
-		return err
+	if bytes.Equal(raw, c.lastReq["mita"]) {
+		return nil
+	}
+	if skipped := busyPorts(raw); len(skipped) > 0 {
+		return fmt.Errorf("已跳过占用端口: %s", joinPorts(skipped))
 	}
 	if err := os.WriteFile(path, raw, 0o640); err != nil {
 		return err
@@ -145,6 +174,7 @@ func (c *Cores) applyMita(raw json.RawMessage) error {
 	}
 	_ = exec.Command(bin, "start").Run()
 	c.last["mita"] = append(json.RawMessage(nil), raw...)
+	c.lastReq["mita"] = append(json.RawMessage(nil), raw...)
 	return nil
 }
 
@@ -330,27 +360,165 @@ func lookBin(names ...string) string {
 }
 
 func checkPublicPorts(raw json.RawMessage) error {
-	tcp, udp := publicListenSpecs(raw)
-	for _, a := range tcp {
-		ln, err := net.Listen("tcp", a)
-		if err != nil {
-			host, port, _ := net.SplitHostPort(a)
-			if host == "0.0.0.0" || host == "::" {
-				return fmt.Errorf("端口 %s 已被占用", port)
-			}
-			return fmt.Errorf("端口 %s 已被占用", a)
-		}
-		_ = ln.Close()
-	}
-	for _, a := range udp {
-		pc, err := net.ListenPacket("udp", a)
-		if err != nil {
-			_, port, _ := net.SplitHostPort(a)
-			return fmt.Errorf("UDP 端口 %s 已被占用", port)
-		}
-		_ = pc.Close()
+	if skipped := busyPorts(raw); len(skipped) > 0 {
+		return fmt.Errorf("已跳过占用端口: %s", joinPorts(skipped))
 	}
 	return nil
+}
+
+func joinPorts(ports []int) string {
+	parts := make([]string, 0, len(ports))
+	seen := map[int]struct{}{}
+	for _, p := range ports {
+		if p <= 0 {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		parts = append(parts, strconv.Itoa(p))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func busyPorts(raw json.RawMessage) []int {
+	tcp, udp := publicListenSpecs(raw)
+	var skipped []int
+	seen := map[int]struct{}{}
+	add := func(addr, network string) {
+		_, portStr, err := net.SplitHostPort(addr)
+		if err != nil {
+			return
+		}
+		port, _ := strconv.Atoi(portStr)
+		if port <= 0 {
+			return
+		}
+		var probeErr error
+		if network == "udp" {
+			var pc net.PacketConn
+			pc, probeErr = net.ListenPacket("udp", addr)
+			if pc != nil {
+				_ = pc.Close()
+			}
+		} else {
+			var ln net.Listener
+			ln, probeErr = net.Listen("tcp", addr)
+			if ln != nil {
+				_ = ln.Close()
+			}
+		}
+		if probeErr != nil {
+			if _, ok := seen[port]; ok {
+				return
+			}
+			seen[port] = struct{}{}
+			skipped = append(skipped, port)
+		}
+	}
+	for _, a := range tcp {
+		add(a, "tcp")
+	}
+	for _, a := range udp {
+		add(a, "udp")
+	}
+	return skipped
+}
+
+func dropOccupiedListen(raw json.RawMessage) (json.RawMessage, []int) {
+	var top map[string]any
+	if err := json.Unmarshal(raw, &top); err != nil || top == nil {
+		return raw, nil
+	}
+	var skipped []int
+	seen := map[int]struct{}{}
+	addSkip := func(port int) {
+		if port <= 0 {
+			return
+		}
+		if _, ok := seen[port]; ok {
+			return
+		}
+		seen[port] = struct{}{}
+		skipped = append(skipped, port)
+	}
+	if ins, ok := top["inbounds"].([]any); ok {
+		keep := make([]any, 0, len(ins))
+		for _, x := range ins {
+			m, _ := x.(map[string]any)
+			if m == nil {
+				keep = append(keep, x)
+				continue
+			}
+			listen := strAny(m["listen"])
+			if listen == "" {
+				listen = "0.0.0.0"
+			}
+			if isLoopback(listen) {
+				keep = append(keep, x)
+				continue
+			}
+			port := anyPort(m["port"])
+			if port == 0 {
+				port = anyPort(m["listen_port"])
+			}
+			if port == 0 {
+				keep = append(keep, x)
+				continue
+			}
+			ln, err := net.Listen("tcp", net.JoinHostPort(listen, strconv.Itoa(port)))
+			if err != nil {
+				addSkip(port)
+				continue
+			}
+			_ = ln.Close()
+			keep = append(keep, x)
+		}
+		top["inbounds"] = keep
+	}
+	if binds, ok := top["portBindings"].([]any); ok {
+		keep := make([]any, 0, len(binds))
+		for _, x := range binds {
+			m, _ := x.(map[string]any)
+			if m == nil {
+				keep = append(keep, x)
+				continue
+			}
+			port := anyPort(m["port"])
+			if port == 0 {
+				keep = append(keep, x)
+				continue
+			}
+			addr := net.JoinHostPort("0.0.0.0", strconv.Itoa(port))
+			proto := strings.ToUpper(strAny(m["protocol"]))
+			var err error
+			if proto == "UDP" {
+				var pc net.PacketConn
+				pc, err = net.ListenPacket("udp", addr)
+				if pc != nil {
+					_ = pc.Close()
+				}
+			} else {
+				var ln net.Listener
+				ln, err = net.Listen("tcp", addr)
+				if ln != nil {
+					_ = ln.Close()
+				}
+			}
+			if err != nil {
+				addSkip(port)
+				continue
+			}
+			keep = append(keep, x)
+		}
+		top["portBindings"] = keep
+	}
+	out, err := json.Marshal(top)
+	if err != nil {
+		return raw, skipped
+	}
+	return out, skipped
 }
 
 func publicListenSpecs(raw json.RawMessage) (tcp []string, udp []string) {

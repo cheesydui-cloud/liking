@@ -33,6 +33,7 @@ type Server struct {
 	ConfigRev   string `json:"config_rev"`
 	LastError   string `json:"last_error"`
 	LastErrorAt int64  `json:"last_error_at"`
+	Cores       string `json:"cores"`
 	CreatedAt   int64  `json:"created_at"`
 }
 
@@ -54,6 +55,7 @@ type Package struct {
 	CreatedAt    int64     `json:"created_at"`
 	InboundIDs   []int64   `json:"inbound_ids,omitempty"`
 	Multipliers  []float64 `json:"multipliers,omitempty"`
+	ServerIDs    []int64   `json:"server_ids"`
 }
 
 type Inbound struct {

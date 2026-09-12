@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from '../lib/api'
+import { copyText } from '../lib/copy'
 import { useUser, useToast } from '../components/Layout'
 import { Icon, PageHead, fmtBytes, fmtDate } from '../components/ui'
 import QRCode from 'qrcode'
@@ -18,7 +18,14 @@ export default function My() {
     }).then(setQr).catch(() => {})
   }, [sub])
 
-  const copy = (t) => navigator.clipboard.writeText(t).then(() => toast('已复制'))
+  const copy = async (t) => {
+    try {
+      await copyText(t)
+      toast('已复制')
+    } catch {
+      toast('浏览器不允许自动复制，请手动选中链接', 'error')
+    }
+  }
   const used = (user?.used_up || 0) + (user?.used_down || 0)
 
   return (
@@ -52,7 +59,7 @@ export default function My() {
               <div key={k}>
                 <div className="kicker mb-1">{k}</div>
                 <div className="flex gap-2 items-center">
-                  <code className="text-[12px] truncate flex-1 font-mono">{v}</code>
+                  <code className="text-[12px] break-all flex-1 font-mono">{v}</code>
                   <button type="button" className="btn-ghost h-9" onClick={() => copy(v)}><Icon name="copy" size={14} /> 复制</button>
                 </div>
               </div>

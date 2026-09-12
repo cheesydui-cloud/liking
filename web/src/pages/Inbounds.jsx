@@ -3,10 +3,62 @@ import { api } from '../lib/api'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, Icon, PageHead } from '../components/ui'
 
+const SUGGESTED_PORTS = [8443, 8444, 2053, 2083, 2087, 2096, 8880, 9443, 10443, 11443]
+
 const empty = {
-  server_id: 0, name: '', profile: 'vless-reality-vision', port: 443, listen: '0.0.0.0',
-  line_kind: 'direct', exit_inbound_id: 0, cert_id: 0,
+  server_id: 0, name: '', profile: 'vless-reality-vision', port: 8443, listen: '0.0.0.0',
+  line_kind: 'direct', exit_inbound_id: 0, cert_id: 0, enabled: true,
   dest: 'www.cloudflare.com:443', sni: '', path: '', method: '2022-blake3-aes-128-gcm', transport: 'TCP',
+}
+
+function nextPort(serverId, list, excludeId = 0) {
+  const used = new Set(
+    list.filter(x => Number(x.server_id) === Number(serverId) && Number(x.id) !== Number(excludeId))
+      .map(x => Number(x.port)),
+  )
+  for (const p of SUGGESTED_PORTS) {
+    if (!used.has(p)) return p
+  }
+  for (let p = 10000; p < 60000; p++) {
+    if (!used.has(p)) return p
+  }
+  return 8443
+}
+
+function usedPortsText(serverId, list, excludeId = 0) {
+  const ports = list
+    .filter(x => Number(x.server_id) === Number(serverId) && Number(x.id) !== Number(excludeId))
+    .map(x => x.port)
+  return ports.length ? `已用 ${[...new Set(ports)].sort((a, b) => a - b).join('、')}` : '该节点还没有入站'
+}
+
+function serverHasCore(s, core) {
+  if (!s?.cores) return true
+  const have = String(s.cores).split(',').map(x => x.trim().toLowerCase().replace('sing-box', 'singbox')).filter(Boolean)
+  if (!have.length) return true
+  const want = String(core || 'xray').toLowerCase().replace('sing-box', 'singbox')
+  return have.includes(want)
+}
+
+function formFromInbound(inb) {
+  const st = inb.settings || {}
+  return {
+    server_id: inb.server_id,
+    name: inb.name || '',
+    profile: inb.profile,
+    port: inb.port,
+    listen: inb.listen || '0.0.0.0',
+    line_kind: inb.line_kind || 'direct',
+    exit_inbound_id: inb.exit_inbound_id || 0,
+    cert_id: inb.cert_id || 0,
+    enabled: inb.enabled !== false,
+    dest: st.dest || 'www.cloudflare.com:443',
+    sni: st.sni || '',
+    path: st.path || '',
+    method: st.method || '2022-blake3-aes-128-gcm',
+    transport: st.transport || 'TCP',
+    settings: st,
+  }
 }
 
 export default function Inbounds() {
@@ -17,6 +69,7 @@ export default function Inbounds() {
   const [certs, setCerts] = useState([])
   const [profiles, setProfiles] = useState([])
   const [f, setF] = useState(empty)
+  const [editId, setEditId] = useState(0)
   const [busy, setBusy] = useState(false)
 
   const load = async () => {
@@ -32,12 +85,37 @@ export default function Inbounds() {
   }
   useEffect(() => { load() }, [])
 
-  const meta = profiles.find(p => p.id === f.profile)
+  useEffect(() => {
+    if (editId || Number(f.server_id) || servers.length !== 1) return
+    const sid = servers[0].id
+    setF(prev => ({ ...prev, server_id: sid, port: nextPort(sid, list) }))
+  }, [servers, list, editId, f.server_id])
 
-  const submit = async (e) => {
-    e.preventDefault()
-    const settings = {}
-    if (f.profile.startsWith('vless-reality')) {
+  const meta = profiles.find(p => p.id === f.profile)
+  const selectedServer = servers.find(s => Number(s.id) === Number(f.server_id))
+  const missingCore = selectedServer && meta && !serverHasCore(selectedServer, meta.core)
+
+  const pickServer = (sid) => {
+    const n = Number(sid) || 0
+    const port = nextPort(n, list, editId)
+    setF({ ...f, server_id: sid, port })
+  }
+
+  const resetForm = () => {
+    setEditId(0)
+    const sid = servers.length === 1 ? servers[0].id : 0
+    setF({ ...empty, server_id: sid, port: sid ? nextPort(sid, list) : 8443 })
+  }
+
+  const startEdit = (inb) => {
+    setEditId(inb.id)
+    setF(formFromInbound(inb))
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const bodyFromForm = () => {
+    const settings = { ...(f.settings || {}) }
+    if (String(f.profile).startsWith('vless-reality')) {
       settings.dest = f.dest
       const host = (f.dest || '').split(':')[0]
       if (host) settings.server_names = [host]
@@ -53,16 +131,32 @@ export default function Inbounds() {
       port: Number(f.port),
       listen: f.listen || '0.0.0.0',
       line_kind: f.line_kind,
+      enabled: f.enabled !== false,
       settings,
     }
     if (f.cert_id) body.cert_id = Number(f.cert_id)
     if (f.line_kind === 'chain' && f.exit_inbound_id) body.exit_inbound_id = Number(f.exit_inbound_id)
+    return body
+  }
+
+  const submit = async (e) => {
+    e.preventDefault()
+    const port = Number(f.port)
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      toast('端口范围 1–65535', 'error')
+      return
+    }
+    if (missingCore) {
+      toast(`节点未安装 ${meta.core}，换协议或先装内核`, 'error')
+      return
+    }
+    const body = bodyFromForm()
     setBusy(true)
     try {
-      const d = await api.post('/inbounds', body)
-      setF({ ...empty, server_id: f.server_id })
+      const d = editId ? await api.put(`/inbounds/${editId}`, body) : await api.post('/inbounds', body)
       if (d.apply_error) toast(d.apply_error, 'error')
-      else toast('已创建')
+      else toast(editId ? '已保存' : '已创建')
+      resetForm()
       load()
     } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
@@ -70,13 +164,16 @@ export default function Inbounds() {
 
   const del = async (id) => {
     if (!(await dialog.confirm({ title: '删除入站', message: '订阅里对应的节点会立刻消失。', danger: true }))) return
-    try { await api.del(`/inbounds/${id}`); load() }
+    try { await api.del(`/inbounds/${id}`); if (editId === id) resetForm(); load() }
     catch (e) { toast(e.message, 'error') }
   }
 
   const toggle = async (inb) => {
     try {
-      const d = await api.put(`/inbounds/${inb.id}`, { enabled: !inb.enabled, name: inb.name, port: inb.port, settings: inb.settings, line_kind: inb.line_kind, exit_inbound_id: inb.exit_inbound_id, cert_id: inb.cert_id })
+      const d = await api.put(`/inbounds/${inb.id}`, {
+        enabled: !inb.enabled, name: inb.name, port: inb.port, listen: inb.listen,
+        settings: inb.settings, line_kind: inb.line_kind, exit_inbound_id: inb.exit_inbound_id, cert_id: inb.cert_id,
+      })
       if (d.apply_error) toast(d.apply_error, 'error')
       load()
     } catch (e) { toast(e.message, 'error') }
@@ -86,26 +183,29 @@ export default function Inbounds() {
 
   return (
     <div>
-      <PageHead kicker="Lines" title="入站" desc="一条入站就是一条线路。链式转发的落地只能是 Xray 家族；Mieru / AnyTLS 不能当落地。" />
+      <PageHead kicker="Lines" title="入站" desc="一条入站就是一条线路。端口可自定义；被占用的端口会自动停用，不会拖垮其它线路。" />
       <form onSubmit={submit} className="card p-5 mb-4">
-        <div className="kicker mb-4">新建线路</div>
+        <div className="kicker mb-4">{editId ? '编辑线路' : '新建线路'}</div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <Field label="服务器">
-            <select className="input-field" value={f.server_id} onChange={e => setF({ ...f, server_id: e.target.value })} required>
+            <select className="input-field" value={f.server_id} onChange={e => pickServer(e.target.value)} required disabled={!!editId}>
               <option value="">选择</option>
-              {servers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {servers.map(s => <option key={s.id} value={s.id}>{s.name}{s.cores ? ` · ${s.cores}` : ''}</option>)}
             </select>
           </Field>
           <Field label="协议">
-            <select className="input-field" value={f.profile} onChange={e => setF({ ...f, profile: e.target.value })}>
+            <select className="input-field" value={f.profile} onChange={e => setF({ ...f, profile: e.target.value })} disabled={!!editId}>
               {(profiles.length ? profiles : [{ id: f.profile, title: f.profile }]).map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
             </select>
           </Field>
           <Field label="名称">
-            <input className="input-field" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} required placeholder="HK-443" />
+            <input className="input-field" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} required placeholder="HK-8443" />
           </Field>
-          <Field label="端口" hint="443 若已被 Nginx / 其他面板占用，请改 8443">
-            <input className="input-field" type="number" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} required />
+          <Field label="端口" hint={f.server_id ? usedPortsText(f.server_id, list, editId) : '1–65535，不要用已被占用的口'}>
+            <input className="input-field" type="number" min="1" max="65535" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} required />
+          </Field>
+          <Field label="监听地址" hint="一般保持 0.0.0.0">
+            <input className="input-field" value={f.listen} onChange={e => setF({ ...f, listen: e.target.value })} />
           </Field>
           {meta?.need_tls && (
             <Field label="TLS 证书">
@@ -115,7 +215,7 @@ export default function Inbounds() {
               </select>
             </Field>
           )}
-          {f.profile.startsWith('vless-reality') && (
+          {String(f.profile).startsWith('vless-reality') && (
             <Field label="REALITY dest">
               <input className="input-field" value={f.dest} onChange={e => setF({ ...f, dest: e.target.value })} />
             </Field>
@@ -148,7 +248,7 @@ export default function Inbounds() {
             </Field>
           )}
           <Field label="线路">
-            <select className="input-field" value={f.line_kind} onChange={e => setF({ ...f, line_kind: e.target.value })}>
+            <select className="input-field" value={f.line_kind} onChange={e => setF({ ...f, line_kind: e.target.value })} disabled={!!editId}>
               <option value="direct">直出</option>
               <option value="chain">链式（本机入口 → 另一台落地）</option>
             </select>
@@ -163,36 +263,49 @@ export default function Inbounds() {
           )}
         </div>
         {Number(f.port) === 443 && (
-          <div className="notice mt-4">443 是 REALITY 常用口。如果这台机器上已有别的服务占用 443，创建会失败并保留原配置。</div>
+          <div className="notice mt-4">443 很容易被 Nginx / 其它面板占用。建议改成 8443 或其它空闲端口。</div>
         )}
-        <div className="mt-4">
-          <button className="btn-primary" disabled={busy}><Icon name="plus" size={16} /> 创建入站</button>
+        {missingCore && (
+          <div className="notice mt-4">这台节点没有 {meta.core}，该协议下发后不会生效。请换 VLESS / SS2022，或先安装内核。</div>
+        )}
+        <div className="mt-4 flex gap-2">
+          <button className="btn-primary" disabled={busy}>
+            <Icon name={editId ? 'check' : 'plus'} size={16} /> {editId ? '保存入站' : '创建入站'}
+          </button>
+          {editId ? (
+            <button type="button" className="btn-ghost" onClick={resetForm}>取消编辑</button>
+          ) : null}
         </div>
       </form>
       <div className="card overflow-hidden">
         {list.length === 0 ? (
-          <Empty title="暂无入站" hint="选一台在线服务器，挑一种协议。443 若已被占用请换端口。" />
+          <Empty title="暂无入站" hint="选一台在线服务器，填自定义端口，挑一种协议。" />
         ) : (
           <div className="table-wrap">
             <table className="data">
               <thead><tr><th>名称</th><th>服务器</th><th>协议</th><th>端口</th><th>线路</th><th>内核</th><th></th></tr></thead>
               <tbody>
-                {list.map(inb => (
-                  <tr key={inb.id} className={!inb.enabled ? 'opacity-50' : ''}>
-                    <td className="font-medium">{inb.name}</td>
-                    <td>{inb.server_name}</td>
-                    <td><Badge tone="gold">{inb.profile}</Badge></td>
-                    <td className="tabular-nums">{inb.port}</td>
-                    <td>{inb.line_kind === 'chain' ? '链式' : '直出'}</td>
-                    <td className="text-ink-mut">{inb.core}</td>
-                    <td className="whitespace-nowrap">
-                      <div className="flex gap-3 justify-end">
-                        <button type="button" className="linkish" onClick={() => toggle(inb)}>{inb.enabled ? '停用' : '启用'}</button>
-                        <button type="button" className="linkish" style={{ color: 'var(--color-danger)' }} onClick={() => del(inb.id)}>删除</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {list.map(inb => {
+                  const srv = servers.find(s => s.id === inb.server_id)
+                  const dead = srv && !serverHasCore(srv, inb.core)
+                  return (
+                    <tr key={inb.id} className={!inb.enabled ? 'opacity-50' : ''}>
+                      <td className="font-medium">{inb.name}</td>
+                      <td>{inb.server_name}</td>
+                      <td><Badge tone="gold">{inb.profile}</Badge></td>
+                      <td className="tabular-nums">{inb.port}</td>
+                      <td>{inb.line_kind === 'chain' ? '链式' : '直出'}</td>
+                      <td className="text-ink-mut">{inb.core}{dead ? ' · 未安装' : ''}{!inb.enabled ? ' · 停用' : ''}</td>
+                      <td className="whitespace-nowrap">
+                        <div className="flex gap-3 justify-end">
+                          <button type="button" className="linkish" onClick={() => startEdit(inb)}>编辑</button>
+                          <button type="button" className="linkish" onClick={() => toggle(inb)}>{inb.enabled ? '停用' : '启用'}</button>
+                          <button type="button" className="linkish" style={{ color: 'var(--color-danger)' }} onClick={() => del(inb.id)}>删除</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

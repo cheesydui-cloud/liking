@@ -76,3 +76,48 @@ func TestBuildXrayAndMita(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildOmitsMissingCores(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	srv, err := db.CreateServer(d, "n1", "10.0.0.1", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MarkServerOnline(d, srv.ID, "0.1.6", "linux", "amd64", "10.0.0.1", []string{"xray"}); err != nil {
+		t.Fatal(err)
+	}
+	in := &db.Inbound{
+		ServerID: srv.ID, Name: "v1", Profile: ProfileVLESSRealityVision,
+		Port: 8443, Enabled: true, LineKind: "direct", Settings: "{}",
+	}
+	if err := Normalize(in, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateInbound(d, in); err != nil {
+		t.Fatal(err)
+	}
+	m := &db.Inbound{
+		ServerID: srv.ID, Name: "m1", Profile: ProfileMieru,
+		Port: 8964, Enabled: true, LineKind: "direct", Settings: `{"transport":"TCP"}`,
+	}
+	if err := Normalize(m, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateInbound(d, m); err != nil {
+		t.Fatal(err)
+	}
+	b, err := Build(d, srv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.Apply.Xray) == 0 {
+		t.Fatal("xray")
+	}
+	if len(b.Apply.Mita) != 0 {
+		t.Fatalf("mita should be omitted, got %s", b.Apply.Mita)
+	}
+}
