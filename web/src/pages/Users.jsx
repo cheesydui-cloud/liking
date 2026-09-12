@@ -196,15 +196,14 @@ export default function Users() {
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase()
     return list.filter(u => {
-      if (u.role === 'admin') return !needle && !pkgFilter
       if (pkgFilter === 'none' && u.package_id) return false
       if (pkgFilter && pkgFilter !== 'none' && String(u.package_id) !== pkgFilter) return false
       if (!needle) return true
-      return [u.username, u.remark, u.package_name].some(x => String(x || '').toLowerCase().includes(needle))
+      const hay = [u.username, u.remark, u.package_name, u.role === 'admin' ? '管理员' : '']
+      return hay.some(x => String(x || '').toLowerCase().includes(needle))
     })
   }, [list, q, pkgFilter])
 
-  const members = list.filter(u => u.role !== 'admin')
   const editing = !!editUser
   const selectedPkg = pkgs.find(p => Number(p.id) === Number(f.package_id))
 
@@ -229,7 +228,7 @@ export default function Users() {
       </div>
 
       <div className="card overflow-hidden">
-        {members.length === 0 ? (
+        {list.length === 0 ? (
           <Empty title="暂无用户" hint="先建套餐并勾选节点，再开账号。" action={
             <button type="button" className="btn-primary" onClick={openCreate}><Icon name="plus" size={15} /> 新建用户</button>
           } />
