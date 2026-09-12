@@ -64,7 +64,21 @@ func TestClashAndSingboxSkipMieru(t *testing.T) {
 		t.Fatalf("skip %v", err)
 	}
 	uri, err := ShareURI(in, c)
-	if err != nil || !strings.HasPrefix(uri, "mieru://") {
-		t.Fatalf("uri %s %v", uri, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(uri, "mierus://") {
+		t.Fatalf("uri %s", uri)
+	}
+	if !strings.Contains(uri, "udp=0") || !strings.Contains(uri, "port=8964") || !strings.Contains(uri, "profile=default") {
+		t.Fatalf("uri %s", uri)
+	}
+	if strings.Contains(uri, "1.2.3.4:8964") {
+		t.Fatalf("port must be in query %s", uri)
+	}
+	in.Settings = `{"transport":"UDP"}`
+	uri, err = ShareURI(in, c)
+	if err != nil || !strings.Contains(uri, "udp=1") {
+		t.Fatalf("udp uri %s %v", uri, err)
 	}
 }

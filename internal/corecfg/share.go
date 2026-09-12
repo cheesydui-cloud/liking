@@ -3,6 +3,7 @@ package corecfg
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"liking/internal/db"
@@ -77,20 +78,18 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 		q.Set("sni", sni)
 		return fmt.Sprintf("anytls://%s@%s?%s#%s", url.QueryEscape(c.Password), hp, q.Encode(), name), nil
 	case ProfileMieru:
-		q := url.Values{}
-		tr := st.String("transport")
-		if tr == "" {
-			tr = "TCP"
-		}
-		if tr == "BOTH" {
-			tr = "TCP"
-		}
-		q.Set("transport", tr)
+		// Shadowrocket: mierus://user:pass@host?udp=1&port=39198&profile=default
 		user := c.Username
 		if user == "" {
 			user = c.Email
 		}
-		return fmt.Sprintf("mieru://%s:%s@%s?%s#%s", url.PathEscape(user), url.PathEscape(c.Password), hp, q.Encode(), name), nil
+		udp := "0"
+		tr := strings.ToUpper(st.String("transport"))
+		if tr == "UDP" || tr == "BOTH" {
+			udp = "1"
+		}
+		userinfo := url.UserPassword(user, c.Password).String()
+		return fmt.Sprintf("mierus://%s@%s?udp=%s&port=%s&profile=default", userinfo, shareHostOnly(host), udp, strconv.Itoa(in.Port)), nil
 	default:
 		return "", fmt.Errorf("未知协议")
 	}
@@ -101,4 +100,11 @@ func nz(s, def string) string {
 		return def
 	}
 	return s
+}
+
+func shareHostOnly(host string) string {
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		return "[" + host + "]"
+	}
+	return host
 }

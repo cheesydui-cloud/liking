@@ -2,6 +2,18 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.1.13 — 2026-09-12
+
+线路「复制」被做成了订阅链接。小火箭认的是 `mierus://` 协议链接，例如 `mierus://user:pass@host?udp=1&port=39198&profile=default`。
+
+### 修复
+- 「复制」只复制协议链接：VLESS / Trojan / SS 仍是 `vless://` 等；Mieru 改为小火箭格式 `mierus://用户:密码@地址?udp=&port=&profile=default`
+- 不再弹出订阅面板；复制失败时只展示这条协议链接
+
+### 升级注意
+- 只升面板即可，节点 Agent 不用重装
+- 回滚：`liking-upgrade --release v0.1.12`
+
 ## v0.1.12 — 2026-09-12
 
 线路「复制」贴出的 `mieru://` 多数软件不认。真正通用的是 HTTP 订阅链接。

@@ -3,7 +3,6 @@ import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, Icon, Modal, PageHead, fmtAgo } from '../components/ui'
-import { ShareModal } from '../components/ShareModal'
 
 const SUGGESTED_PORTS = [8443, 8444, 2053, 2083, 2087, 2096, 8880, 9443, 10443, 11443]
 
@@ -111,7 +110,7 @@ export default function Nodes() {
   const [lineOpen, setLineOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [paramInb, setParamInb] = useState(null)
-  const [share, setShare] = useState(null)
+  const [shareText, setShareText] = useState('')
 
   const load = async () => {
     try {
@@ -269,7 +268,14 @@ export default function Nodes() {
 
   const copyShare = async (inb) => {
     try {
-      setShare(await api.get(`/inbounds/${inb.id}/share`))
+      const d = await api.get(`/inbounds/${inb.id}/share`)
+      try {
+        await copyText(d.uri)
+        toast('已复制节点链接')
+      } catch {
+        setShareText(d.uri)
+        toast('浏览器不允许自动复制，请手动选中链接', 'error')
+      }
     } catch (e) {
       toast(e.message, 'error')
     }
@@ -519,10 +525,23 @@ export default function Nodes() {
             }}><Icon name="copy" size={13} /></button>
           </div>
         ))}
-        <p className="text-[12px] text-ink-mut mt-3">这些是服务端参数，不能直接导入客户端。点线路上的「复制」拿订阅链接。</p>
+        <p className="text-[12px] text-ink-mut mt-3">这些是服务端参数，不能直接导入客户端。点线路上的「复制」拿协议链接。</p>
       </Modal>
 
-      <ShareModal share={share} onClose={() => setShare(null)} onToast={toast} />
+      <Modal open={!!shareText} title="节点链接" onClose={() => setShareText('')} footer={
+        <>
+          <button type="button" className="btn-ghost" onClick={() => setShareText('')}>关闭</button>
+          <button type="button" className="btn-primary" onClick={async () => {
+            try { await copyText(shareText); toast('已复制节点链接') }
+            catch { toast('请手动选中复制', 'error') }
+          }}>
+            <Icon name="copy" size={15} /> 复制
+          </button>
+        </>
+      }>
+        <p className="text-[12px] text-ink-mut mb-2">粘贴到小火箭 / v2rayN / Nekobox 即可导入。</p>
+        <code className="block text-[12px] break-all font-mono p-3 rounded-md" style={{ background: 'var(--color-fill)' }}>{shareText}</code>
+      </Modal>
     </div>
   )
 }
