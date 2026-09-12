@@ -260,18 +260,26 @@ func (s *Server) prepareInbound(in *db.Inbound) error {
 	} else {
 		in.ExitInboundID = nil
 	}
+	used, err := db.UsedPortsOnServer(s.DB, in.ServerID, in.ID)
+	if err != nil {
+		return err
+	}
+	if in.Port == 0 {
+		p, err := corecfg.PickFreePort(used)
+		if err != nil {
+			return err
+		}
+		in.Port = p
+	} else if in.Port < 1 || in.Port > 65535 {
+		return errPortInvalid
+	} else if _, ok := used[in.Port]; ok {
+		return errPortTaken
+	}
 	if err := corecfg.Normalize(in, exit); err != nil {
 		return err
 	}
 	if corecfg.NeedTLS(in.Profile) && in.CertID == nil {
 		return errNeedCert
-	}
-	used, err := db.UsedPortsOnServer(s.DB, in.ServerID, in.ID)
-	if err != nil {
-		return err
-	}
-	if _, ok := used[in.Port]; ok {
-		return errPortTaken
 	}
 	return nil
 }
@@ -281,8 +289,9 @@ type simpleError string
 func (e simpleError) Error() string { return string(e) }
 
 const (
-	errNeedCert  simpleError = "该协议需要先上传 TLS 证书"
-	errPortTaken simpleError = "该服务器上端口已被占用"
+	errNeedCert    simpleError = "该协议需要先上传 TLS 证书"
+	errPortTaken   simpleError = "该服务器上端口已被占用"
+	errPortInvalid simpleError = "端口范围 1–65535，或不填则随机"
 )
 
 func exitServerID(s *Server, in *db.Inbound) int64 {

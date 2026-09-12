@@ -282,7 +282,7 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 	}
 	in.Settings = raw
 	if in.Name == "" {
-		in.Name = in.Profile
+		in.Name = fmt.Sprintf("%s-%d", in.Profile, in.Port)
 	}
 	return nil
 }

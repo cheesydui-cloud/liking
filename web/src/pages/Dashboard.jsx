@@ -35,7 +35,7 @@ export default function Dashboard() {
       </div>
       {(d.server_list || []).some(s => s.last_error) && (
         <div className="notice mb-4">
-          有节点配置下发失败，打开「节点管理」查看原因。常见原因：端口被占用、内核未安装。
+          有服务器配置下发失败，打开「服务器管理」查看原因。常见原因：端口被占用、内核未安装。
         </div>
       )}
       <div className="card overflow-hidden">

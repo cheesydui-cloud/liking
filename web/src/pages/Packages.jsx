@@ -212,7 +212,7 @@ export default function Packages() {
               )}
             </div>
             {servers.length === 0 ? (
-              <div className="text-[13px] text-ink-mut py-3">还没有节点。先到「节点管理」添加并安装 Agent。</div>
+              <div className="text-[13px] text-ink-mut py-3">还没有服务器。先到「服务器管理」添加并安装 Agent。</div>
             ) : (
               <div className="grid grid-cols-1 gap-2">
                 {servers.map(s => {

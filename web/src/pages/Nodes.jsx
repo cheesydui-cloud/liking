@@ -4,33 +4,18 @@ import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, Icon, Modal, PageHead, fmtAgo } from '../components/ui'
 
-const SUGGESTED_PORTS = [8443, 8444, 2053, 2083, 2087, 2096, 8880, 9443, 10443, 11443]
-
 const emptyLine = {
-  server_id: 0, name: '', profile: 'vless-reality-vision', port: 8443, listen: '0.0.0.0',
+  server_id: 0, name: '', profile: 'vless-reality-vision', port: '', listen: '0.0.0.0',
   line_kind: 'direct', exit_inbound_id: 0, cert_id: 0, enabled: true,
   dest: 'www.cloudflare.com:443', sni: '', path: '', method: '2022-blake3-aes-128-gcm', transport: 'BOTH',
-}
-
-function nextPort(serverId, list, excludeId = 0) {
-  const used = new Set(
-    list.filter(x => Number(x.server_id) === Number(serverId) && Number(x.id) !== Number(excludeId))
-      .map(x => Number(x.port)),
-  )
-  for (const p of SUGGESTED_PORTS) {
-    if (!used.has(p)) return p
-  }
-  for (let p = 10000; p < 60000; p++) {
-    if (!used.has(p)) return p
-  }
-  return 8443
 }
 
 function usedPortsText(serverId, list, excludeId = 0) {
   const ports = list
     .filter(x => Number(x.server_id) === Number(serverId) && Number(x.id) !== Number(excludeId))
     .map(x => x.port)
-  return ports.length ? `已用 ${[...new Set(ports)].sort((a, b) => a - b).join('、')}` : '该节点还没有线路'
+  const used = ports.length ? `已用 ${[...new Set(ports)].sort((a, b) => a - b).join('、')}` : '这台服务器还没有节点'
+  return `不填则随机，避开已用端口。${used}`
 }
 
 function serverHasCore(s, core) {
@@ -144,7 +129,7 @@ export default function Nodes() {
       setName(''); setHost('')
       setNodeOpen(false)
       setCmd(d.install || '')
-      toast('已添加节点')
+      toast('已添加服务器')
       load()
     } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
@@ -163,7 +148,7 @@ export default function Nodes() {
   }
 
   const delNode = async (id) => {
-    if (!(await dialog.confirm({ title: '删除节点', message: '这台机器上的线路也会一并删除，且无法恢复。', danger: true, okText: '删除' }))) return
+    if (!(await dialog.confirm({ title: '删除服务器', message: '这台机器上的节点也会一并删除，且无法恢复。', danger: true, okText: '删除' }))) return
     try { await api.del(`/servers/${id}`); load(); toast('已删除') }
     catch (e) { toast(e.message, 'error') }
   }
@@ -178,7 +163,7 @@ export default function Nodes() {
   const openCreateLine = (serverId) => {
     const sid = Number(serverId)
     setEditId(0)
-    setF({ ...emptyLine, server_id: sid, port: nextPort(sid, list) })
+    setF({ ...emptyLine, server_id: sid })
     setLineOpen(true)
   }
 
@@ -209,7 +194,7 @@ export default function Nodes() {
       server_id: Number(f.server_id),
       name: f.name,
       profile: f.profile,
-      port: Number(f.port),
+      port: Number(f.port) || 0,
       listen: f.listen || '0.0.0.0',
       line_kind: f.line_kind,
       enabled: f.enabled !== false,
@@ -222,9 +207,15 @@ export default function Nodes() {
 
   const submitLine = async (e) => {
     e.preventDefault()
-    const port = Number(f.port)
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      toast('端口范围 1–65535', 'error')
+    const raw = String(f.port ?? '').trim()
+    if (raw !== '') {
+      const port = Number(raw)
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        toast('端口范围 1–65535，或不填则随机', 'error')
+        return
+      }
+    } else if (editId) {
+      toast('编辑时需要填写端口', 'error')
       return
     }
     const wasEdit = !!editId
@@ -232,7 +223,7 @@ export default function Nodes() {
     try {
       const d = wasEdit ? await api.put(`/inbounds/${editId}`, bodyFromForm()) : await api.post('/inbounds', bodyFromForm())
       if (d.apply_error) toast(d.apply_error, 'error')
-      else toast(wasEdit ? '已保存' : '已添加线路')
+      else toast(wasEdit ? '已保存' : '已增加节点')
       closeLine()
       load()
     } catch (e) { toast(e.message, 'error') }
@@ -240,7 +231,7 @@ export default function Nodes() {
   }
 
   const delLine = async (id) => {
-    if (!(await dialog.confirm({ title: '删除线路', message: '订阅里对应的节点会立刻消失。', danger: true }))) return
+    if (!(await dialog.confirm({ title: '删除节点', message: '订阅里对应的节点会立刻消失。', danger: true }))) return
     try { await api.del(`/inbounds/${id}`); if (editId === id) closeLine(); load() }
     catch (e) { toast(e.message, 'error') }
   }
@@ -287,23 +278,23 @@ export default function Nodes() {
   return (
     <div>
       <PageHead
-        title="节点管理"
-        desc="一台机器一个 Agent，下面挂线路。端口可自定义；被占用的口只会停那一条，不会拖垮其它线路。"
+        title="服务器管理"
+        desc="一台机器一个 Agent，下面挂节点。名称可留空；端口不填则随机，并错开已用端口。"
         actions={
           <button type="button" className="btn-primary" onClick={openCreateNode}>
-            <Icon name="plus" size={15} /> 添加节点
+            <Icon name="plus" size={15} /> 添加服务器
           </button>
         }
       />
       {servers.length > 0 && (
         <div className="text-[12px] text-ink-mut mb-3">
-          {online} 在线 · {servers.length - online} 离线 · {list.length} 条线路
+          {online} 在线 · {servers.length - online} 离线 · {list.length} 个节点
         </div>
       )}
       {servers.length === 0 ? (
         <div className="card overflow-hidden">
-          <Empty title="还没有节点" hint="先起一个名字，添加后把安装命令拿到机器上以 root 执行，再在节点上添加线路。" action={
-            <button type="button" className="btn-primary" onClick={openCreateNode}><Icon name="plus" size={15} /> 添加节点</button>
+          <Empty title="还没有服务器" hint="先起一个名字，添加后把安装命令拿到机器上以 root 执行，再增加节点。" action={
+            <button type="button" className="btn-primary" onClick={openCreateNode}><Icon name="plus" size={15} /> 添加服务器</button>
           } />
         </div>
       ) : (
@@ -338,17 +329,17 @@ export default function Nodes() {
                   <div className="flex flex-wrap gap-2.5 shrink-0">
                     <button type="button" className="row-act" onClick={() => showInstall(s.id)}>安装命令</button>
                     <button type="button" className="row-act" onClick={() => sync(s.id)}>同步</button>
-                    <button type="button" className="row-act is-danger" onClick={() => delNode(s.id)}>删除节点</button>
+                    <button type="button" className="row-act is-danger" onClick={() => delNode(s.id)}>删除服务器</button>
                   </div>
                 </div>
                 <div className="px-4 py-2 flex items-center justify-between border-t" style={{ borderColor: 'var(--color-line-soft)' }}>
-                  <span className="text-[12px] font-medium text-ink-mut">线路 · {lines.length}</span>
+                  <span className="text-[12px] font-medium text-ink-mut">节点 · {lines.length}</span>
                   <button type="button" className="row-act" onClick={() => openCreateLine(s.id)}>
-                    <span className="inline-flex items-center gap-1"><Icon name="plus" size={12} /> 添加线路</span>
+                    <span className="inline-flex items-center gap-1"><Icon name="plus" size={12} /> 增加节点</span>
                   </button>
                 </div>
                 {lines.length === 0 ? (
-                  <div className="px-4 pb-4 text-[13px] text-ink-mut">这台节点还没有线路。选协议、填端口即可。</div>
+                  <div className="px-4 pb-4 text-[13px] text-ink-mut">还没有节点。选协议即可，名称和端口都可以留空。</div>
                 ) : (
                   <div className="table-wrap">
                     <table className="data">
@@ -385,7 +376,7 @@ export default function Nodes() {
         </div>
       )}
 
-      <Modal open={nodeOpen} title="添加节点" onClose={() => setNodeOpen(false)} footer={
+      <Modal open={nodeOpen} title="添加服务器" onClose={() => setNodeOpen(false)} footer={
         <>
           <button type="button" className="btn-ghost" onClick={() => setNodeOpen(false)}>取消</button>
           <button type="submit" form="node-form" className="btn-primary" disabled={busy}>{busy ? '添加中…' : '添加'}</button>
@@ -412,18 +403,18 @@ export default function Nodes() {
           </button>
         </>
       }>
-        <p className="text-[13px] text-ink-mut mb-3">在节点上以 root 执行。明文 http 会自动带 --insecure。</p>
+        <p className="text-[13px] text-ink-mut mb-3">在服务器上以 root 执行。明文 http 会自动带 --insecure。</p>
         <pre className="text-[12px] font-mono bg-raised p-3 rounded-lg overflow-x-auto whitespace-pre-wrap">{cmd}</pre>
       </Modal>
 
-      <Modal open={lineOpen} title={editId ? '编辑线路' : '添加线路'} onClose={closeLine} size="lg" footer={
+      <Modal open={lineOpen} title={editId ? '编辑节点' : '增加节点'} onClose={closeLine} size="lg" footer={
         <>
           <button type="button" className="btn-ghost" onClick={closeLine}>取消</button>
           <button type="submit" form="line-form" className="btn-primary" disabled={busy}>{busy ? '保存中…' : (editId ? '保存' : '创建')}</button>
         </>
       }>
         <form id="line-form" onSubmit={submitLine} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="节点">
+          <Field label="服务器">
             <select className="input-field" value={f.server_id} disabled>
               {servers.map(s => <option key={s.id} value={s.id}>{s.name}{s.cores ? ` · ${s.cores}` : ''}</option>)}
             </select>
@@ -433,11 +424,11 @@ export default function Nodes() {
               {(profiles.length ? profiles : [{ id: f.profile, title: f.profile }]).map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
             </select>
           </Field>
-          <Field label="名称">
-            <input className="input-field" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} required placeholder="HK-8443" autoFocus />
+          <Field label="名称" hint="可留空，保存时按协议和端口生成">
+            <input className="input-field" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="" autoFocus />
           </Field>
-          <Field label="端口" hint={f.server_id ? usedPortsText(f.server_id, list, editId) : '1–65535，不要用已被占用的口'}>
-            <input className="input-field" type="number" min="1" max="65535" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} required />
+          <Field label="端口" hint={f.server_id ? usedPortsText(f.server_id, list, editId) : '不填则随机，避开已用端口'}>
+            <input className="input-field" type="number" min="1" max="65535" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} placeholder="" />
           </Field>
           <Field label="监听地址" hint="一般保持 0.0.0.0">
             <input className="input-field" value={f.listen} onChange={e => setF({ ...f, listen: e.target.value })} />
@@ -500,7 +491,7 @@ export default function Nodes() {
             <div className="notice sm:col-span-2">443 很容易被 Nginx / 其它面板占用。建议改成 8443 或其它空闲端口。</div>
           )}
           {missingCore && (
-            <div className="notice sm:col-span-2">这台节点还没有 {meta.core}。创建后会自动从 GitHub 下载并拉起，第一次可能要等一会儿。节点需要能访问 GitHub。</div>
+            <div className="notice sm:col-span-2">这台服务器还没有 {meta.core}。创建后会自动从 GitHub 下载并拉起，第一次可能要等一会儿。服务器需要能访问 GitHub。</div>
           )}
         </form>
       </Modal>
@@ -525,7 +516,7 @@ export default function Nodes() {
             }}><Icon name="copy" size={13} /></button>
           </div>
         ))}
-        <p className="text-[12px] text-ink-mut mt-3">这些是服务端参数，不能直接导入客户端。点线路上的「复制」拿协议链接。</p>
+        <p className="text-[12px] text-ink-mut mt-3">这些是服务端参数，不能直接导入客户端。点节点上的「复制」拿协议链接。</p>
       </Modal>
 
       <Modal open={!!shareText} title="节点链接" onClose={() => setShareText('')} footer={

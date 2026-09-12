@@ -153,9 +153,9 @@ export function Layout({ children }) {
   const groups = isAdmin ? [
     { items: [{ to: '/', end: true, icon: 'layout', label: '总览' }] },
     {
-      label: '节点',
+      label: '服务器',
       items: [
-        { to: '/nodes', icon: 'servers', label: '节点管理' },
+        { to: '/nodes', icon: 'servers', label: '服务器管理' },
         { to: '/certs', icon: 'cert', label: '证书' },
       ],
     },

@@ -338,6 +338,93 @@ func TestInboundShareURI(t *testing.T) {
 	}
 }
 
+func TestCreateInboundRandomPort(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	body, _ := json.Marshal(map[string]string{"name": "n1", "public_host": "10.0.0.1"})
+	res, err = c.Post(ts.URL+"/api/servers", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		Server struct {
+			ID int64 `json:"id"`
+		} `json:"server"`
+	}
+	decodeRes(t, res, &created)
+
+	post := func() (int, int, string) {
+		t.Helper()
+		inBody, _ := json.Marshal(map[string]any{
+			"server_id": created.Server.ID,
+			"profile":   "ss2022",
+		})
+		res, err := c.Post(ts.URL+"/api/inbounds", "application/json", bytes.NewReader(inBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out struct {
+			Inbound struct {
+				Name string `json:"name"`
+				Port int    `json:"port"`
+			} `json:"inbound"`
+		}
+		decodeRes(t, res, &out)
+		return out.Inbound.Port, res.StatusCode, out.Inbound.Name
+	}
+	p1, _, n1 := post()
+	if p1 < 10000 || p1 > 59999 {
+		t.Fatalf("port %d", p1)
+	}
+	if n1 != "ss2022-"+strconv.Itoa(p1) {
+		t.Fatalf("name %s", n1)
+	}
+	p2, _, _ := post()
+	if p2 == p1 || p2 < 10000 || p2 > 59999 {
+		t.Fatalf("ports %d %d", p1, p2)
+	}
+
+	taken, _ := json.Marshal(map[string]any{
+		"server_id": created.Server.ID,
+		"profile":   "ss2022",
+		"port":      p1,
+	})
+	res, err = c.Post(ts.URL+"/api/inbounds", "application/json", bytes.NewReader(taken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("taken %d", res.StatusCode)
+	}
+	res.Body.Close()
+}
+
 func TestInboundShareSS2022UsesConnectIP(t *testing.T) {
 	d, err := db.Open(":memory:")
 	if err != nil {
