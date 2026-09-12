@@ -1,10 +1,12 @@
 package server
 
 import (
+	"context"
 	"log"
 	"sync"
 	"time"
 
+	"liking/internal/certs"
 	"liking/internal/corecfg"
 	"liking/internal/db"
 )
@@ -153,6 +155,47 @@ func (s *Server) enforceOnce() {
 	}
 	s.syncServers(ids...)
 	_ = db.DeleteExpiredSessions(s.DB)
+}
+
+func (s *Server) certRenewLoop() {
+	timer := time.NewTimer(90 * time.Second)
+	defer timer.Stop()
+	ticker := time.NewTicker(12 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-timer.C:
+			s.renewDueCerts()
+		case <-ticker.C:
+			s.renewDueCerts()
+		}
+	}
+}
+
+func (s *Server) renewDueCerts() {
+	ids, err := db.ListCertIDsDueRenew(s.DB, time.Now().Add(30*24*time.Hour).Unix())
+	if err != nil || len(ids) == 0 {
+		return
+	}
+	changed := false
+	for _, id := range ids {
+		cur, err := db.GetCert(s.DB, id)
+		if err != nil || cur.Source != "acme-cf" {
+			continue
+		}
+		_, err = s.issueACME(context.Background(), id, cur.Name, certs.SplitNames(cur.Domains), cur.AcmeEmail)
+		if err != nil {
+			_ = db.SetCertError(s.DB, id, err.Error())
+			log.Printf("renew cert %d: %v", id, err)
+			continue
+		}
+		changed = true
+	}
+	if changed {
+		s.syncAll()
+	}
 }
 
 func shouldReset(u *db.User, pkg *db.Package, now int64) bool {

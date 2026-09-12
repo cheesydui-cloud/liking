@@ -156,7 +156,6 @@ export function Layout({ children }) {
       label: '服务器',
       items: [
         { to: '/nodes', icon: 'servers', label: '服务器管理' },
-        { to: '/certs', icon: 'cert', label: '证书' },
       ],
     },
     {

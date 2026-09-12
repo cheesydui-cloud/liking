@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Modal, PageHead } from '../components/ui'
+import { Badge, Empty, Field, Icon, Modal, PageHead, fmtDateShort } from '../components/ui'
 
 const SUGGESTED_PORTS = [8443, 8444, 2053, 2083, 2087, 2096, 8880, 9443, 10443, 11443]
 
@@ -340,10 +340,10 @@ export default function Inbounds() {
             <input className="input-field" value={f.listen} onChange={e => setF({ ...f, listen: e.target.value })} />
           </Field>
           {meta?.need_tls && (
-            <Field label="TLS 证书">
+            <Field label="TLS 证书" hint="在设置里签发或上传">
               <select className="input-field" value={f.cert_id} onChange={e => setF({ ...f, cert_id: e.target.value })}>
                 <option value="">选择证书</option>
-                {certs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {certs.map(c => <option key={c.id} value={c.id}>{c.name}{c.expires_at ? ` · ${fmtDateShort(c.expires_at)}` : ''}</option>)}
               </select>
             </Field>
           )}

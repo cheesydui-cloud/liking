@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"liking/internal/certs"
 	"liking/internal/db"
 )
 
@@ -901,6 +902,138 @@ func TestServerTrafficLimit(t *testing.T) {
 	if updated.Server.TrafficLimit != lim || updated.Server.PublicHost != "10.0.0.1" {
 		t.Fatalf("partial %+v", updated.Server)
 	}
+}
+
+func TestCertsAndSettings(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	res, err = c.Get(ts.URL + "/api/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st map[string]any
+	decodeRes(t, res, &st)
+	if st["cf_api_token_set"] != false {
+		t.Fatalf("token set %+v", st)
+	}
+	if _, ok := st["cf_api_token"]; ok {
+		t.Fatal("token leaked")
+	}
+
+	put, _ := json.Marshal(map[string]string{
+		"panel_name": "liking", "panel_url": "", "acme_email": "a@b.com", "cf_api_token": "secret-token",
+	})
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/api/settings", bytes.NewReader(put))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+	res, err = c.Get(ts.URL + "/api/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st = map[string]any{}
+	decodeRes(t, res, &st)
+	if st["cf_api_token_set"] != true || st["acme_email"] != "a@b.com" {
+		t.Fatalf("%+v", st)
+	}
+	if _, ok := st["cf_api_token"]; ok {
+		t.Fatal("token leaked after save")
+	}
+
+	body, _ := json.Marshal(map[string]string{"name": "self", "domains": "self.example.com"})
+	res, err = c.Post(ts.URL+"/api/certs/selfsign", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		Cert struct {
+			ID        int64  `json:"id"`
+			Source    string `json:"source"`
+			ExpiresAt int64  `json:"expires_at"`
+			KeyPEM    string `json:"key_pem"`
+			Domains   string `json:"domains"`
+		} `json:"cert"`
+	}
+	decodeRes(t, res, &created)
+	if created.Cert.ID == 0 || created.Cert.Source != "selfsigned" || created.Cert.ExpiresAt == 0 || created.Cert.KeyPEM != "" {
+		t.Fatalf("%+v", created.Cert)
+	}
+
+	res, err = c.Post(ts.URL+"/api/certs/"+strconv.FormatInt(created.Cert.ID, 10)+"/renew", "application/json", bytes.NewReader([]byte("{}")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 400 {
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		t.Fatalf("renew selfsigned %d %s", res.StatusCode, b)
+	}
+	res.Body.Close()
+
+	pemCert, pemKey, _, err := certs.SelfSign("up.example.com", []string{"up.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, _ := json.Marshal(map[string]string{"name": "up", "cert_pem": pemCert, "key_pem": pemKey})
+	res, err = c.Post(ts.URL+"/api/certs", "application/json", bytes.NewReader(up))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var uploaded struct {
+		Cert struct {
+			Source    string `json:"source"`
+			ExpiresAt int64  `json:"expires_at"`
+			Domains   string `json:"domains"`
+		} `json:"cert"`
+	}
+	decodeRes(t, res, &uploaded)
+	if uploaded.Cert.Source != "upload" || uploaded.Cert.ExpiresAt == 0 || uploaded.Cert.Domains == "" {
+		t.Fatalf("%+v", uploaded.Cert)
+	}
+
+	badACME, _ := json.Marshal(map[string]string{"domains": "nodot"})
+	res, err = c.Post(ts.URL+"/api/certs/acme", "application/json", bytes.NewReader(badACME))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 400 {
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		t.Fatalf("acme %d %s", res.StatusCode, b)
+	}
+	res.Body.Close()
 }
 
 func TestHealthz(t *testing.T) {

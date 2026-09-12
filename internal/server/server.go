@@ -25,6 +25,7 @@ type Server struct {
 	kickMu       sync.Mutex
 	kickWant     map[int64]bool
 	kickRun      map[int64]bool
+	acmeMu       sync.Mutex
 }
 
 func New(d *sql.DB) (*Server, error) {
@@ -49,6 +50,7 @@ func New(d *sql.DB) (*Server, error) {
 	}
 	hub.Redispatch = func(ids []int64) { s.syncServers(ids...) }
 	go s.enforceLoop()
+	go s.certRenewLoop()
 	return s, nil
 }
 
@@ -116,6 +118,9 @@ func (s *Server) Router() http.Handler {
 			r.Get("/api/certs", s.handleListCerts)
 			r.Get("/api/certs/{id}", s.handleGetCert)
 			r.Post("/api/certs", s.handleCreateCert)
+			r.Post("/api/certs/selfsign", s.handleSelfSignCert)
+			r.Post("/api/certs/acme", s.handleIssueACME)
+			r.Post("/api/certs/{id}/renew", s.handleRenewCert)
 			r.Put("/api/certs/{id}", s.handleUpdateCert)
 			r.Delete("/api/certs/{id}", s.handleDeleteCert)
 

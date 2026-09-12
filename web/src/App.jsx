@@ -5,7 +5,6 @@ import Dashboard from './pages/Dashboard'
 import Nodes from './pages/Nodes'
 import Users from './pages/Users'
 import Packages from './pages/Packages'
-import Certs from './pages/Certs'
 import Settings from './pages/Settings'
 import My from './pages/My'
 import Password from './pages/Password'
@@ -59,7 +58,7 @@ export default function App() {
           <Route path="/inbounds" element={<Navigate to="/nodes" replace />} />
           <Route path="/users" element={<AdminRoute><Users /></AdminRoute>} />
           <Route path="/packages" element={<AdminRoute><Packages /></AdminRoute>} />
-          <Route path="/certs" element={<AdminRoute><Certs /></AdminRoute>} />
+          <Route path="/certs" element={<Navigate to="/settings" replace />} />
           <Route path="/settings" element={<AdminRoute><Settings /></AdminRoute>} />
           <Route path="/password" element={<AdminRoute><Password /></AdminRoute>} />
           <Route path="/my" element={<UserRoute><My /></UserRoute>} />

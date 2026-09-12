@@ -21,19 +21,19 @@ type User struct {
 }
 
 type Server struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	PublicHost  string `json:"public_host"`
-	Token       string `json:"token,omitempty"`
-	Online      int    `json:"online"`
-	LastSeen    int64  `json:"last_seen"`
-	AgentVer    string `json:"agent_ver"`
-	OS          string `json:"os"`
-	Arch        string `json:"arch"`
-	ConnectIP   string `json:"connect_ip"`
-	ConfigRev   string `json:"config_rev"`
-	LastError   string `json:"last_error"`
-	LastErrorAt int64  `json:"last_error_at"`
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	PublicHost   string `json:"public_host"`
+	Token        string `json:"token,omitempty"`
+	Online       int    `json:"online"`
+	LastSeen     int64  `json:"last_seen"`
+	AgentVer     string `json:"agent_ver"`
+	OS           string `json:"os"`
+	Arch         string `json:"arch"`
+	ConnectIP    string `json:"connect_ip"`
+	ConfigRev    string `json:"config_rev"`
+	LastError    string `json:"last_error"`
+	LastErrorAt  int64  `json:"last_error_at"`
 	Cores        string `json:"cores"`
 	CreatedAt    int64  `json:"created_at"`
 	TrafficLimit int64  `json:"traffic_limit"`
@@ -44,11 +44,16 @@ type Server struct {
 }
 
 type Certificate struct {
-	ID      int64  `json:"id"`
-	Name    string `json:"name"`
-	CertPEM string `json:"cert_pem,omitempty"`
-	KeyPEM  string `json:"key_pem,omitempty"`
-	Domains string `json:"domains"`
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	CertPEM   string `json:"cert_pem,omitempty"`
+	KeyPEM    string `json:"key_pem,omitempty"`
+	Domains   string `json:"domains"`
+	Source    string `json:"source"`
+	ExpiresAt int64  `json:"expires_at"`
+	AcmeEmail string `json:"acme_email,omitempty"`
+	LastError string `json:"last_error,omitempty"`
+	AutoRenew bool   `json:"auto_renew"`
 }
 
 type Package struct {

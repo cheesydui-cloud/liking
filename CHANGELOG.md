@@ -2,6 +2,19 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.1.23 — 2026-09-13
+
+证书单独占一侧栏，又只能粘贴 PEM，没有域名的人没法给 Trojan / XHTTP / AnyTLS 配 TLS。
+
+### 改进
+- 证书收进设置，侧栏不再单独列出
+- 三种签发：Cloudflare DNS 申请 Let's Encrypt（支持泛域名，域名不必指向面板）、自签、上传 PEM
+- Let's Encrypt 到期前约 30 天自动续期；设置里保存 Cloudflare Token 和 ACME 邮箱（Token 不明文回显）
+
+### 升级注意
+- 只升面板即可。已有上传的证书仍可用
+- 回滚：`liking-upgrade --release v0.1.22`
+
 ## v0.1.22 — 2026-09-13
 
 浅色主题是暖米色加 terracotta，看起来不像纯白管理台。

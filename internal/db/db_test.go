@@ -120,6 +120,26 @@ func TestOpenMigrateAndCRUD(t *testing.T) {
 	if UserAccessOK(user, p) {
 		t.Fatal("over quota")
 	}
+
+	cert, err := CreateCert(d, &Certificate{
+		Name: "c1", CertPEM: "-----BEGIN CERTIFICATE-----\nA\n-----END CERTIFICATE-----",
+		KeyPEM:  "-----BEGIN PRIVATE KEY-----\nB\n-----END PRIVATE KEY-----",
+		Domains: "a.example", Source: "acme-cf", ExpiresAt: now() + 10, AutoRenew: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cert.Source != "acme-cf" || !cert.AutoRenew {
+		t.Fatalf("%+v", cert)
+	}
+	due, err := ListCertIDsDueRenew(d, now()+100)
+	if err != nil || len(due) != 1 || due[0] != cert.ID {
+		t.Fatalf("due %v %v", due, err)
+	}
+	list, err := ListCerts(d)
+	if err != nil || len(list) != 1 || list[0].KeyPEM != "" || list[0].ExpiresAt == 0 {
+		t.Fatalf("list %+v %v", list, err)
+	}
 }
 
 func TestPackageServersSelectInbounds(t *testing.T) {

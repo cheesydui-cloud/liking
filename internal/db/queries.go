@@ -389,8 +389,40 @@ func SetServerApplyError(d *sql.DB, id int64, applyErr error) error {
 	return err
 }
 
-func CreateCert(d *sql.DB, name, certPEM, keyPEM, domains string) (*Certificate, error) {
-	res, err := d.Exec(`INSERT INTO certificates(name,cert_pem,key_pem,domains) VALUES(?,?,?,?)`, name, certPEM, keyPEM, domains)
+func certAuto(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+func scanCert(scan func(dest ...any) error, withPEM bool) (*Certificate, error) {
+	c := &Certificate{}
+	var auto int
+	var err error
+	if withPEM {
+		err = scan(&c.ID, &c.Name, &c.CertPEM, &c.KeyPEM, &c.Domains, &c.Source, &c.ExpiresAt, &c.AcmeEmail, &c.LastError, &auto)
+	} else {
+		err = scan(&c.ID, &c.Name, &c.Domains, &c.Source, &c.ExpiresAt, &c.AcmeEmail, &c.LastError, &auto)
+	}
+	if err != nil {
+		return nil, err
+	}
+	c.AutoRenew = auto != 0
+	if c.Source == "" {
+		c.Source = "upload"
+	}
+	return c, nil
+}
+
+func CreateCert(d *sql.DB, c *Certificate) (*Certificate, error) {
+	if c.Source == "" {
+		c.Source = "upload"
+	}
+	res, err := d.Exec(
+		`INSERT INTO certificates(name,cert_pem,key_pem,domains,source,expires_at,acme_email,last_error,auto_renew) VALUES(?,?,?,?,?,?,?,?,?)`,
+		c.Name, c.CertPEM, c.KeyPEM, c.Domains, c.Source, c.ExpiresAt, c.AcmeEmail, c.LastError, certAuto(c.AutoRenew),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -399,30 +431,49 @@ func CreateCert(d *sql.DB, name, certPEM, keyPEM, domains string) (*Certificate,
 }
 
 func GetCert(d *sql.DB, id int64) (*Certificate, error) {
-	c := &Certificate{}
-	err := d.QueryRow(`SELECT id,name,cert_pem,key_pem,domains FROM certificates WHERE id=?`, id).
-		Scan(&c.ID, &c.Name, &c.CertPEM, &c.KeyPEM, &c.Domains)
-	if err != nil {
-		return nil, err
-	}
-	return c, nil
+	return scanCert(d.QueryRow(`SELECT id,name,cert_pem,key_pem,domains,source,expires_at,acme_email,last_error,auto_renew FROM certificates WHERE id=?`, id).Scan, true)
 }
 
 func ListCerts(d *sql.DB) ([]*Certificate, error) {
-	rows, err := d.Query(`SELECT id,name,domains FROM certificates ORDER BY id`)
+	rows, err := d.Query(`SELECT id,name,domains,source,expires_at,acme_email,last_error,auto_renew FROM certificates ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []*Certificate
 	for rows.Next() {
-		c := &Certificate{}
-		if err := rows.Scan(&c.ID, &c.Name, &c.Domains); err != nil {
+		c, err := scanCert(rows.Scan, false)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+func ListCertIDsDueRenew(d *sql.DB, before int64) ([]int64, error) {
+	rows, err := d.Query(`SELECT id FROM certificates WHERE source='acme-cf' AND auto_renew=1 AND expires_at>0 AND expires_at<=? ORDER BY id`, before)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+func SetCertError(d *sql.DB, id int64, msg string) error {
+	if len(msg) > 2000 {
+		msg = msg[:2000]
+	}
+	_, err := d.Exec(`UPDATE certificates SET last_error=? WHERE id=?`, msg, id)
+	return err
 }
 
 func DeleteCert(d *sql.DB, id int64) error {
@@ -884,8 +935,8 @@ func TouchServerLastSeen(d *sql.DB, id int64) error {
 }
 
 func UpdateCert(d *sql.DB, c *Certificate) error {
-	_, err := d.Exec(`UPDATE certificates SET name=?, cert_pem=?, key_pem=?, domains=? WHERE id=?`,
-		c.Name, c.CertPEM, c.KeyPEM, c.Domains, c.ID)
+	_, err := d.Exec(`UPDATE certificates SET name=?, cert_pem=?, key_pem=?, domains=?, source=?, expires_at=?, acme_email=?, last_error=?, auto_renew=? WHERE id=?`,
+		c.Name, c.CertPEM, c.KeyPEM, c.Domains, c.Source, c.ExpiresAt, c.AcmeEmail, c.LastError, certAuto(c.AutoRenew), c.ID)
 	return err
 }
 
