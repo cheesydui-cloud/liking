@@ -57,7 +57,7 @@ export default function Login() {
         <div className="flex items-end gap-3 mb-8">
           <BrandMark size={28} />
           <div>
-            <div className="text-[16px] font-semibold leading-none">{panelName}</div>
+            <div className="text-[22px] font-bold leading-none tracking-tight">{panelName}</div>
             <div className="text-[12px] text-ink-mut mt-1.5">登录面板</div>
           </div>
         </div>

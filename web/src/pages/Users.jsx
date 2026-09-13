@@ -495,7 +495,7 @@ export default function Users() {
                   <div className="text-[12px] text-ink-mut mb-1">已用流量{editUser.direction === 'twoway' || selectedPkg?.direction === 'twoway' ? '（双向）' : ''}</div>
                   <Meter value={billedBytes(editUser)} max={trafficCap({ ...editUser, traffic_limit: bytesFromGB(f.traffic_gb) ?? editUser.traffic_limit, package_id: f.package_id || editUser.package_id }, pkgs)} />
                 </div>
-                <button type="button" className="btn-ghost shrink-0 h-8" onClick={resetTraffic}>清零</button>
+                <button type="button" className="btn-danger shrink-0 h-8" onClick={resetTraffic}>清零</button>
               </div>
             </div>
           )}

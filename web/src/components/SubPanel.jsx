@@ -32,7 +32,7 @@ export function SubPanel({ token, onCopied }) {
     const dark = document.documentElement.classList.contains('dark')
     QRCode.toDataURL(auto, {
       width: 280, margin: 1,
-      color: dark ? { dark: '#fafafa', light: '#111113' } : { dark: '#000000', light: '#ffffff' },
+      color: dark ? { dark: '#E8EEF5', light: '#0B1220' } : { dark: '#0F172A', light: '#F4F7FA' },
     }).then(setQr).catch(() => setQr(''))
   }, [token, auto])
 
@@ -49,7 +49,7 @@ export function SubPanel({ token, onCopied }) {
     <div className="flex flex-col md:flex-row gap-5">
       {qr && (
         <div className="shrink-0 text-center">
-          <img src={qr} alt="订阅二维码" className="w-[148px] h-[148px] border mx-auto" style={{ borderColor: 'var(--color-line)', borderRadius: 2 }} />
+          <img src={qr} alt="订阅二维码" className="w-[148px] h-[148px] border mx-auto" style={{ borderColor: 'var(--color-line)', borderRadius: 10 }} />
           <div className="text-[11px] text-ink-mut mt-2">扫码导入</div>
         </div>
       )}

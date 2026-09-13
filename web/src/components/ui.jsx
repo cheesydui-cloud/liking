@@ -182,8 +182,8 @@ export function PageHead({ title, desc, actions }) {
     <div className="mb-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="page-title text-[16px] font-semibold tracking-tight leading-tight">{title}</h1>
-          {desc && <p className="text-[13px] text-ink-mut mt-1 max-w-2xl leading-relaxed">{desc}</p>}
+          <h1 className="page-title">{title}</h1>
+          {desc && <p className="page-desc mt-1.5 max-w-2xl leading-relaxed">{desc}</p>}
         </div>
         {actions && <div className="hidden sm:flex flex-wrap items-center gap-2 shrink-0">{actions}</div>}
       </div>
@@ -266,7 +266,7 @@ export function Modal({ open, title, onClose, children, footer, wide, size }) {
   const max = size === 'xl' ? 'max-w-3xl' : (size === 'lg' || wide) ? 'max-w-2xl' : 'max-w-md'
   return (
     <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-0 sm:p-6">
-      <button type="button" className="absolute inset-0 bg-black/50" aria-label="关闭" onClick={onClose} />
+      <button type="button" className="absolute inset-0 modal-scrim" aria-label="关闭" onClick={onClose} />
       <div
         role="dialog"
         aria-modal="true"
@@ -275,7 +275,7 @@ export function Modal({ open, title, onClose, children, footer, wide, size }) {
         style={{ overscrollBehavior: 'contain' }}
       >
         <div className="flex items-start justify-between gap-3 mb-4">
-          <h2 id={titleId} className="text-[16px] font-semibold leading-tight">{title}</h2>
+          <h2 id={titleId} className="text-[18px] font-bold leading-tight tracking-tight">{title}</h2>
           <button type="button" className="btn-ghost h-8 w-8 px-0" onClick={onClose} aria-label="关闭"><Icon name="close" size={15} /></button>
         </div>
         <div>{children}</div>

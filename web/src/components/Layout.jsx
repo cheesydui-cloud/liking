@@ -179,7 +179,7 @@ export function Layout({ children }) {
     document.documentElement.classList.toggle('dark', next)
     localStorage.setItem('lk-theme', next ? 'dark' : 'light')
     const meta = document.querySelector('meta[name="theme-color"]')
-    if (meta) meta.setAttribute('content', next ? '#09090b' : '#ffffff')
+    if (meta) meta.setAttribute('content', next ? '#0B1220' : '#D7E3F0')
   }
 
   const groups = isAdmin ? [
@@ -214,17 +214,17 @@ export function Layout({ children }) {
     <div className="flex h-screen">
       <a href="#main" className="skip-link">跳到内容</a>
       {open && (
-        <button type="button" className="fixed inset-0 bg-black/45 z-30 lg:hidden" aria-label="关闭菜单" onClick={() => setOpen(false)} />
+        <button type="button" className="fixed inset-0 modal-scrim z-30 lg:hidden" aria-label="关闭菜单" onClick={() => setOpen(false)} />
       )}
       <aside
-        className={`fixed lg:static z-40 h-full w-[200px] flex flex-col border-r bg-surface ${open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
-        style={{ borderColor: 'var(--color-line)', transition: 'transform var(--duration-med) ease', overscrollBehavior: 'contain' }}
+        className={`sidebar-pane fixed lg:static z-40 h-full w-[200px] flex flex-col ${open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+        style={{ transition: 'transform var(--duration-med) ease', overscrollBehavior: 'contain' }}
         aria-label="主导航"
       >
         <div className="px-4 pt-4 pb-3 flex items-end gap-2.5">
           <BrandMark size={28} />
           <div className="min-w-0">
-            <div className="text-[15px] font-semibold truncate leading-tight">{panelName || 'liking'}</div>
+            <div className="text-[16px] font-bold truncate leading-tight tracking-tight">{panelName || 'liking'}</div>
             <div className="text-[11px] text-ink-mut mt-0.5">{isAdmin ? '管理' : '用户'}{version ? ` v${version}` : ''}</div>
           </div>
         </div>
@@ -256,7 +256,7 @@ export function Layout({ children }) {
         </div>
       </aside>
       <main id="main" ref={mainRef} tabIndex={-1} className="flex-1 min-w-0 flex flex-col bg-app outline-none">
-        <div className="h-12 px-3 sm:px-5 flex items-center gap-2 border-b shrink-0" style={{ borderColor: 'var(--color-line)', background: 'var(--color-surface)' }}>
+        <div className="topbar h-12 px-3 sm:px-5 flex items-center gap-2 shrink-0">
           <button type="button" className="lg:hidden btn-ghost h-9 w-9 px-0" onClick={() => setOpen(true)} aria-label="打开菜单">
             <Icon name="menu" size={16} />
           </button>
