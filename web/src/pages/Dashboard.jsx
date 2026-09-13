@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
-import { Badge, DayBars, Empty, PageHead, SkeletonRows, fmtAgo, fmtBps, fmtBytes } from '../components/ui'
+import { Badge, DayBars, Empty, Icon, PageHead, SkeletonRows, fmtAgo, fmtBps, fmtBytes } from '../components/ui'
 
 function alertItemsOf(d) {
   if (Array.isArray(d.alert_items) && d.alert_items.length) return d.alert_items
@@ -38,20 +38,11 @@ export default function Dashboard() {
     { n: 6, t: '开用户，复制订阅', to: '/users', done: (d.members || 0) > 0 },
   ]
   const next = steps.find(s => !s.done)
-  const showSetup = (d.servers || 0) === 0
+  const showSetup = (d.members || 0) === 0
 
   return (
     <div>
       <PageHead title="总览" desc="先加服务器，在机器上挂节点，再把套餐绑给用户。已用流量按套餐方向和节点倍率计。" />
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
-        {cards.map(c => (
-          <Link key={c.label} to={c.to} className="card p-4 hover:border-[var(--color-accent)] transition-colors">
-            <div className="text-[12px] text-ink-mut">{c.label}</div>
-            <div className="text-[22px] font-semibold leading-none mt-2 tabular-nums tracking-tight">{c.value}</div>
-            <div className="text-[12px] text-ink-mut mt-2">{c.hint}</div>
-          </Link>
-        ))}
-      </div>
       {alerts.length > 0 && (
         <div className="space-y-2 mb-4">
           {alerts.map((a, i) => (
@@ -65,6 +56,14 @@ export default function Dashboard() {
           ))}
         </div>
       )}
+      <div className="status-rail mb-5">
+        {cards.map(c => (
+          <Link key={c.label} to={c.to} className="status-rail-item" title={c.hint}>
+            <span className="status-rail-label">{c.label}</span>
+            <span className="status-rail-value">{c.value}</span>
+          </Link>
+        ))}
+      </div>
       {(d.days || []).some(x => (x.up || 0) + (x.down || 0) > 0) && (
         <div className="card p-4 mb-4">
           <div className="flex items-center justify-between mb-3">
@@ -75,12 +74,12 @@ export default function Dashboard() {
         </div>
       )}
       {showSetup ? (
-        <div className="card p-4">
+        <div className="card p-4 mb-4">
           <div className="text-[14px] font-semibold mb-1">开始使用</div>
           <p className="text-[13px] text-ink-mut mb-2">按顺序做完就能给用户发订阅。</p>
           {steps.map(s => (
             <div key={s.n} className={`setup-step ${s.done ? 'is-done' : (next && next.n === s.n ? 'is-now' : '')}`}>
-              <div className="setup-n">{s.done ? '✓' : s.n}</div>
+              <div className="setup-n" aria-hidden="true">{s.done ? <Icon name="check" size={12} /> : s.n}</div>
               <div className="min-w-0 flex-1">
                 <div className="text-[14px] font-medium">{s.t}</div>
                 {s.hint ? <div className="text-[12px] text-ink-mut mt-0.5">{s.hint}</div> : null}
@@ -91,7 +90,8 @@ export default function Dashboard() {
             </div>
           ))}
         </div>
-      ) : (
+      ) : null}
+      {(d.servers || 0) > 0 || !showSetup ? (
       <div className="card overflow-hidden">
         <div className="px-4 py-3 flex items-center justify-between border-b" style={{ borderColor: 'var(--color-line-soft)' }}>
           <div className="text-[14px] font-semibold">服务器</div>
@@ -130,7 +130,7 @@ export default function Dashboard() {
           </div>
         )}
       </div>
-      )}
+      ) : null}
       {d.online === 0 && (d.servers || 0) > 0 && (
         <div className="mt-4 text-[13px] text-ink-mut flex items-center gap-2">
           <Badge tone="warn">提示</Badge>

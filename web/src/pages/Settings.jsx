@@ -191,7 +191,7 @@ function AuditPanel() {
           <p className="text-[12.5px] text-ink-mut mt-1">最近 200 条。只读。</p>
         </div>
         {!rows ? (
-          <div className="px-5 pb-5 text-[13px] text-ink-mut">加载中</div>
+          <div className="px-5 pb-5 text-[13px] text-ink-mut">加载中…</div>
         ) : rows.length === 0 ? (
           <Empty title="还没有记录" />
         ) : (

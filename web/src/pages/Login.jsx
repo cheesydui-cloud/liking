@@ -53,7 +53,7 @@ export default function Login() {
 
   return (
     <div className="min-h-dvh grid place-items-center p-5 bg-app">
-      <div className="card w-full max-w-[380px] p-6 sm:p-7" style={{ boxShadow: '0 1px 2px rgba(17,17,17,0.04), 0 16px 40px rgba(17,17,17,0.06)' }}>
+      <div className="card w-full max-w-[380px] p-6 sm:p-7">
         <div className="flex items-center gap-2.5 mb-6">
           <BrandMark size={32} />
           <div>
@@ -69,12 +69,12 @@ export default function Login() {
         <form onSubmit={submit} className="flex flex-col gap-3.5">
           <label className="block">
             <span className="block text-[12px] font-medium text-ink-soft mb-1.5">用户名</span>
-            <input className="input-field h-10" value={username} onChange={e => setUsername(e.target.value)} required autoFocus autoComplete="username" />
+            <input className="input-field h-10" name="username" value={username} onChange={e => setUsername(e.target.value)} required autoFocus autoComplete="username" spellCheck={false} />
           </label>
           <label className="block">
             <span className="block text-[12px] font-medium text-ink-soft mb-1.5">密码</span>
             <div className="relative">
-              <input className="input-field h-10 pr-11" type={show ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} required autoComplete="current-password" />
+              <input className="input-field h-10 pr-11" name="password" type={show ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} required autoComplete="current-password" />
               <button type="button" className="absolute right-1.5 top-1/2 -translate-y-1/2 btn-ghost h-8 w-8 px-0 border-0" onClick={() => setShow(v => !v)} aria-label={show ? '隐藏密码' : '显示密码'}>
                 <Icon name={show ? 'eye-off' : 'eye'} size={16} />
               </button>
@@ -83,7 +83,7 @@ export default function Login() {
           {needTotp && (
             <label className="block">
               <span className="block text-[12px] font-medium text-ink-soft mb-1.5">两步验证码</span>
-              <input className="input-field h-10 font-mono tracking-widest" value={totp} onChange={e => setTotp(e.target.value)} required autoFocus inputMode="numeric" autoComplete="one-time-code" placeholder="6 位数字" />
+              <input className="input-field h-10 font-mono tracking-widest" name="one-time-code" value={totp} onChange={e => setTotp(e.target.value)} required autoFocus inputMode="numeric" autoComplete="one-time-code" spellCheck={false} placeholder="123456" />
             </label>
           )}
           <button className="btn-primary h-10 mt-1" disabled={loading}>{loading ? '登录中…' : '登录'}</button>

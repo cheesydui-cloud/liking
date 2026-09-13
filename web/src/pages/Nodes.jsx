@@ -554,6 +554,7 @@ export default function Nodes() {
     const needle = q.trim().toLowerCase()
     return servers.filter(s => {
       if (statusFilter === 'online' && !s.online) return false
+      if (statusFilter === 'offline' && s.online) return false
       if (statusFilter === 'upgrade' && !(s.needs_upgrade || s.needs_reinstall)) return false
       if (!needle) return true
       const names = linesOf(s.id).map(x => x.name).join(' ')
@@ -577,15 +578,15 @@ export default function Nodes() {
         <div className="flex flex-col sm:flex-row gap-2 mb-3">
           <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索服务器 / 节点 / 地址" />
           <div className="flex gap-1 shrink-0">
-            {[['','全部'],['online','在线'],['upgrade','可升级']].map(([id, lab]) => (
-              <button key={id || 'all'} type="button" className={`chip ${statusFilter === id ? 'is-on' : ''}`} onClick={() => setStatusFilter(id)}>{lab}</button>
+            {[['','全部'],['online','在线'],['offline','离线'],['upgrade','可升级']].map(([id, lab]) => (
+              <button key={id || 'all'} type="button" className={`chip ${statusFilter === id ? 'is-on' : ''}`} aria-pressed={statusFilter === id} onClick={() => setStatusFilter(id)}>{lab}</button>
             ))}
           </div>
         </div>
       )}
       {servers.length > 0 && (
         <div className="text-[12px] text-ink-mut mb-3">
-          {online} 在线 · {servers.length - online} 离线 · {list.length} 个节点
+          {online} 在线，{servers.length - online} 离线，{list.length} 个节点
         </div>
       )}
       {servers.length === 0 ? (
@@ -627,7 +628,7 @@ export default function Nodes() {
                       </div>
                       <div className="text-[12px] text-ink-mut mt-1.5">
                         Agent {s.agent_ver || '—'} · 心跳 {fmtAgo(s.last_seen)}
-                        {s.os ? ` · ${[s.os, s.arch].filter(Boolean).join('/')}` : ''}
+                        {s.os ? `  ${[s.os, s.arch].filter(Boolean).join('/')}` : ''}
                         {s.cores_running ? ` · 内核 ${s.cores_running}` : ''}
                       </div>
                       {s.online && (s.disk_total || s.mem_total || s.conns || s.load_milli) ? (

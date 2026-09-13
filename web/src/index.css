@@ -2,27 +2,60 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Primitive */
+:root {
+  --ink-0: #ffffff;
+  --ink-50: #f5f5f5;
+  --ink-100: #ebebeb;
+  --ink-200: #e3e3e3;
+  --ink-400: #8a8a8a;
+  --ink-500: #6b6b6b;
+  --ink-700: #3f3f3f;
+  --ink-950: #0a0a0a;
+  --live-50: #f0fdfa;
+  --live-700: #0f766e;
+  --warn-50: #fff7ed;
+  --warn-700: #c2410c;
+  --fault-50: #fef2f2;
+  --fault-700: #b91c1c;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --duration-fast: 150ms;
+  --duration-med: 200ms;
+  --z-nav: 40;
+  --z-overlay: 80;
+  --z-toast: 90;
+  --sidebar-w: 216px;
+  --header-h: 48px;
+  --button-h: 36px;
+  --input-h: 36px;
+}
+
 @theme {
   --color-app: #ffffff;
   --color-surface: #ffffff;
-  --color-raised: #f4f4f5;
+  --color-raised: #f5f5f5;
   --color-fill: #f7f7f7;
-  --color-line: #e5e5e5;
-  --color-line-soft: #f3f3f3;
-  --color-ink: #111111;
-  --color-ink-soft: #5c5c5c;
-  --color-ink-mut: #8c8c8c;
-  --color-accent: #111111;
-  --color-accent-soft: #f4f4f5;
+  --color-line: #e3e3e3;
+  --color-line-soft: #f0f0f0;
+  --color-ink: #0a0a0a;
+  --color-ink-soft: #3f3f3f;
+  --color-ink-mut: #6b6b6b;
+  --color-accent: #0a0a0a;
+  --color-accent-soft: #f5f5f5;
   --color-on-accent: #ffffff;
-  --color-gold: #111111;
+  --color-gold: #0a0a0a;
   --color-gold-2: #3f3f3f;
-  --color-ok: #0e7a4a;
-  --color-ok-soft: #e8f6ef;
-  --color-warn: #b54708;
-  --color-warn-soft: #fef4e8;
-  --color-danger: #d92d20;
-  --color-danger-soft: #fdecec;
+  --color-ok: #0f766e;
+  --color-ok-soft: #f0fdfa;
+  --color-warn: #c2410c;
+  --color-warn-soft: #fff7ed;
+  --color-danger: #b91c1c;
+  --color-danger-soft: #fef2f2;
   --font-sans: "Fira Sans", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Avenir Next", system-ui, sans-serif;
   --font-mono: "Fira Code", "SF Mono", ui-monospace, Menlo, monospace;
   --radius-md: 8px;
@@ -30,6 +63,15 @@
 }
 
 .dark {
+  --ink-0: #09090b;
+  --ink-50: #18181b;
+  --ink-950: #fafafa;
+  --live-50: rgba(45, 212, 191, 0.12);
+  --live-700: #2dd4bf;
+  --warn-50: rgba(251, 146, 60, 0.14);
+  --warn-700: #fb923c;
+  --fault-50: rgba(248, 113, 113, 0.12);
+  --fault-700: #f87171;
   --color-app: #09090b;
   --color-surface: #111113;
   --color-raised: #1c1c1f;
@@ -37,17 +79,17 @@
   --color-line: #27272a;
   --color-line-soft: rgba(255, 255, 255, 0.06);
   --color-ink: #fafafa;
-  --color-ink-soft: #a1a1aa;
-  --color-ink-mut: #71717a;
+  --color-ink-soft: #d4d4d8;
+  --color-ink-mut: #a1a1aa;
   --color-accent: #fafafa;
   --color-accent-soft: rgba(255, 255, 255, 0.08);
   --color-on-accent: #09090b;
   --color-gold: #fafafa;
   --color-gold-2: #d4d4d8;
-  --color-ok: #34d399;
-  --color-ok-soft: rgba(52, 211, 153, 0.12);
-  --color-warn: #fbbf24;
-  --color-warn-soft: rgba(251, 191, 36, 0.14);
+  --color-ok: #2dd4bf;
+  --color-ok-soft: rgba(45, 212, 191, 0.12);
+  --color-warn: #fb923c;
+  --color-warn-soft: rgba(251, 146, 60, 0.14);
   --color-danger: #f87171;
   --color-danger-soft: rgba(248, 113, 113, 0.12);
 }
@@ -55,6 +97,27 @@
 html, body, #root { height: 100%; }
 html { color-scheme: light; }
 html.dark { color-scheme: dark; }
+html, body { touch-action: manipulation; }
+
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: -48px;
+  z-index: 100;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--color-ink);
+  color: var(--color-on-accent);
+  font-size: 13px;
+  font-weight: 500;
+}
+.skip-link:focus {
+  top: 12px;
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+h1, h2, .page-title { text-wrap: pretty; }
 
 ::selection {
   background: var(--color-ink);
@@ -83,22 +146,25 @@ body {
 }
 
 .input-field {
-  @apply w-full h-9 px-3 rounded-lg border text-[13.5px] outline-none transition-colors duration-150;
+  @apply w-full h-9 px-3 rounded-lg border text-[13.5px] outline-none;
   background: var(--color-surface);
   color: var(--color-ink);
   border-color: var(--color-line);
+  transition: border-color var(--duration-fast) ease, box-shadow var(--duration-fast) ease;
 }
 .input-field:hover { border-color: color-mix(in srgb, var(--color-ink) 28%, var(--color-line)); }
-.input-field:focus {
+.input-field:focus, .input-field:focus-visible {
   border-color: var(--color-ink);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-ink) 10%, transparent);
+  outline: none;
 }
 .input-field:disabled { opacity: 0.5; cursor: not-allowed; }
 select.input-field { cursor: pointer; }
 textarea.input-field { height: auto; min-height: 7rem; padding-top: 0.55rem; padding-bottom: 0.55rem; resize: vertical; }
 
 .btn-primary {
-  @apply inline-flex items-center justify-center gap-1.5 h-9 px-3.5 rounded-lg text-[13px] font-medium cursor-pointer transition-colors duration-150;
+  @apply inline-flex items-center justify-center gap-1.5 h-9 px-3.5 rounded-lg text-[13px] font-medium cursor-pointer;
+  transition: opacity var(--duration-fast) ease, background-color var(--duration-fast) ease, border-color var(--duration-fast) ease;
   background: var(--color-accent);
   color: var(--color-on-accent);
   border: 1px solid var(--color-accent);
@@ -108,7 +174,8 @@ textarea.input-field { height: auto; min-height: 7rem; padding-top: 0.55rem; pad
 .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
 
 .btn-ghost {
-  @apply inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium border cursor-pointer transition-colors duration-150;
+  @apply inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium border cursor-pointer;
+  transition: color var(--duration-fast) ease, background-color var(--duration-fast) ease, border-color var(--duration-fast) ease;
   border-color: var(--color-line);
   color: var(--color-ink-soft);
   background: transparent;
@@ -175,6 +242,7 @@ table.data td {
   color: var(--color-ink);
   border-bottom: 1px solid var(--color-line-soft);
   vertical-align: middle;
+  font-variant-numeric: tabular-nums;
 }
 table.data tbody tr { transition: background 120ms ease; }
 table.data tbody tr:hover { background: var(--color-fill); }
@@ -340,7 +408,8 @@ a.notice:hover { border-color: color-mix(in srgb, var(--color-ink) 28%, var(--co
   border-radius: 10px;
   border: 1px solid var(--color-line);
   background: var(--color-surface);
-  box-shadow: 0 8px 24px rgba(17, 17, 17, 0.08);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--color-ink) 8%, transparent);
+  overscroll-behavior: contain;
 }
 .dark .more-menu-pop {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
@@ -503,4 +572,57 @@ a.notice:hover { border-color: color-mix(in srgb, var(--color-ink) 28%, var(--co
 .sidebar-link-active {
   background: var(--color-raised);
   color: var(--color-ink);
+}
+
+.status-rail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: var(--color-surface);
+  overflow: hidden;
+}
+@media (min-width: 768px) {
+  .status-rail { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+.status-rail-item {
+  min-width: 0;
+  padding: 12px 14px;
+  border-right: 1px solid var(--color-line-soft);
+  border-bottom: 1px solid var(--color-line-soft);
+  text-decoration: none;
+  color: inherit;
+  transition: background-color var(--duration-fast) ease;
+}
+.status-rail-item:hover { background: var(--color-fill); }
+@media (min-width: 768px) {
+  .status-rail-item { border-bottom: 0; }
+  .status-rail-item:nth-child(6n) { border-right: 0; }
+}
+@media (max-width: 767px) {
+  .status-rail-item:nth-child(2n) { border-right: 0; }
+  .status-rail-item:nth-last-child(-n+2) { border-bottom: 0; }
+}
+.status-rail-label {
+  display: block;
+  font-size: 12px;
+  color: var(--color-ink-mut);
+}
+.status-rail-value {
+  display: block;
+  margin-top: 6px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 639px) {
+  .input-field:not(textarea):not(select) { min-height: 44px; height: 44px; }
+  .btn-primary:not(.h-8), .btn-ghost:not(.h-8) { min-height: 44px; }
+  .btn-ghost.w-8, .btn-ghost.w-9 { min-width: 44px; }
 }

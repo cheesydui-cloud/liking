@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 export function Icon({ name, size = 18, className = '' }) {
@@ -98,7 +98,7 @@ export function DayBars({ days = [], className = '' }) {
   const max = Math.max(1, ...rows.map(d => (Number(d.up) || 0) + (Number(d.down) || 0)))
   if (!rows.length) return null
   return (
-    <div className={`traffic-bars ${className}`}>
+    <div className={`traffic-bars ${className}`} role="img" aria-label="近 14 日流量">
       {rows.map(d => {
         const tot = (Number(d.up) || 0) + (Number(d.down) || 0)
         const pct = Math.max(tot ? 6 : 2, Math.round((tot / max) * 100))
@@ -142,7 +142,7 @@ export function PageHead({ title, desc, actions }) {
     <div className="mb-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-[20px] font-semibold tracking-tight leading-tight">{title}</h1>
+          <h1 className="page-title text-[20px] font-semibold tracking-tight leading-tight">{title}</h1>
           {desc && <p className="text-[13px] text-ink-mut mt-1 max-w-2xl leading-relaxed">{desc}</p>}
         </div>
         {actions && <div className="hidden sm:flex flex-wrap items-center gap-2 shrink-0">{actions}</div>}
@@ -213,6 +213,7 @@ export function Badge({ tone = 'muted', children, className = '' }) {
 const modalStack = []
 
 export function Modal({ open, title, onClose, children, footer, wide, size }) {
+  const titleId = useId()
   useEffect(() => {
     if (!open) return
     const id = {}
@@ -239,9 +240,15 @@ export function Modal({ open, title, onClose, children, footer, wide, size }) {
   return (
     <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-0 sm:p-6">
       <button type="button" className="absolute inset-0 bg-black/50" aria-label="关闭" onClick={onClose} />
-      <div role="dialog" aria-modal="true" className={`relative card w-full ${max} p-5 m-0 sm:m-auto rounded-t-xl sm:rounded-xl max-h-[92dvh] overflow-y-auto`}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className={`relative card w-full ${max} p-5 m-0 sm:m-auto rounded-t-xl sm:rounded-xl max-h-[92dvh] overflow-y-auto`}
+        style={{ overscrollBehavior: 'contain' }}
+      >
         <div className="flex items-start justify-between gap-3 mb-4">
-          <h2 className="text-[16px] font-semibold leading-tight">{title}</h2>
+          <h2 id={titleId} className="text-[16px] font-semibold leading-tight">{title}</h2>
           <button type="button" className="btn-ghost h-8 w-8 px-0" onClick={onClose} aria-label="关闭"><Icon name="close" size={15} /></button>
         </div>
         <div>{children}</div>
@@ -348,11 +355,21 @@ export function MoreMenu({ label = '更多', items = [], disabled }) {
   )
 }
 
-export function SearchInput({ value, onChange, placeholder = '搜索' }) {
+export function SearchInput({ value, onChange, placeholder = '搜索…' }) {
   return (
     <div className="relative flex-1 min-w-[12rem]">
-      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-mut"><Icon name="search" size={14} /></span>
-      <input className="input-field pl-8" placeholder={placeholder} value={value} onChange={onChange} />
+      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-mut" aria-hidden="true"><Icon name="search" size={14} /></span>
+      <input
+        className="input-field pl-8"
+        type="search"
+        name="q"
+        autoComplete="off"
+        spellCheck={false}
+        aria-label={placeholder.replace(/…$/, '') || '搜索'}
+        placeholder={placeholder.endsWith('…') ? placeholder : `${placeholder}…`}
+        value={value}
+        onChange={onChange}
+      />
     </div>
   )
 }

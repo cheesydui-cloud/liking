@@ -16,7 +16,7 @@ function Loading() {
       <div className="text-center">
         <BrandMark size={36} className="mx-auto mb-3" />
         <div className="text-[15px] font-semibold">liking</div>
-        <div className="text-[12px] text-ink-mut mt-1">加载中</div>
+        <div className="text-[12px] text-ink-mut mt-1">加载中…</div>
       </div>
     </div>
   )

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { BrandMark, Icon, Modal } from './ui'
@@ -82,7 +82,7 @@ export function UserProvider({ children }) {
       <ToastCtx.Provider value={toast}>
         <DialogCtx.Provider value={{ confirm, prompt }}>
           {children}
-          <div className="fixed right-4 bottom-4 z-[90] flex flex-col gap-2" aria-live="polite">
+          <div className="fixed right-4 bottom-4 z-[90] flex flex-col gap-2" aria-live="polite" aria-relevant="additions">
             {toasts.map(t => (
               <div key={t.id} className="card px-3.5 py-2.5 text-[13px] min-w-[220px]"
                 style={{
@@ -109,6 +109,9 @@ export function UserProvider({ children }) {
             {dialog?.message && <p className="text-[14px] text-ink-soft">{dialog.message}</p>}
             {dialog?.kind === 'prompt' && (
               <input className="input-field mt-3" type={dialog.inputType || 'text'} autoFocus
+                name="dialog-input"
+                autoComplete="off"
+                aria-label={dialog.title || '请输入'}
                 value={dialog.value || ''}
                 onChange={e => setDialog({ ...dialog, value: e.target.value })}
                 onKeyDown={e => { if (e.key === 'Enter') closeDialog(dialog.value) }}
@@ -125,7 +128,7 @@ function SideLink({ to, end, icon, children }) {
   return (
     <NavLink to={to} end={end}
       className={({ isActive }) =>
-        `flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[13px] transition-colors duration-150 ${
+        `flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[13px] ${
           isActive ? 'sidebar-link-active font-medium' : 'text-ink-soft hover:text-ink hover:bg-raised'
         }`
       }>
@@ -159,9 +162,14 @@ export function Layout({ children }) {
   const [open, setOpen] = useState(false)
   const isAdmin = user?.role === 'admin'
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
+  const mainRef = useRef(null)
   const pageTitle = pageTitleOf(loc.pathname)
   const announceText = (announce || '').trim()
   const announceLong = announceText.length > 80
+
+  useEffect(() => {
+    mainRef.current?.focus({ preventScroll: true })
+  }, [loc.pathname])
 
   const logout = async () => {
     try { await api.post('/logout') } catch {}
@@ -173,6 +181,8 @@ export function Layout({ children }) {
     setDark(next)
     document.documentElement.classList.toggle('dark', next)
     localStorage.setItem('lk-theme', next ? 'dark' : 'light')
+    const meta = document.querySelector('meta[name="theme-color"]')
+    if (meta) meta.setAttribute('content', next ? '#09090b' : '#ffffff')
   }
 
   const groups = isAdmin ? [
@@ -204,14 +214,20 @@ export function Layout({ children }) {
 
   return (
     <div className="flex h-screen">
-      {open && <div className="fixed inset-0 bg-black/45 z-30 lg:hidden" onClick={() => setOpen(false)} />}
-      <aside className={`fixed lg:static z-40 h-full w-[216px] flex flex-col border-r bg-surface ${open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} transition-transform duration-200`}
-        style={{ borderColor: 'var(--color-line)' }}>
+      <a href="#main" className="skip-link">跳到内容</a>
+      {open && (
+        <button type="button" className="fixed inset-0 bg-black/45 z-30 lg:hidden" aria-label="关闭菜单" onClick={() => setOpen(false)} />
+      )}
+      <aside
+        className={`fixed lg:static z-40 h-full w-[216px] flex flex-col border-r bg-surface ${open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+        style={{ borderColor: 'var(--color-line)', transition: 'transform var(--duration-med) ease', overscrollBehavior: 'contain' }}
+        aria-label="主导航"
+      >
         <div className="px-4 pt-4 pb-3 flex items-center gap-2.5">
           <BrandMark size={28} />
           <div className="min-w-0">
             <div className="text-[15px] font-semibold truncate leading-tight">{panelName || 'liking'}</div>
-            <div className="text-[11px] text-ink-mut mt-0.5">{isAdmin ? '管理' : '用户'}{version ? ` · v${version}` : ''}</div>
+            <div className="text-[11px] text-ink-mut mt-0.5">{isAdmin ? '管理' : '用户'}{version ? ` v${version}` : ''}</div>
           </div>
         </div>
         <nav className="flex-1 px-2.5 overflow-y-auto" onClick={() => setOpen(false)}>
@@ -241,7 +257,7 @@ export function Layout({ children }) {
           </button>
         </div>
       </aside>
-      <main className="flex-1 min-w-0 flex flex-col bg-app">
+      <main id="main" ref={mainRef} tabIndex={-1} className="flex-1 min-w-0 flex flex-col bg-app outline-none">
         <div className="h-12 px-3 sm:px-5 flex items-center gap-2 border-b shrink-0" style={{ borderColor: 'var(--color-line)', background: 'var(--color-surface)' }}>
           <button type="button" className="lg:hidden btn-ghost h-9 w-9 px-0" onClick={() => setOpen(true)} aria-label="打开菜单">
             <Icon name="menu" size={16} />
