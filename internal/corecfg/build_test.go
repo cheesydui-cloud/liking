@@ -348,3 +348,103 @@ func TestBuildSingboxClashAPI(t *testing.T) {
 		t.Fatalf("controller %v api %s", clash["external_controller"], b.Apply.SingboxAPI)
 	}
 }
+
+func TestBuildSK5AndPortForward(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	srv, err := db.CreateServer(d, "n1", "10.0.0.1", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := &db.Inbound{
+		ServerID: srv.ID, Name: "sk5-in", Profile: ProfileVLESSRealityVision,
+		Port: 8443, Enabled: true, LineKind: "chain",
+		ExitURI: "socks5://u:p@203.0.113.9:1080", Settings: "{}",
+	}
+	if err := Normalize(entry, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateInbound(d, entry); err != nil {
+		t.Fatal(err)
+	}
+	pipe := &db.Inbound{
+		ServerID: srv.ID, Name: "pipe", Profile: ProfilePortForward,
+		Port: 10443, Enabled: true, Settings: `{"dest_host":"8.8.8.8","dest_port":443,"network":"tcp,udp"}`,
+	}
+	if err := Normalize(pipe, nil); err != nil {
+		t.Fatal(err)
+	}
+	createdPipe, err := db.CreateInbound(d, pipe)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pkg, err := db.CreatePackage(d, "std", 0, 30, 0, "oneway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := db.CreateUser(d, "alice", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.BindUserPackage(d, u.ID, pkg.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	u, _ = db.GetUser(d, u.ID)
+	if _, err := ProvisionUser(d, u); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.GetClient(d, createdPipe.ID, u.ID); err == nil {
+		t.Fatal("port-forward must not get a user client")
+	}
+
+	b, err := Build(d, srv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.Apply.Xray) == 0 {
+		t.Fatal("xray")
+	}
+	var xray map[string]any
+	if err := json.Unmarshal(b.Apply.Xray, &xray); err != nil {
+		t.Fatal(err)
+	}
+	foundDoor := false
+	for _, raw := range xray["inbounds"].([]any) {
+		obj, _ := raw.(map[string]any)
+		if obj["protocol"] != "dokodemo-door" || obj["tag"] == "api" {
+			continue
+		}
+		foundDoor = true
+		st, _ := obj["settings"].(map[string]any)
+		if st["address"] != "8.8.8.8" || st["port"] != float64(443) || st["network"] != "tcp,udp" {
+			t.Fatalf("dokodemo %+v", st)
+		}
+	}
+	if !foundDoor {
+		t.Fatal("missing dokodemo-door")
+	}
+	foundSocks := false
+	for _, raw := range xray["outbounds"].([]any) {
+		obj, _ := raw.(map[string]any)
+		if obj["protocol"] != "socks" {
+			continue
+		}
+		foundSocks = true
+		st, _ := obj["settings"].(map[string]any)
+		srvs, _ := st["servers"].([]any)
+		if len(srvs) != 1 {
+			t.Fatalf("socks servers %v", st["servers"])
+		}
+		s0, _ := srvs[0].(map[string]any)
+		if s0["address"] != "203.0.113.9" || s0["port"] != float64(1080) {
+			t.Fatalf("socks server %+v", s0)
+		}
+	}
+	if !foundSocks {
+		t.Fatal("missing socks outbound")
+	}
+}

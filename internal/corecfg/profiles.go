@@ -17,6 +17,7 @@ const (
 	ProfileSS2022             = "ss2022"
 	ProfileAnyTLS             = "anytls"
 	ProfileMieru              = "mieru"
+	ProfilePortForward        = "port-forward"
 
 	CoreXray    = "xray"
 	CoreSingbox = "singbox"
@@ -48,12 +49,21 @@ func Catalog() []Meta {
 }
 
 func Known(profile string) bool {
+	if profile == ProfilePortForward {
+		return true
+	}
 	for _, m := range Catalog() {
 		if m.ID == profile {
 			return true
 		}
 	}
 	return false
+}
+
+// UserFacing is false for inbounds that occupy a port but never appear in
+// user subscriptions (port-forward pipes).
+func UserFacing(profile string) bool {
+	return profile != ProfilePortForward
 }
 
 func CoreFor(profile string) string {
@@ -81,6 +91,8 @@ func Spec(profile string) (protocol, network, security string) {
 		return "anytls", "tcp", "tls"
 	case ProfileMieru:
 		return "mieru", "tcp", "none"
+	case ProfilePortForward:
+		return "dokodemo-door", "tcp", "none"
 	default:
 		return "", "", ""
 	}
@@ -371,11 +383,45 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 			return fmt.Errorf("Mieru transport 必须是 TCP / UDP / BOTH")
 		}
 		st["transport"] = tr
+	case ProfilePortForward:
+		host := strings.TrimSpace(st.String("dest_host"))
+		if host == "" {
+			return fmt.Errorf("端口中转需要目标地址")
+		}
+		port := st.Int("dest_port", 0)
+		if port < 1 || port > 65535 {
+			return fmt.Errorf("端口中转目标端口无效")
+		}
+		st["dest_host"] = host
+		st["dest_port"] = port
+		netw := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(st.String("network")), " ", ""))
+		switch netw {
+		case "", "tcp":
+			st["network"] = "tcp"
+		case "tcp,udp":
+			st["network"] = "tcp,udp"
+		default:
+			return fmt.Errorf("端口中转 network 必须是 tcp 或 tcp,udp")
+		}
+		in.LineKind = "direct"
+		in.ExitInboundID = nil
+		in.ExitURI = ""
 	}
 
 	if in.LineKind == "chain" {
-		if exit == nil && strings.TrimSpace(in.ExitURI) == "" {
-			return fmt.Errorf("链式线路需要落地入站")
+		uri := strings.TrimSpace(in.ExitURI)
+		if exit != nil && uri != "" {
+			return fmt.Errorf("落地节点和 SK5 不能同时填")
+		}
+		if exit == nil && uri == "" {
+			return fmt.Errorf("链式线路需要落地入站或 SK5")
+		}
+		if uri != "" {
+			if _, err := ParseSocksURI(uri); err != nil {
+				return err
+			}
+			in.ExitURI = uri
+			in.ExitInboundID = nil
 		}
 		if exit != nil {
 			if exit.ID == in.ID && in.ID != 0 {

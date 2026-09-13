@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import QRCode from 'qrcode'
 import { api } from '../lib/api'
 import { useToast, useDialog, useUser } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, Tabs, fmtBytes, fmtDate, fmtDateShort } from '../components/ui'
+import { Badge, Empty, Field, FilterTabs, Icon, Modal, MoreMenu, PageHead, Tabs, fmtBytes, fmtDate, fmtDateShort } from '../components/ui'
 
 const emptyIssue = { channel: 'acme-cf', name: '', domains: '', cert_pem: '', key_pem: '' }
 
@@ -503,12 +503,101 @@ function BackupPanel() {
 
 const settingTabs = [
   { id: 'panel', label: '面板' },
+  { id: 'subscribe', label: '订阅' },
   { id: 'certs', label: '证书' },
   { id: 'backup', label: '备份' },
   { id: 'security', label: '安全' },
   { id: 'account', label: '账号' },
   { id: 'audit', label: '审计' },
 ]
+
+const rulePresets = [
+  ['minimal', '极简'],
+  ['balanced', '均衡'],
+  ['comprehensive', '完整'],
+  ['custom', '自定义'],
+]
+
+function catsForPreset(preset, catalog) {
+  if (!Array.isArray(catalog)) return []
+  if (preset === 'custom') return []
+  return catalog.filter(c => (c.presets || []).includes(preset)).map(c => c.name)
+}
+
+function SubRulesPanel() {
+  const toast = useToast()
+  const [preset, setPreset] = useState('balanced')
+  const [cats, setCats] = useState([])
+  const [catalog, setCatalog] = useState([])
+  const [busy, setBusy] = useState(false)
+
+  const load = () => api.get('/settings').then(d => {
+    const p = d.sub_rule_preset || 'balanced'
+    const list = Array.isArray(d.sub_rule_catalog) ? d.sub_rule_catalog : []
+    setPreset(p)
+    setCatalog(list)
+    setCats(Array.isArray(d.sub_rule_categories) ? d.sub_rule_categories : catsForPreset(p, list))
+  }).catch(e => toast(e.message, 'error'))
+
+  useEffect(() => { load() }, [])
+
+  const pickPreset = (id) => {
+    setPreset(id)
+    if (id !== 'custom') setCats(catsForPreset(id, catalog))
+  }
+
+  const toggle = (name) => {
+    setPreset('custom')
+    setCats(prev => prev.includes(name) ? prev.filter(x => x !== name) : [...prev, name])
+  }
+
+  const save = async (e) => {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      await api.put('/settings', { sub_rule_preset: preset, sub_rule_categories: cats })
+      toast('已保存')
+      load()
+    } catch (err) { toast(err.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <form onSubmit={save} className="card p-5 max-w-3xl space-y-4">
+      <div>
+        <div className="text-[15px] font-medium">分流规则</div>
+        <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
+          写入所有用户的 Clash Meta 与 sing-box 订阅。节点仍由套餐决定，通用 URI 不受影响。规则集来自 MetaCubeX，客户端第一次更新会下载。
+        </p>
+      </div>
+      <div>
+        <div className="kicker mb-2">规则模式</div>
+        <FilterTabs value={preset} onChange={pickPreset} items={rulePresets} />
+      </div>
+      <div>
+        <div className="kicker mb-2">规则选择</div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {catalog.map(c => {
+            const on = cats.includes(c.name)
+            return (
+              <button
+                key={c.name}
+                type="button"
+                className={`node-pick ${on ? 'is-on' : ''}`}
+                onClick={() => toggle(c.name)}
+              >
+                <span className={`node-check ${on ? 'is-on' : ''}`}>{on ? '✓' : ''}</span>
+                <span className="text-[13px] leading-snug">{c.label}</span>
+              </button>
+            )
+          })}
+        </div>
+        <p className="text-[12px] text-ink-mut mt-2">{cats.length} 类。广告拦截默认丢弃；私有网络和国内默认直连；其余走节点选择。</p>
+      </div>
+      <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
+    </form>
+  )
+}
 
 const TZ_OPTIONS = ['Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Tokyo', 'Asia/Singapore', 'UTC', 'Europe/London', 'America/New_York']
 
@@ -655,6 +744,8 @@ export default function Settings({ accountOnly = false }) {
     <div>
       <PageHead title="设置" desc={desc} />
       {!accountOnly && <Tabs value={tab} onChange={goTab} items={settingTabs} />}
+
+      {tab === 'subscribe' && <SubRulesPanel />}
 
       {tab === 'panel' && (
       <form onSubmit={savePanel} className="card p-5 max-w-3xl space-y-4">

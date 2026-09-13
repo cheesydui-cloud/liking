@@ -139,6 +139,7 @@ const PAGE_TITLES = {
   '/nodes': '服务器',
   '/users': '用户',
   '/packages': '套餐',
+  '/forwards': '转发',
   '/traffic': '流量',
   '/settings': '设置',
   '/my': '订阅',
@@ -194,6 +195,7 @@ export function Layout({ children }) {
       items: [
         { to: '/users', icon: 'users', label: '用户' },
         { to: '/packages', icon: 'package', label: '套餐' },
+        { to: '/forwards', icon: 'forward', label: '转发' },
         { to: '/traffic', icon: 'bars', label: '流量' },
       ],
     },

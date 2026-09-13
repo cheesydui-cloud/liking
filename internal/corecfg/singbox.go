@@ -124,6 +124,22 @@ func singInbound(in *db.Inbound, clients []*db.Client, certs map[int64]*db.Certi
 }
 
 func singChainOutbound(entry *db.Inbound, byID map[int64]*db.Inbound) (map[string]any, error) {
+	if t, err := socksExit(entry); err != nil {
+		return nil, err
+	} else if t != nil {
+		ob := map[string]any{
+			"type":        "socks",
+			"tag":         outboundTag(entry.ID),
+			"server":      t.Host,
+			"server_port": t.Port,
+			"version":     "5",
+		}
+		if t.User != "" || t.Pass != "" {
+			ob["username"] = t.User
+			ob["password"] = t.Pass
+		}
+		return ob, nil
+	}
 	if entry.ExitInboundID == nil {
 		return nil, fmt.Errorf("链式线路 %s 没有落地", entry.Name)
 	}

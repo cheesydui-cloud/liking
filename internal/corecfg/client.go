@@ -35,6 +35,9 @@ func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
 		if err != nil {
 			continue
 		}
+		if !UserFacing(in.Profile) {
+			continue
+		}
 		servers[in.ServerID] = struct{}{}
 		c, err := db.GetClient(d, in.ID, u.ID)
 		if err == sql.ErrNoRows {
@@ -62,6 +65,9 @@ func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
 }
 
 func newClient(u *db.User, in *db.Inbound) (*db.Client, error) {
+	if in != nil && !UserFacing(in.Profile) {
+		return nil, fmt.Errorf("该入站没有用户")
+	}
 	c := &db.Client{
 		InboundID: in.ID,
 		UserID:    u.ID,

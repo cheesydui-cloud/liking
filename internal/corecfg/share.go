@@ -94,6 +94,8 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 		q.Set("fp", nz(st.String("fingerprint"), "chrome"))
 		q.Set("alpn", strings.Join(st.ALPN(), ","))
 		return fmt.Sprintf("anytls://%s@%s?%s#%s", url.QueryEscape(c.Password), hp, q.Encode(), name), nil
+	case ProfilePortForward:
+		return "", fmt.Errorf("端口中转没有分享链接")
 	case ProfileMieru:
 		// Shadowrocket: mierus://user:pass@host?udp=1&port=39198&profile=default
 		user := c.Username

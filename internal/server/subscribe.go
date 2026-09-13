@@ -97,6 +97,9 @@ func inboundLive(d *sql.DB, in *db.Inbound, over map[int64]bool) bool {
 	if in == nil || !in.Enabled {
 		return false
 	}
+	if !corecfg.UserFacing(in.Profile) {
+		return false
+	}
 	if over != nil && over[in.ServerID] {
 		return false
 	}
@@ -162,7 +165,20 @@ func buildClash(d *sql.DB, clients []*db.Client, over map[int64]bool) (string, e
 		names = append(names, name)
 		b.WriteString(yaml)
 	}
-	return corecfg.ClashDocument(names, b.String()), nil
+	return corecfg.ClashDocument(names, b.String(), subRuleNames(d)), nil
+}
+
+func subRuleNames(d *sql.DB) []string {
+	preset, _ := db.GetSetting(d, "sub_rule_preset")
+	raw, _ := db.GetSetting(d, "sub_rule_categories")
+	var custom []string
+	if strings.TrimSpace(raw) != "" {
+		if err := json.Unmarshal([]byte(raw), &custom); err != nil {
+			custom = nil
+		}
+	}
+	_, names := corecfg.ResolveSubRules(preset, custom)
+	return names
 }
 
 func buildSingboxSub(d *sql.DB, clients []*db.Client, over map[int64]bool) ([]byte, error) {
@@ -191,16 +207,5 @@ func buildSingboxSub(d *sql.DB, clients []*db.Client, over map[int64]bool) ([]by
 			tags = append(tags, tag)
 		}
 	}
-	if tags == nil {
-		tags = []string{"direct"}
-	}
-	outs = append([]any{map[string]any{
-		"type":      "selector",
-		"tag":       "liking",
-		"outbounds": tags,
-	}}, outs...)
-	outs = append(outs, map[string]any{"type": "direct", "tag": "direct"})
-	return json.MarshalIndent(map[string]any{
-		"outbounds": outs,
-	}, "", "  ")
+	return json.MarshalIndent(corecfg.SingboxClientDocument(outs, tags, subRuleNames(d)), "", "  ")
 }

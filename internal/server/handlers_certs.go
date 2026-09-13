@@ -2,12 +2,14 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"liking/internal/certs"
+	"liking/internal/corecfg"
 	"liking/internal/db"
 )
 
@@ -354,6 +356,13 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	tlsID, _ := db.GetSetting(s.DB, "panel_tls_cert_id")
 	backupHour, _ := db.GetSetting(s.DB, "backup_hour")
 	backupPass, _ := db.GetSetting(s.DB, "backup_password")
+	rulePreset, _ := db.GetSetting(s.DB, "sub_rule_preset")
+	ruleRaw, _ := db.GetSetting(s.DB, "sub_rule_categories")
+	var custom []string
+	if strings.TrimSpace(ruleRaw) != "" {
+		_ = json.Unmarshal([]byte(ruleRaw), &custom)
+	}
+	preset, cats := corecfg.ResolveSubRules(rulePreset, custom)
 	jsonOK(w, map[string]any{
 		"panel_name":          name,
 		"panel_url":           url,
@@ -367,22 +376,27 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"backup_keep":         db.SettingInt(s.DB, "backup_keep", 7),
 		"backup_password_set": strings.TrimSpace(backupPass) != "",
 		"tls_active":          s.TLSActive,
+		"sub_rule_preset":     preset,
+		"sub_rule_categories": cats,
+		"sub_rule_catalog":    corecfg.SubRuleCatalogPublic(),
 	})
 }
 
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		PanelName      *string `json:"panel_name"`
-		PanelURL       *string `json:"panel_url"`
-		AcmeEmail      *string `json:"acme_email"`
-		CFToken        *string `json:"cf_api_token"`
-		Announce       *string `json:"announce"`
-		AdminCIDRs     *string `json:"admin_cidrs"`
-		Timezone       *string `json:"timezone"`
-		PanelTLSCertID *string `json:"panel_tls_cert_id"`
-		BackupHour     *string `json:"backup_hour"`
-		BackupKeep     *int    `json:"backup_keep"`
-		BackupPassword *string `json:"backup_password"`
+		PanelName         *string   `json:"panel_name"`
+		PanelURL          *string   `json:"panel_url"`
+		AcmeEmail         *string   `json:"acme_email"`
+		CFToken           *string   `json:"cf_api_token"`
+		Announce          *string   `json:"announce"`
+		AdminCIDRs        *string   `json:"admin_cidrs"`
+		Timezone          *string   `json:"timezone"`
+		PanelTLSCertID    *string   `json:"panel_tls_cert_id"`
+		BackupHour        *string   `json:"backup_hour"`
+		BackupKeep        *int      `json:"backup_keep"`
+		BackupPassword    *string   `json:"backup_password"`
+		SubRulePreset     *string   `json:"sub_rule_preset"`
+		SubRuleCategories *[]string `json:"sub_rule_categories"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -443,6 +457,18 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.BackupPassword != nil {
 		_ = db.SetSetting(s.DB, "backup_password", *req.BackupPassword)
+	}
+	if req.SubRulePreset != nil {
+		if !corecfg.ValidSubRulePreset(*req.SubRulePreset) {
+			jsonErr(w, http.StatusBadRequest, "规则模式无效")
+			return
+		}
+		_ = db.SetSetting(s.DB, "sub_rule_preset", corecfg.NormalizeSubRulePreset(*req.SubRulePreset))
+	}
+	if req.SubRuleCategories != nil {
+		names := corecfg.NormalizeCategoryNames(*req.SubRuleCategories)
+		raw, _ := json.Marshal(names)
+		_ = db.SetSetting(s.DB, "sub_rule_categories", string(raw))
 	}
 	jsonOK(w, map[string]any{"ok": true, "tls_active": s.TLSActive})
 }

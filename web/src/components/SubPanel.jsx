@@ -71,7 +71,7 @@ export function SubPanel({ token, onCopied }) {
           <a className="btn-ghost h-8" href={singboxImportURL(token)}>打开 sing-box</a>
           <button type="button" className="btn-ghost h-8" onClick={() => copy(auto, '已复制自动识别链接')}><Icon name="link" size={14} /> 复制自动识别</button>
         </div>
-        <p className="text-[12px] text-ink-mut">HTTP 打开面板时浏览器可能禁止剪贴板，直接选中链接也能复制。</p>
+        <p className="text-[12px] text-ink-mut">Clash Meta / sing-box 会带上设置 → 订阅里绑定的分流。通用 URI 只含节点。HTTP 打开面板时浏览器可能禁止剪贴板，直接选中链接也能复制。</p>
       </div>
     </div>
   )

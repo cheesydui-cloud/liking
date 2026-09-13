@@ -109,7 +109,7 @@ func TestClashAndSingboxSkipMieru(t *testing.T) {
 }
 
 func TestClashDocumentDNS(t *testing.T) {
-	doc := ClashDocument([]string{"a"}, "  - name: \"a\"\n    type: ss\n")
+	doc := ClashDocument([]string{"a"}, "  - name: \"a\"\n    type: ss\n", nil)
 	if !strings.Contains(doc, "enhanced-mode: fake-ip") {
 		t.Fatalf("missing fake-ip\n%s", doc)
 	}

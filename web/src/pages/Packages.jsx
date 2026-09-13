@@ -14,6 +14,7 @@ function protoShort(profile) {
     case 'ss2022': return 'SS2022'
     case 'anytls': return 'AnyTLS'
     case 'mieru': return 'Mieru'
+    case 'port-forward': return '中转'
     default: return profile || ''
   }
 }
@@ -26,16 +27,45 @@ function selectedInboundIds(pkg, ins = []) {
   return []
 }
 
-function packageNodeNames(p, ins, servers) {
+function packageNodes(p, ins, servers) {
   const iids = Array.isArray(p.inbound_ids) ? p.inbound_ids.map(Number).filter(Boolean) : []
-  if (iids.length) return iids.map(id => ins.find(x => Number(x.id) === id)?.name).filter(Boolean)
   const sids = Array.isArray(p.server_ids) ? p.server_ids.map(Number).filter(Boolean) : []
-  if (sids.length) {
-    const names = ins.filter(x => sids.includes(Number(x.server_id))).map(x => x.name).filter(Boolean)
-    if (names.length) return names
-    return sids.map(id => servers.find(s => Number(s.id) === id)?.name).filter(Boolean)
+  let nodes = []
+  if (iids.length) nodes = iids.map(id => ins.find(x => Number(x.id) === id)).filter(Boolean)
+  else if (sids.length) nodes = ins.filter(x => sids.includes(Number(x.server_id)))
+  else return { all: true, count: 0, servers: [], names: [] }
+  nodes = nodes.filter(n => n && n.profile !== 'port-forward' && n.user_facing !== false)
+
+  const seen = new Set()
+  const serverNames = []
+  for (const n of nodes) {
+    const sid = Number(n.server_id)
+    if (seen.has(sid)) continue
+    seen.add(sid)
+    const s = servers.find(x => Number(x.id) === sid)
+    const label = s?.name || n.server_name || ''
+    if (label) serverNames.push(label)
   }
-  return []
+  return {
+    all: false,
+    count: nodes.length || iids.length || sids.length,
+    servers: serverNames,
+    names: nodes.map(n => n.name).filter(Boolean),
+  }
+}
+
+function PackageNodesCell({ p, ins, servers }) {
+  const meta = packageNodes(p, ins, servers)
+  if (meta.all) return <span className="text-ink-mut">全部</span>
+  const tip = meta.names.length ? meta.names.join('、') : undefined
+  return (
+    <div title={tip}>
+      <span className="tabular-nums font-mono text-[12px]">{meta.count}</span>
+      {meta.servers.length ? (
+        <div className="text-[11px] text-ink-mut truncate mt-0.5">{meta.servers.join(' · ')}</div>
+      ) : null}
+    </div>
+  )
 }
 
 function trafficLabel(bytes) {
@@ -163,14 +193,19 @@ export default function Packages() {
     } catch (e) { toast(e.message, 'error') }
   }
 
+  const pickableIns = useMemo(
+    () => ins.filter(x => x.profile !== 'port-forward' && x.user_facing !== false),
+    [ins],
+  )
+
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase()
-    if (!needle) return ins
-    return ins.filter(x => {
+    if (!needle) return pickableIns
+    return pickableIns.filter(x => {
       const hay = `${x.name || ''} ${x.profile || ''} ${x.protocol || ''} ${x.port || ''} ${x.server_name || ''} ${x.server_host || ''}`.toLowerCase()
       return hay.includes(needle)
     })
-  }, [ins, q])
+  }, [pickableIns, q])
 
   const groups = useMemo(() => {
     const by = new Map()
@@ -215,14 +250,12 @@ export default function Packages() {
               <tbody>
                 {list.map(p => {
                   const n = users.filter(u => u.role !== 'admin' && u.package_id === p.id).length
-                  const names = packageNodeNames(p, ins, servers)
-                  const nodeText = names.length === 0 ? '全部节点' : names.length <= 4 ? names.join('、') : `${names.slice(0, 4).join('、')} 等 ${names.length} 个`
                   return (
                     <tr key={p.id}>
                       <td className="font-medium">{p.name}</td>
                       <td className="tabular-nums font-mono text-[12px]">{trafficLabel(p.traffic_bytes)}</td>
                       <td>{p.direction === 'twoway' ? '双向' : '单向'}</td>
-                      <td className="text-[13px] text-ink-soft max-w-[22rem] truncate" title={names.join('、')}>{nodeText}</td>
+                      <td className="max-w-[14rem]"><PackageNodesCell p={p} ins={ins} servers={servers} /></td>
                       <td className="tabular-nums font-mono text-[12px]">{n}</td>
                       <td className="whitespace-nowrap">
                         <div className="icon-row">
@@ -243,8 +276,8 @@ export default function Packages() {
           <div className="md:hidden divide-y" style={{ borderColor: 'var(--color-line-soft)' }}>
             {list.map(p => {
               const n = users.filter(u => u.role !== 'admin' && u.package_id === p.id).length
-              const names = packageNodeNames(p, ins, servers)
-              const nodeText = names.length === 0 ? '全部节点' : names.length <= 3 ? names.join('、') : `${names.slice(0, 3).join('、')} 等 ${names.length} 个`
+              const meta = packageNodes(p, ins, servers)
+              const nodeLine = meta.all ? '全部节点' : `${meta.count} 节点${meta.servers.length ? ` · ${meta.servers.join(' · ')}` : ''}`
               return (
                 <div key={p.id} className="px-3.5 py-3">
                   <div className="flex items-start justify-between gap-3">
@@ -253,7 +286,7 @@ export default function Packages() {
                       <div className="text-[12px] text-ink-mut mt-0.5">
                         {trafficLabel(p.traffic_bytes)} / {p.direction === 'twoway' ? '双向' : '单向'} / {n} 用户
                       </div>
-                      <div className="text-[12px] text-ink-mut mt-0.5 truncate">{nodeText}</div>
+                      <div className="text-[12px] text-ink-mut mt-0.5 truncate" title={meta.names.join('、')}>{nodeLine}</div>
                     </div>
                     <div className="icon-row shrink-0">
                       <button type="button" className="icon-btn" onClick={() => startEdit(p)} aria-label="编辑套餐" title="编辑">
@@ -296,24 +329,24 @@ export default function Packages() {
               <div>
                 <div className="text-[12px] font-medium text-ink-soft">包含节点</div>
                 <div className="text-[11.5px] text-ink-mut mt-0.5">
-                  {f.inbound_ids.length ? `已选 ${f.inbound_ids.length} / ${ins.length}` : '未勾选 = 全部节点'}
+                  {f.inbound_ids.length ? `已选 ${f.inbound_ids.length} / ${pickableIns.length}` : '未勾选 = 全部节点'}
                 </div>
               </div>
               <div className="flex gap-3 shrink-0">
-                {ins.length > 0 && (
-                  <button type="button" className="row-act" onClick={() => setF({ ...f, inbound_ids: ins.map(x => Number(x.id)) })}>全选当前</button>
+                {filtered.length > 0 && (
+                  <button type="button" className="row-act" onClick={() => setF({ ...f, inbound_ids: filtered.map(x => Number(x.id)) })}>全选当前</button>
                 )}
                 {f.inbound_ids.length > 0 && (
                   <button type="button" className="row-act" onClick={() => setF({ ...f, inbound_ids: [] })}>清空为全部</button>
                 )}
               </div>
             </div>
-            {ins.length > 6 && (
+            {pickableIns.length > 6 && (
               <div className="mb-2">
                 <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索节点 / 协议 / 端口" />
               </div>
             )}
-            {ins.length === 0 ? (
+            {pickableIns.length === 0 ? (
               <div className="text-[13px] text-ink-mut py-3">还没有节点。先到「服务器管理」增加节点。</div>
             ) : groups.length === 0 ? (
               <div className="text-[13px] text-ink-mut py-3">没有匹配的节点。</div>

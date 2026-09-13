@@ -114,6 +114,22 @@ func socksPort(id int64) int      { return 20000 + int(id) }
 
 func xrayInbound(in *db.Inbound, clients []*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound) (map[string]any, error) {
 	st := ParseSettings(in.Settings)
+	if in.Profile == ProfilePortForward {
+		netw := st.String("network")
+		if netw == "" {
+			netw = "tcp"
+		}
+		return map[string]any{
+			"listen":   in.Listen,
+			"port":     in.Port,
+			"protocol": "dokodemo-door",
+			"settings": map[string]any{
+				"address": st.String("dest_host"),
+				"port":    st.Int("dest_port", 0),
+				"network": netw,
+			},
+		}, nil
+	}
 	users := xrayUsers(in, clients, st)
 	users = append(users, relayUsers(in, byID)...)
 	if len(users) == 0 {
@@ -295,7 +311,31 @@ func xrayXHTTPSettings(st Settings) map[string]any {
 	return xh
 }
 
+func xraySocksOutbound(id int64, t *SocksTarget) (map[string]any, string, error) {
+	if t == nil || t.Host == "" {
+		return nil, "", fmt.Errorf("SK5 缺少主机")
+	}
+	tag := outboundTag(id)
+	srv := map[string]any{
+		"address": t.Host,
+		"port":    t.Port,
+	}
+	if t.User != "" || t.Pass != "" {
+		srv["users"] = []any{map[string]any{"user": t.User, "pass": t.Pass}}
+	}
+	return map[string]any{
+		"tag":      tag,
+		"protocol": "socks",
+		"settings": map[string]any{"servers": []any{srv}},
+	}, tag, nil
+}
+
 func xrayChainOutbound(entry *db.Inbound, byID map[int64]*db.Inbound) (map[string]any, string, error) {
+	if t, err := socksExit(entry); err != nil {
+		return nil, "", err
+	} else if t != nil {
+		return xraySocksOutbound(entry.ID, t)
+	}
 	if entry.ExitInboundID == nil {
 		return nil, "", fmt.Errorf("链式线路 %s 没有落地", entry.Name)
 	}

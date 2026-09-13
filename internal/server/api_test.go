@@ -169,6 +169,26 @@ func TestLoginAndServerAndInbound(t *testing.T) {
 		t.Fatalf("sub uri %s", decoded)
 	}
 
+	res, err = c.Get(ts.URL + "/api/sub/" + createdUser.User.SubToken + "/clash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clashBody, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 200 || !strings.Contains(string(clashBody), "RULE-SET,youtube,油管视频") || !strings.Contains(string(clashBody), "MATCH,回落") {
+		t.Fatalf("clash sub %d %s", res.StatusCode, clashBody)
+	}
+
+	res, err = c.Get(ts.URL + "/api/sub/" + createdUser.User.SubToken + "/singbox")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sbBody, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 200 || !strings.Contains(string(sbBody), `"final": "回落"`) || !strings.Contains(string(sbBody), "youtube") {
+		t.Fatalf("singbox sub %d %s", res.StatusCode, sbBody)
+	}
+
 	var listed struct {
 		Inbounds []struct {
 			ID   int64 `json:"id"`
@@ -948,6 +968,9 @@ func TestCertsAndSettings(t *testing.T) {
 	if st["timezone"] != "Asia/Shanghai" {
 		t.Fatalf("timezone %+v", st)
 	}
+	if st["sub_rule_preset"] != "balanced" {
+		t.Fatalf("sub rules %+v", st["sub_rule_preset"])
+	}
 	if _, ok := st["cf_api_token"]; ok {
 		t.Fatal("token leaked")
 	}
@@ -997,6 +1020,41 @@ func TestCertsAndSettings(t *testing.T) {
 	decodeRes(t, res, &st)
 	if st["panel_name"] != "liking-x" || st["acme_email"] != "a@b.com" || st["cf_api_token_set"] != true {
 		t.Fatalf("partial settings %+v", st)
+	}
+	if st["sub_rule_preset"] != "balanced" {
+		t.Fatalf("rules wiped %+v", st["sub_rule_preset"])
+	}
+
+	rulePut, _ := json.Marshal(map[string]any{
+		"sub_rule_preset":     "custom",
+		"sub_rule_categories": []string{"ads", "private", "bogus"},
+	})
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/settings", bytes.NewReader(rulePut))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+	res, err = c.Get(ts.URL + "/api/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st = map[string]any{}
+	decodeRes(t, res, &st)
+	if st["sub_rule_preset"] != "custom" {
+		t.Fatalf("custom preset %+v", st["sub_rule_preset"])
+	}
+	gotCats, _ := st["sub_rule_categories"].([]any)
+	if len(gotCats) != 2 || gotCats[0] != "ads" || gotCats[1] != "private" {
+		t.Fatalf("custom cats %+v", gotCats)
+	}
+	cat0, _ := st["sub_rule_catalog"].([]any)
+	if len(cat0) < 20 {
+		t.Fatalf("catalog %+v", len(cat0))
 	}
 
 	body, _ := json.Marshal(map[string]string{"name": "self", "domains": "self.example.com"})

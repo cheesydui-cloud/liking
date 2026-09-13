@@ -30,6 +30,7 @@ func inboundJSON(in *db.Inbound) map[string]any {
 		"line_kind":       in.LineKind,
 		"exit_inbound_id": in.ExitInboundID,
 		"exit_uri":        in.ExitURI,
+		"user_facing":     corecfg.UserFacing(in.Profile),
 		"created_at":      in.CreatedAt,
 		"server_name":     in.ServerName,
 		"server_host":     in.ServerHost,
@@ -48,7 +49,7 @@ type inboundReq struct {
 	CertID        *int64          `json:"cert_id"`
 	LineKind      string          `json:"line_kind"`
 	ExitInboundID *int64          `json:"exit_inbound_id"`
-	ExitURI       string          `json:"exit_uri"`
+	ExitURI       *string         `json:"exit_uri"`
 }
 
 func (s *Server) handleListInbounds(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +92,9 @@ func (s *Server) handleCreateInbound(w http.ResponseWriter, r *http.Request) {
 		CertID:        req.CertID,
 		LineKind:      req.LineKind,
 		ExitInboundID: req.ExitInboundID,
-		ExitURI:       req.ExitURI,
+	}
+	if req.ExitURI != nil {
+		in.ExitURI = strings.TrimSpace(*req.ExitURI)
 	}
 	if req.Enabled != nil {
 		in.Enabled = *req.Enabled
@@ -157,7 +160,9 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 	if req.ExitInboundID != nil {
 		in.ExitInboundID = req.ExitInboundID
 	}
-	in.ExitURI = req.ExitURI
+	if req.ExitURI != nil {
+		in.ExitURI = strings.TrimSpace(*req.ExitURI)
+	}
 	if err := s.prepareInbound(in); err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -183,6 +188,10 @@ func (s *Server) handleInboundShare(w http.ResponseWriter, r *http.Request) {
 	in, err := db.GetInbound(s.DB, id)
 	if err != nil {
 		jsonErr(w, http.StatusNotFound, "入站不存在")
+		return
+	}
+	if !corecfg.UserFacing(in.Profile) {
+		jsonErr(w, http.StatusBadRequest, "端口中转没有分享链接")
 		return
 	}
 	if corecfg.ShareHost(in) == "" {

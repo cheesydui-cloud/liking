@@ -71,6 +71,8 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 		fmt.Fprintf(&b, "    client-fingerprint: %s\n", yq(nz(st.String("fingerprint"), "chrome")))
 		writeClashALPN(&b, st)
 		b.WriteString("    udp: true\n")
+	case ProfilePortForward:
+		return "", "", fmt.Errorf("端口中转没有分享链接")
 	case ProfileMieru:
 		b.WriteString("    type: mieru\n")
 		user := c.Username
@@ -90,7 +92,7 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 	return name, b.String(), nil
 }
 
-func ClashDocument(names []string, proxiesYAML string) string {
+func ClashDocument(names []string, proxiesYAML string, selected []string) string {
 	var b strings.Builder
 	b.WriteString("mixed-port: 7890\nallow-lan: false\nmode: rule\n")
 	b.WriteString("dns:\n  enable: true\n  ipv6: false\n  enhanced-mode: fake-ip\n")
@@ -100,16 +102,119 @@ func ClashDocument(names []string, proxiesYAML string) string {
 	b.WriteString("  fake-ip-filter:\n    - '*.lan'\n    - localhost\n    - '*.local'\n")
 	b.WriteString("proxies:\n")
 	b.WriteString(proxiesYAML)
-	b.WriteString("proxy-groups:\n  - name: liking\n    type: select\n    proxies:\n")
-	if len(names) == 0 {
+	writeClashGroups(&b, names, selected)
+	writeClashRules(&b, selected)
+	writeClashRuleProviders(&b, selected)
+	return b.String()
+}
+
+func writeClashGroups(b *strings.Builder, names, selected []string) {
+	cats := SelectedCategories(selected)
+	auto := append([]string{}, names...)
+	if len(auto) == 0 {
+		auto = []string{"DIRECT"}
+	}
+	selectProxies := append([]string{"DIRECT", "REJECT", GroupAuto}, names...)
+	b.WriteString("proxy-groups:\n")
+	writeClashGroup(b, GroupSelect, "select", nil, selectProxies)
+	writeClashGroup(b, GroupAuto, "url-test", func(b *strings.Builder) {
+		b.WriteString("    url: https://www.gstatic.com/generate_204\n")
+		b.WriteString("    interval: 300\n")
+		b.WriteString("    lazy: false\n")
+	}, auto)
+	for _, c := range cats {
+		writeClashGroup(b, c.Label, "select", nil, categoryClashProxies(c.Name, names))
+	}
+	writeClashGroup(b, GroupFallback, "select", nil, append([]string{GroupSelect, "DIRECT", "REJECT", GroupAuto}, names...))
+}
+
+func categoryClashProxies(name string, names []string) []string {
+	switch name {
+	case "ads":
+		return append([]string{"REJECT", GroupSelect, "DIRECT", GroupAuto}, names...)
+	case "domestic":
+		return []string{"DIRECT", GroupSelect}
+	case "private":
+		return append([]string{"DIRECT", GroupSelect, "REJECT", GroupAuto}, names...)
+	default:
+		return append([]string{GroupSelect, "DIRECT", "REJECT", GroupAuto}, names...)
+	}
+}
+
+func writeClashGroup(b *strings.Builder, name, typ string, extra func(*strings.Builder), proxies []string) {
+	fmt.Fprintf(b, "  - name: %s\n    type: %s\n", yq(name), typ)
+	if extra != nil {
+		extra(b)
+	}
+	b.WriteString("    proxies:\n")
+	if len(proxies) == 0 {
 		b.WriteString("      - DIRECT\n")
-	} else {
-		for _, n := range names {
-			fmt.Fprintf(&b, "      - %s\n", yq(n))
+		return
+	}
+	for _, p := range proxies {
+		fmt.Fprintf(b, "      - %s\n", yq(p))
+	}
+}
+
+func writeClashRules(b *strings.Builder, selected []string) {
+	cats := SelectedCategories(selected)
+	b.WriteString("rules:\n")
+	seen := map[string]bool{}
+	for _, c := range cats {
+		for _, p := range c.SiteRules {
+			if p.Key == "" || seen[p.Key] {
+				continue
+			}
+			seen[p.Key] = true
+			fmt.Fprintf(b, "  - %s\n", yq("RULE-SET,"+p.Key+","+c.Label))
 		}
 	}
-	b.WriteString("rules:\n  - MATCH,liking\n")
-	return b.String()
+	for _, c := range cats {
+		for _, p := range c.IPRules {
+			if p.Key == "" || seen[p.Key] {
+				continue
+			}
+			seen[p.Key] = true
+			fmt.Fprintf(b, "  - %s\n", yq("RULE-SET,"+p.Key+","+c.Label+",no-resolve"))
+		}
+	}
+	fmt.Fprintf(b, "  - %s\n", yq("MATCH,"+GroupFallback))
+}
+
+func writeClashRuleProviders(b *strings.Builder, selected []string) {
+	cats := SelectedCategories(selected)
+	if len(cats) == 0 {
+		return
+	}
+	b.WriteString("rule-providers:\n")
+	seen := map[string]bool{}
+	for _, c := range cats {
+		for _, p := range append(append([]RuleProvider{}, c.SiteRules...), c.IPRules...) {
+			if p.Key == "" || seen[p.Key] {
+				continue
+			}
+			seen[p.Key] = true
+			interval := p.Interval
+			if interval <= 0 {
+				interval = 86400
+			}
+			typ := nz(p.Type, "http")
+			format := nz(p.Format, "mrs")
+			behavior := nz(p.Behavior, "domain")
+			fmt.Fprintf(b, "  %s:\n", clashYAMLKey(p.Key))
+			fmt.Fprintf(b, "    type: %s\n    behavior: %s\n    format: %s\n", typ, behavior, format)
+			fmt.Fprintf(b, "    url: %s\n", yq(p.URL))
+			fmt.Fprintf(b, "    path: %s\n", yq(nz(p.Path, "./ruleset/"+p.Key+"."+format)))
+			fmt.Fprintf(b, "    interval: %d\n", interval)
+		}
+	}
+}
+
+func clashYAMLKey(s string) string {
+	if s == "" || strings.ContainsAny(s, "[]{}#&*!|>'\"%@`,:?") || strings.Contains(s, " ") {
+		return yq(s)
+	}
+	return s
 }
 
 func yq(s string) string {

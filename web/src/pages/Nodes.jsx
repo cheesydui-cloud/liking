@@ -16,7 +16,7 @@ const FINGERPRINTS = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', '
 
 const emptyLine = {
   server_id: 0, name: '', profile: 'vless-reality-vision', port: '', listen: '0.0.0.0',
-  line_kind: 'direct', exit_inbound_id: 0, cert_id: 0, enabled: true,
+  line_kind: 'direct', exit_inbound_id: 0, exit_uri: '', cert_id: 0, enabled: true,
   dest: 'www.microsoft.com:443', sni: '', path: '', host: '', mode: 'auto',
   method: '2022-blake3-aes-256-gcm', transport: 'BOTH',
   fingerprint: 'chrome', short_ids: '', xver: 0, spider_x: '',
@@ -88,6 +88,9 @@ function inboundParamRows(inb) {
     ['method', st.method],
     ['server_password', st.server_password],
     ['transport', st.transport],
+    ['dest_host', st.dest_host],
+    ['dest_port', st.dest_port],
+    ['network', st.network],
   ].filter(([, v]) => v)
 }
 
@@ -126,6 +129,7 @@ function protoShort(profile) {
     case 'ss2022': return 'SS2022'
     case 'anytls': return 'AnyTLS'
     case 'mieru': return 'Mieru'
+    case 'port-forward': return '中转'
     default: return profile || ''
   }
 }
@@ -165,6 +169,7 @@ function formFromInbound(inb) {
     listen: inb.listen || '0.0.0.0',
     line_kind: inb.line_kind || 'direct',
     exit_inbound_id: inb.exit_inbound_id || 0,
+    exit_uri: inb.exit_uri || '',
     cert_id: inb.cert_id || 0,
     enabled: inb.enabled !== false,
     dest: st.dest || 'www.microsoft.com:443',
@@ -487,6 +492,7 @@ export default function Nodes() {
     }
     if (f.cert_id) body.cert_id = Number(f.cert_id)
     if (f.line_kind === 'chain' && f.exit_inbound_id) body.exit_inbound_id = Number(f.exit_inbound_id)
+    if (f.exit_uri) body.exit_uri = f.exit_uri
     return body
   }
 
@@ -525,7 +531,7 @@ export default function Nodes() {
     try {
       const d = await api.put(`/inbounds/${inb.id}`, {
         enabled: !inb.enabled, name: inb.name, port: inb.port, listen: inb.listen,
-        settings: inb.settings, line_kind: inb.line_kind, exit_inbound_id: inb.exit_inbound_id, cert_id: inb.cert_id,
+        settings: inb.settings, line_kind: inb.line_kind, exit_inbound_id: inb.exit_inbound_id, exit_uri: inb.exit_uri || '', cert_id: inb.cert_id,
       })
       if (d.apply_error) toast(d.apply_error, 'error')
       load()
@@ -682,7 +688,7 @@ export default function Nodes() {
                             <tr key={inb.id} className={!inb.enabled ? 'opacity-50' : ''}>
                               <td className="font-medium">
                                 {inb.name}
-                                {inb.line_kind === 'chain' ? <span className="text-ink-mut font-normal"> 链式</span> : null}
+                                {inb.profile === 'port-forward' ? <span className="text-ink-mut font-normal"> 中转</span> : inb.exit_uri ? <span className="text-ink-mut font-normal"> SK5</span> : inb.line_kind === 'chain' ? <span className="text-ink-mut font-normal"> 链式</span> : null}
                                 {dead ? <span className="text-ink-mut font-normal"> 未安装</span> : null}
                                 {!inb.enabled ? <span className="text-ink-mut font-normal"> 停用</span> : null}
                               </td>
@@ -691,12 +697,16 @@ export default function Nodes() {
                               <td className="tabular-nums font-mono text-[12px] whitespace-nowrap">{fmtBytes((inb.used_up || 0) + (inb.used_down || 0))}</td>
                               <td className="whitespace-nowrap">
                                 <div className="icon-row">
-                                  <button type="button" className="icon-btn" onClick={() => copyShare(inb)} aria-label="复制节点链接" title="复制">
-                                    <Icon name="copy" size={14} />
-                                  </button>
-                                  <button type="button" className="icon-btn" onClick={() => startEdit(inb)} aria-label="编辑节点" title="编辑">
-                                    <Icon name="pencil" size={14} />
-                                  </button>
+                                  {inb.profile !== 'port-forward' ? (
+                                    <button type="button" className="icon-btn" onClick={() => copyShare(inb)} aria-label="复制节点链接" title="复制">
+                                      <Icon name="copy" size={14} />
+                                    </button>
+                                  ) : null}
+                                  {inb.profile !== 'port-forward' ? (
+                                    <button type="button" className="icon-btn" onClick={() => startEdit(inb)} aria-label="编辑节点" title="编辑">
+                                      <Icon name="pencil" size={14} />
+                                    </button>
+                                  ) : null}
                                   <MoreMenu iconOnly items={[
                                     { label: '参数', onSelect: () => setParamInb(inb) },
                                     { label: inb.enabled ? '停用' : '启用', onSelect: () => toggle(inb) },
@@ -721,17 +731,19 @@ export default function Nodes() {
                               <div className="font-medium truncate">{inb.name}</div>
                               <div className="text-[12px] text-ink-mut mt-0.5">
                                 {protoShort(inb.profile)} / {inb.port}
-                                {inb.line_kind === 'chain' ? ' / 链式' : ''}
+                                {inb.profile === 'port-forward' ? ' / 中转' : inb.exit_uri ? ' / SK5' : inb.line_kind === 'chain' ? ' / 链式' : ''}
                                 {dead ? ' / 未安装' : ''}
                               </div>
                               <div className="text-[12px] text-ink-mut tabular-nums font-mono mt-0.5">{fmtBytes((inb.used_up || 0) + (inb.used_down || 0))}</div>
                             </div>
                             <div className="icon-row shrink-0">
-                              <button type="button" className="icon-btn" onClick={() => copyShare(inb)} aria-label="复制节点链接" title="复制">
-                                <Icon name="copy" size={14} />
-                              </button>
+                              {inb.profile !== 'port-forward' ? (
+                                <button type="button" className="icon-btn" onClick={() => copyShare(inb)} aria-label="复制节点链接" title="复制">
+                                  <Icon name="copy" size={14} />
+                                </button>
+                              ) : null}
                               <MoreMenu iconOnly items={[
-                                { label: '编辑', onSelect: () => startEdit(inb) },
+                                ...(inb.profile !== 'port-forward' ? [{ label: '编辑', onSelect: () => startEdit(inb) }] : []),
                                 { label: '参数', onSelect: () => setParamInb(inb) },
                                 { label: inb.enabled ? '停用' : '启用', onSelect: () => toggle(inb) },
                                 { sep: true },
@@ -894,14 +906,17 @@ export default function Nodes() {
               <option value="chain">链式（本机入口 → 另一台落地）</option>
             </select>
           </Field>
-          {f.line_kind === 'chain' && (
-            <Field label="落地线路" hint="不可选 Mieru / AnyTLS">
+          {f.line_kind === 'chain' && !f.exit_uri && (
+            <Field label="落地线路" hint="不可选 Mieru / AnyTLS。SK5 落地到「转发」页改。">
               <select className="input-field" value={f.exit_inbound_id} onChange={e => setF({ ...f, exit_inbound_id: e.target.value })}>
                 <option value="">选择落地</option>
                 {landings.map(x => <option key={x.id} value={x.id}>{x.server_name} / {x.name}</option>)}
               </select>
             </Field>
           )}
+          {f.exit_uri ? (
+            <div className="notice sm:col-span-2">落地是 SK5，到「转发」页修改。</div>
+          ) : null}
           {f.profile === 'anytls' && (
             <div className="notice sm:col-span-2">AnyTLS 走 sing-box，需要证书。不能当链式落地。</div>
           )}
