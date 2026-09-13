@@ -97,8 +97,8 @@ func GetUser(d *sql.DB, id int64) (*User, error) {
 	var en int
 	var tlim sql.NullInt64
 	var totpEn int
-	err := d.QueryRow(`SELECT id,username,password_hash,role,remark,enabled,expires_at,traffic_limit,used_up,used_down,cycle_start,sub_token,created_at,totp_secret,totp_enabled,traffic_reset_day FROM users WHERE id=?`, id).
-		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Remark, &en, &u.ExpiresAt, &tlim, &u.UsedUp, &u.UsedDown, &u.CycleStart, &u.SubToken, &u.CreatedAt, &u.TOTPSecret, &totpEn, &u.TrafficResetDay)
+	err := d.QueryRow(`SELECT id,username,password_hash,role,remark,enabled,expires_at,traffic_limit,used_up,used_down,cycle_start,sub_token,created_at,totp_secret,totp_enabled,traffic_reset_day,password_plain FROM users WHERE id=?`, id).
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Remark, &en, &u.ExpiresAt, &tlim, &u.UsedUp, &u.UsedDown, &u.CycleStart, &u.SubToken, &u.CreatedAt, &u.TOTPSecret, &totpEn, &u.TrafficResetDay, &u.PasswordPlain)
 	if err != nil {
 		return nil, err
 	}
@@ -224,6 +224,11 @@ func ClearUserTOTP(d *sql.DB, id int64) error {
 
 func SetUserPassword(d *sql.DB, id int64, hash string) error {
 	_, err := d.Exec(`UPDATE users SET password_hash=? WHERE id=?`, hash, id)
+	return err
+}
+
+func SetUserPasswordPlain(d *sql.DB, id int64, plain string) error {
+	_, err := d.Exec(`UPDATE users SET password_plain=? WHERE id=?`, plain, id)
 	return err
 }
 

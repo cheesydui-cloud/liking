@@ -4,6 +4,7 @@ type User struct {
 	ID              int64  `json:"id"`
 	Username        string `json:"username"`
 	PasswordHash    string `json:"-"`
+	PasswordPlain   string `json:"-"`
 	Role            string `json:"role"`
 	Remark          string `json:"remark"`
 	Enabled         bool   `json:"enabled"`

@@ -27,16 +27,38 @@ func randomPassword(n int) (string, error) {
 	return string(out), nil
 }
 
+// adminUserView exposes the stored login password to admin APIs for 名片 copy.
+// Session /me never uses this wrapper.
+func adminUserView(u *db.User) any {
+	if u == nil {
+		return nil
+	}
+	type view struct {
+		*db.User
+		Password string `json:"password,omitempty"`
+	}
+	pw := ""
+	if u.Role != "admin" {
+		pw = u.PasswordPlain
+	}
+	return view{User: u, Password: pw}
+}
+
+func rememberLoginPassword(d *sql.DB, id int64, pw string) {
+	_ = db.SetUserPasswordPlain(d, id, pw)
+}
+
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	list, err := db.ListUsers(s.DB)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if list == nil {
-		list = []*db.User{}
+	out := make([]any, 0, len(list))
+	for _, u := range list {
+		out = append(out, adminUserView(u))
 	}
-	jsonOK(w, map[string]any{"users": list})
+	jsonOK(w, map[string]any{"users": out})
 }
 
 func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -88,6 +110,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusConflict, "用户名已存在")
 		return
 	}
+	rememberLoginPassword(s.DB, u.ID, req.Password)
 	exp := req.ExpiresAt
 	if req.Days > 0 {
 		exp = time.Now().Add(time.Duration(req.Days) * 24 * time.Hour).Unix()
@@ -105,9 +128,11 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	s.provisionAndSyncUser(u)
 	admin := userFromCtx(r.Context())
 	db.AddAudit(s.DB, &admin.ID, "user.create", u.Username)
-	out := map[string]any{"user": u}
+	out := map[string]any{"user": adminUserView(u)}
 	if generated != "" {
 		out["password"] = generated
+	} else if req.Password != "" {
+		out["password"] = req.Password
 	}
 	jsonOK(w, out)
 }
@@ -233,6 +258,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, http.StatusInternalServerError, err.Error())
 				return
 			}
+			rememberLoginPassword(s.DB, u.ID, pw)
 		}
 	}
 	if req.Unbind {
@@ -261,7 +287,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	u, _ = db.GetUser(s.DB, u.ID)
 	s.provisionAndSyncUser(u)
-	jsonOK(w, map[string]any{"user": u})
+	jsonOK(w, map[string]any{"user": adminUserView(u)})
 }
 
 func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
@@ -295,7 +321,7 @@ func (s *Server) handleResetTraffic(w http.ResponseWriter, r *http.Request) {
 	}
 	u, _ := db.GetUser(s.DB, id)
 	s.provisionAndSyncUser(u)
-	jsonOK(w, map[string]any{"ok": true, "user": u})
+	jsonOK(w, map[string]any{"ok": true, "user": adminUserView(u)})
 }
 
 func (s *Server) handleRotateSub(w http.ResponseWriter, r *http.Request) {
@@ -348,7 +374,8 @@ func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out := map[string]any{"ok": true}
+	rememberLoginPassword(s.DB, id, req.Password)
+	out := map[string]any{"ok": true, "password": req.Password}
 	if generated != "" {
 		out["password"] = generated
 	}

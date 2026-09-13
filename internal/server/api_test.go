@@ -684,6 +684,44 @@ func TestUserPasswordAndExtend(t *testing.T) {
 	if len(created.Password) < 6 || created.User.ID == 0 || created.User.ExpiresAt == 0 {
 		t.Fatalf("generated %+v", created)
 	}
+	res, err = c.Get(ts.URL + "/api/users")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed struct {
+		Users []struct {
+			ID       int64  `json:"id"`
+			Password string `json:"password"`
+			Role     string `json:"role"`
+		} `json:"users"`
+	}
+	decodeRes(t, res, &listed)
+	sawBob := false
+	for _, u := range listed.Users {
+		if u.Role == "admin" && u.Password != "" {
+			t.Fatal("admin password in list")
+		}
+		if u.ID == created.User.ID {
+			sawBob = true
+			if u.Password != created.Password {
+				t.Fatalf("card password %q want %q", u.Password, created.Password)
+			}
+		}
+	}
+	if !sawBob {
+		t.Fatal("bob not listed")
+	}
+	res, err = c.Get(ts.URL + "/api/me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var adminMe struct {
+		User map[string]any `json:"user"`
+	}
+	decodeRes(t, res, &adminMe)
+	if pw, ok := adminMe.User["password"]; ok && pw != nil && pw != "" {
+		t.Fatalf("/me leaked password %#v", pw)
+	}
 	before := created.User.ExpiresAt
 	ext, _ := json.Marshal(map[string]any{"extend_days": 30, "remark": ""})
 	req, err := http.NewRequest(http.MethodPut, ts.URL+"/api/users/"+strconv.FormatInt(created.User.ID, 10), bytes.NewReader(ext))
@@ -742,6 +780,7 @@ func TestUserPasswordAndExtend(t *testing.T) {
 		User struct {
 			Username     string `json:"username"`
 			Remark       string `json:"remark"`
+			Password     string `json:"password"`
 			TrafficLimit *int64 `json:"traffic_limit"`
 			UsedUp       int64  `json:"used_up"`
 			UsedDown     int64  `json:"used_down"`
@@ -751,6 +790,9 @@ func TestUserPasswordAndExtend(t *testing.T) {
 	decodeRes(t, res, &edited)
 	if edited.User.Username != "robert" || edited.User.Remark != "vip" || edited.User.TrafficLimit == nil || *edited.User.TrafficLimit != 5*1024*1024*1024 {
 		t.Fatalf("edit %+v", edited.User)
+	}
+	if edited.User.Password != "newpass12" {
+		t.Fatalf("edit card password %q", edited.User.Password)
 	}
 	if edited.User.UsedUp != 111 || edited.User.UsedDown != 222 {
 		t.Fatalf("same package wiped traffic %+v", edited.User)
@@ -849,13 +891,17 @@ func TestUserPasswordAndExtend(t *testing.T) {
 	}
 	var me struct {
 		User struct {
-			TrafficCap int64 `json:"traffic_cap"`
+			TrafficCap int64  `json:"traffic_cap"`
+			Password   string `json:"password"`
 		} `json:"user"`
 		Sub map[string]string `json:"sub"`
 	}
 	decodeRes(t, res, &me)
 	if me.User.TrafficCap != 20*1024*1024*1024 || me.Sub["auto"] == "" || me.Sub["clash"] == "" {
 		t.Fatalf("me %+v", me)
+	}
+	if me.User.Password != "" {
+		t.Fatalf("/me user leaked password %q", me.User.Password)
 	}
 }
 

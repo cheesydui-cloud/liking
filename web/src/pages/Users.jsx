@@ -59,7 +59,33 @@ function UserFlags({ u }) {
   return null
 }
 
-function UserRowActs({ u, onEdit, onSub, onTraffic, onToggle, onRemove }) {
+function cardDate(ts) {
+  if (!ts) return '不限期'
+  const d = new Date(Number(ts) * 1000)
+  if (Number.isNaN(d.getTime())) return '—'
+  const z = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`
+}
+
+function formatUserCard(u, pkgs = []) {
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  const lines = [`网址：${origin}`, `账号：${u.username || ''}`]
+  if (u.password) lines.push(`密码：${u.password}`)
+  lines.push(`到期：${cardDate(u.expires_at)}`)
+  if (u.package_name) lines.push(`套餐：${u.package_name}`)
+  else if (u.role !== 'admin') lines.push('套餐：未绑定')
+  if (u.role !== 'admin') {
+    const cap = u.traffic_cap || trafficCap(u, pkgs)
+    if (cap > 0) lines.push(`流量：${fmtBytes(billedBytes(u))} / ${fmtBytes(cap)}`)
+    else lines.push('流量：不限')
+  }
+  if (u.sub_token) lines.push(`订阅：${origin}/api/sub/${u.sub_token}`)
+  if (u.remark) lines.push(`备注：${u.remark}`)
+  if (u.enabled === false) lines.push('状态：停用')
+  return lines.join('\n')
+}
+
+function UserRowActs({ u, onEdit, onSub, onCard, onTraffic, onToggle, onRemove }) {
   if (u.role === 'admin') return null
   return (
     <div className="icon-row">
@@ -69,7 +95,12 @@ function UserRowActs({ u, onEdit, onSub, onTraffic, onToggle, onRemove }) {
       <button type="button" className="icon-btn" onClick={() => onSub(u)} aria-label="订阅" title="订阅">
         <Icon name="link" size={14} />
       </button>
+      <button type="button" className="icon-btn" onClick={() => onCard(u)} aria-label="复制名片" title="复制名片">
+        <Icon name="copy" size={14} />
+      </button>
       <MoreMenu iconOnly items={[
+        { label: '复制名片', onSelect: () => onCard(u) },
+        { sep: true },
         { label: '流量', onSelect: () => onTraffic(u) },
         { label: u.enabled ? '停用' : '启用', onSelect: onToggle },
         { sep: true },
@@ -179,7 +210,17 @@ export default function Users() {
         if (f.password.trim()) body.password = f.password.trim()
         await api.put(`/users/${editUser.id}`, body)
         if (f.password.trim()) {
-          try { await copyText(f.password.trim()); toast('已保存，新密码已复制') }
+          const pkgName = pkgs.find(p => Number(p.id) === Number(f.package_id))?.name || ''
+          const card = formatUserCard({
+            ...editUser,
+            username,
+            remark: f.remark,
+            expires_at: ymdToUnix(f.expires),
+            package_name: pkgName,
+            password: f.password.trim(),
+            enabled: f.enabled !== false,
+          }, pkgs)
+          try { await copyText(card); toast('已保存，名片已复制') }
           catch { toast('已保存') }
         } else toast('已保存')
       } else {
@@ -188,7 +229,11 @@ export default function Users() {
         if (f.package_id) body.package_id = Number(f.package_id)
         const d = await api.post('/users', body)
         const pw = d.password || f.password
-        if (pw) {
+        const created = d.user ? { ...d.user, password: pw || d.user.password || '' } : null
+        if (created) {
+          try { await copyText(formatUserCard(created, pkgs)); toast('已创建，名片已复制') }
+          catch { toast(pw ? `已创建，密码 ${pw}` : '已创建') }
+        } else if (pw) {
           try { await copyText(pw); toast('已创建，密码已复制') } catch { toast(`已创建，密码 ${pw}`) }
         } else toast('已创建')
         if (!body.package_id) toast('未绑定套餐，订阅里不会有节点', 'error')
@@ -229,6 +274,15 @@ export default function Users() {
     } catch (e) { toast(e.message, 'error') }
   }
 
+  const copyCard = async (u) => {
+    try {
+      await copyText(formatUserCard(u, pkgs))
+      toast(u.password ? '已复制名片' : '已复制名片。此账号没有保存的密码，编辑用户并重设后才会出现在名片里。')
+    } catch {
+      toast('浏览器不允许自动复制', 'error')
+    }
+  }
+
   const rotate = async (u) => {
     if (!(await dialog.confirm({ title: '重置订阅令牌', message: '旧订阅链接立刻失效。' }))) return
     try {
@@ -266,7 +320,7 @@ export default function Users() {
     <div>
       <PageHead
         title="用户"
-        desc="一人一套餐。点铅笔改资料，点链接看订阅。到期或超量会从内核配置里摘掉客户端。"
+        desc="一人一套餐。点复制出名片发给客户，点链接看订阅。到期或超量会从内核配置里摘掉客户端。"
         actions={
           <div className="flex gap-2">
             <button type="button" className="btn-ghost" onClick={() => setBulkOpen(true)}>批量开户</button>
@@ -327,6 +381,7 @@ export default function Users() {
                         u={u}
                         onEdit={openEdit}
                         onSub={setSubUser}
+                        onCard={copyCard}
                         onTraffic={openTraffic}
                         onToggle={() => act(() => api.put(`/users/${u.id}`, { enabled: !u.enabled }))}
                         onRemove={remove}
@@ -355,6 +410,7 @@ export default function Users() {
                     u={u}
                     onEdit={openEdit}
                     onSub={setSubUser}
+                    onCard={copyCard}
                     onTraffic={openTraffic}
                     onToggle={() => act(() => api.put(`/users/${u.id}`, { enabled: !u.enabled }))}
                     onRemove={remove}

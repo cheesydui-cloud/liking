@@ -274,6 +274,31 @@ func TestPackageExplicitInbounds(t *testing.T) {
 	}
 }
 
+func TestPasswordPlainRoundTrip(t *testing.T) {
+	d, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	u, err := CreateUser(d, "alice", "hash", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.PasswordPlain != "" {
+		t.Fatalf("plain %q", u.PasswordPlain)
+	}
+	if err := SetUserPasswordPlain(d, u.ID, "secret12"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := GetUser(d, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PasswordPlain != "secret12" || got.PasswordHash != "hash" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
 func TestListUsersDoesNotDeadlock(t *testing.T) {
 	d, err := Open(":memory:")
 	if err != nil {

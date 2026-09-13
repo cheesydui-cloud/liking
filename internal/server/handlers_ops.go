@@ -52,7 +52,6 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		pw := strings.TrimSpace(item.Password)
-		generated := ""
 		if pw == "" {
 			p, err := randomPassword(10)
 			if err != nil {
@@ -61,7 +60,6 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			pw = p
-			generated = p
 		} else if len(pw) < 6 {
 			rec.Error = "密码至少 6 位"
 			out = append(out, rec)
@@ -79,6 +77,7 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 			out = append(out, rec)
 			continue
 		}
+		rememberLoginPassword(s.DB, u.ID, pw)
 		exp := int64(0)
 		if item.Days > 0 {
 			exp = time.Now().Add(time.Duration(item.Days) * 24 * time.Hour).Unix()
@@ -96,7 +95,7 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 		u, _ = db.GetUser(s.DB, u.ID)
 		s.provisionAndSyncUser(u)
 		rec.OK = true
-		rec.Password = generated
+		rec.Password = pw
 		okN++
 		out = append(out, rec)
 	}

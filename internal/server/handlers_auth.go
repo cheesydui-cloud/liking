@@ -122,6 +122,7 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "内部错误")
 		return
 	}
+	rememberLoginPassword(s.DB, u.ID, req.New)
 	jsonOK(w, map[string]any{"ok": true})
 }
 
@@ -192,6 +193,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, "内部错误")
 			return
 		}
+		rememberLoginPassword(s.DB, u.ID, req.NewPassword)
 		changed = true
 	}
 	if !changed {
@@ -208,27 +210,33 @@ func (s *Server) sessionPayload(u *db.User, r *http.Request) map[string]any {
 	if name == "" {
 		name = "liking"
 	}
+	view := u
+	if u != nil {
+		c := *u
+		c.PasswordPlain = ""
+		view = &c
+	}
 	out := map[string]any{
-		"user":       u,
+		"user":       view,
 		"panel_name": name,
 		"version":    version.Version,
 	}
 	announce, _ := db.GetSetting(s.DB, "announce")
 	out["announce"] = announce
 	out["timezone"] = db.Timezone(s.DB)
-	if u != nil && u.Role != "admin" {
+	if view != nil && view.Role != "admin" {
 		base := panelURL(s.DB, r)
 		out["sub"] = map[string]string{
-			"auto":    base + "/api/sub/" + u.SubToken,
-			"clash":   base + "/api/sub/" + u.SubToken + "/clash",
-			"singbox": base + "/api/sub/" + u.SubToken + "/singbox",
-			"uri":     base + "/api/sub/" + u.SubToken + "/uri",
+			"auto":    base + "/api/sub/" + view.SubToken,
+			"clash":   base + "/api/sub/" + view.SubToken + "/clash",
+			"singbox": base + "/api/sub/" + view.SubToken + "/singbox",
+			"uri":     base + "/api/sub/" + view.SubToken + "/uri",
 		}
-		if u.TrafficLimit != nil {
-			u.TrafficCap = *u.TrafficLimit
-		} else if u.PackageID != nil {
-			if p, err := db.GetPackage(s.DB, *u.PackageID); err == nil {
-				u.TrafficCap = p.TrafficBytes
+		if view.TrafficLimit != nil {
+			view.TrafficCap = *view.TrafficLimit
+		} else if view.PackageID != nil {
+			if p, err := db.GetPackage(s.DB, *view.PackageID); err == nil {
+				view.TrafficCap = p.TrafficBytes
 			}
 		}
 	}
