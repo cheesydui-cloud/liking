@@ -733,13 +733,15 @@ export default function Settings({ accountOnly = false }) {
                     <td><Badge tone={c.source === 'acme-cf' ? 'ok' : 'muted'}>{sourceLabel(c.source)}</Badge></td>
                     <td className="text-ink-mut">{c.domains || '—'}</td>
                     <td><Badge tone={expiryTone(c.expires_at)}>{expiryText(c.expires_at)}</Badge></td>
-                    <td className="text-right whitespace-nowrap">
+                    <td className="whitespace-nowrap">
+                      <div className="flex gap-1.5 justify-end items-center">
                       {c.source === 'acme-cf' && (
                         <button type="button" className="row-act" disabled={renewing === c.id} onClick={() => renew(c.id)}>
                           {renewing === c.id ? '续期中…' : '续期'}
                         </button>
                       )}
                       <button type="button" className="row-act is-danger" onClick={() => del(c.id)}>删除</button>
+                      </div>
                     </td>
                   </tr>
                 ))}

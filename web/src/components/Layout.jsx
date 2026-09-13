@@ -128,7 +128,7 @@ function SideLink({ to, end, icon, children }) {
   return (
     <NavLink to={to} end={end}
       className={({ isActive }) => `sidebar-link${isActive ? ' is-active' : ''}`}>
-      <Icon name={icon} size={16} />
+      <Icon name={icon} size={18} />
       <span>{children}</span>
     </NavLink>
   )
@@ -229,7 +229,7 @@ export function Layout({ children }) {
         <nav className="flex-1 px-2.5 overflow-y-auto" onClick={() => setOpen(false)}>
           {groups.map((g, i) => (
             <div key={i} className={i ? 'mt-3.5' : ''}>
-              {g.label && <div className="px-2.5 mb-1 text-[11px] font-medium text-ink-mut">{g.label}</div>}
+              {g.label && <div className="px-2.5 mb-1 text-[12px] font-semibold text-ink-mut">{g.label}</div>}
               <div className="space-y-0.5">
                 {g.items.map(n => (
                   <SideLink key={n.to} to={n.to} end={n.end} icon={n.icon}>{n.label}</SideLink>

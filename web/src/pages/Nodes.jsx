@@ -616,10 +616,10 @@ export default function Nodes() {
                           : s.needs_upgrade ? <Badge tone="warn">可升级</Badge> : null}
                         {s.over_quota ? <Badge tone="danger">流量已满</Badge> : null}
                       </div>
-                      <div className="text-[12px] font-mono text-ink-mut mt-1 truncate">
-                        {s.public_host || '未填公开地址'}
-                        <button type="button" className="row-act ml-2 font-sans" onClick={() => saveHost(s)}>改</button>
-                        <button type="button" className="row-act ml-2 font-sans" onClick={() => openCF(s)}>从 CF 同步</button>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span className="text-[12px] font-mono text-ink-mut truncate">{s.public_host || '未填公开地址'}</span>
+                        <button type="button" className="row-act" onClick={() => saveHost(s)}>改</button>
+                        <button type="button" className="row-act" onClick={() => openCF(s)}>从 CF 同步</button>
                       </div>
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         {cores.length ? cores.map(c => <span key={c} className="chip">{c}</span>) : <span className="chip">未上报内核</span>}
@@ -662,8 +662,8 @@ export default function Nodes() {
                 <div className="machine-nodes">
                 <div className="px-3.5 py-2 flex items-center justify-between">
                   <span className="text-[12px] font-medium text-ink-mut">节点 {lines.length}</span>
-                  <button type="button" className="row-act" onClick={() => openCreateLine(s.id)}>
-                    <span className="inline-flex items-center gap-1"><Icon name="plus" size={12} /> 增加节点</span>
+                  <button type="button" className="btn-ghost h-8" onClick={() => openCreateLine(s.id)}>
+                    <Icon name="plus" size={14} /> 增加节点
                   </button>
                 </div>
                 {lines.length === 0 ? (

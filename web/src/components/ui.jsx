@@ -340,7 +340,7 @@ export function MoreMenu({ label = '更多', items = [], disabled }) {
       <button
         ref={btnRef}
         type="button"
-        className="row-act inline-flex items-center gap-1"
+        className="row-act"
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}

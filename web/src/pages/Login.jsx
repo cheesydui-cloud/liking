@@ -73,7 +73,7 @@ export default function Login() {
             <span className="block text-[12px] font-medium text-ink-soft mb-1.5">密码</span>
             <div className="relative">
               <input className="input-field h-10 pr-11" name="password" type={show ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} required autoComplete="current-password" />
-              <button type="button" className="absolute right-1.5 top-1/2 -translate-y-1/2 btn-ghost h-8 w-8 px-0 border-0" onClick={() => setShow(v => !v)} aria-label={show ? '隐藏密码' : '显示密码'}>
+              <button type="button" className="absolute right-1.5 top-1/2 -translate-y-1/2 btn-ghost h-8 w-8 px-0" onClick={() => setShow(v => !v)} aria-label={show ? '隐藏密码' : '显示密码'}>
                 <Icon name={show ? 'eye-off' : 'eye'} size={16} />
               </button>
             </div>

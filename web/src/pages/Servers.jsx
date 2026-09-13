@@ -102,9 +102,9 @@ export default function Servers() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-[15px] font-semibold truncate">{s.name}</div>
-                    <div className="text-[12px] font-mono text-ink-mut mt-1 truncate">
-                      {s.public_host || '未填公开地址'}
-                      <button type="button" className="row-act ml-2 font-sans" onClick={() => saveHost(s)}>改</button>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                      <span className="text-[12px] font-mono text-ink-mut truncate">{s.public_host || '未填公开地址'}</span>
+                      <button type="button" className="row-act" onClick={() => saveHost(s)}>改</button>
                     </div>
                   </div>
                   <div className="shrink-0 flex items-center gap-2">

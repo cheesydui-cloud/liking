@@ -282,7 +282,7 @@ export default function Users() {
                     <td className="text-[13px]">{u.role === 'admin' ? '—' : (u.package_name || <span className="text-ink-mut">未绑定</span>)}</td>
                     <td className="min-w-[10rem]">
                       {u.role === 'admin' ? '—' : (
-                        <button type="button" className="w-full text-left" onClick={() => openTraffic(u)}>
+                        <button type="button" className="hit-surface w-full" onClick={() => openTraffic(u)}>
                           <Meter value={billedBytes(u)} max={u.traffic_cap || trafficCap(u, pkgs)} />
                           {u.direction === 'twoway' ? <div className="text-[11px] text-ink-mut mt-0.5">双向计费</div> : null}
                         </button>
