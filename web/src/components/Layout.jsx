@@ -180,7 +180,7 @@ export function Layout({ children }) {
     document.documentElement.classList.toggle('dark', next)
     localStorage.setItem('lk-theme', next ? 'dark' : 'light')
     const meta = document.querySelector('meta[name="theme-color"]')
-    if (meta) meta.setAttribute('content', next ? '#0B1220' : '#D7E3F0')
+    if (meta) meta.setAttribute('content', next ? '#161618' : '#F3F2EE')
   }
 
   const groups = isAdmin ? [
@@ -226,7 +226,7 @@ export function Layout({ children }) {
         <div className="px-4 pt-4 pb-3 flex items-end gap-2.5">
           <BrandMark size={28} />
           <div className="min-w-0">
-            <div className="text-[16px] font-bold truncate leading-tight tracking-tight">{panelName || 'liking'}</div>
+            <div className="text-[15px] font-semibold truncate leading-tight">{panelName || 'liking'}</div>
             <div className="text-[11px] text-ink-mut mt-0.5">{isAdmin ? '管理' : '用户'}{version ? ` v${version}` : ''}</div>
           </div>
         </div>

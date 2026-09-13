@@ -32,7 +32,7 @@ export function SubPanel({ token, onCopied }) {
     const dark = document.documentElement.classList.contains('dark')
     QRCode.toDataURL(auto, {
       width: 280, margin: 1,
-      color: dark ? { dark: '#E8EEF5', light: '#0B1220' } : { dark: '#0F172A', light: '#F4F7FA' },
+      color: dark ? { dark: '#ECECE8', light: '#161618' } : { dark: '#1A1916', light: '#F3F2EE' },
     }).then(setQr).catch(() => setQr(''))
   }, [token, auto])
 

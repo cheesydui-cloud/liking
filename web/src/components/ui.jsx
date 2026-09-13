@@ -288,7 +288,7 @@ export function Modal({ open, title, onClose, children, footer, wide, size }) {
         style={{ overscrollBehavior: 'contain' }}
       >
         <div className="flex items-start justify-between gap-3 mb-4">
-          <h2 id={titleId} className="text-[18px] font-bold leading-tight tracking-tight">{title}</h2>
+          <h2 id={titleId} className="text-[16px] font-semibold leading-tight">{title}</h2>
           <button type="button" className="btn-ghost h-8 w-8 px-0" onClick={onClose} aria-label="关闭"><Icon name="close" size={15} /></button>
         </div>
         <div>{children}</div>
