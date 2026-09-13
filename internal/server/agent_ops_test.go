@@ -35,7 +35,7 @@ func TestDashboardAlertsOldAgent(t *testing.T) {
 	if len(items) != 3 || len(strs) != 3 {
 		t.Fatalf("items %+v strs %v", items, strs)
 	}
-	if items[0].Kind != "warn" || items[0].To != "/nodes" || !strings.Contains(items[0].Text, "太旧") {
+	if items[0].Kind != "warn" || items[0].To != "/servers" || !strings.Contains(items[0].Text, "太旧") {
 		t.Fatalf("reinstall %+v", items[0])
 	}
 	if items[1].Kind != "warn" || !strings.Contains(items[1].Text, "可升级") {
@@ -171,7 +171,7 @@ func TestOldAgentUpgradeFailsFast(t *testing.T) {
 	decodeRes(t, res, &dash)
 	found := false
 	for _, a := range dash.AlertItems {
-		if strings.Contains(a.Text, "太旧") && a.To == "/nodes" && a.Kind == "warn" {
+		if strings.Contains(a.Text, "太旧") && a.To == "/servers" && a.Kind == "warn" {
 			found = true
 		}
 	}

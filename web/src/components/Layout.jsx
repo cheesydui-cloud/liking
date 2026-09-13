@@ -136,7 +136,8 @@ function SideLink({ to, end, icon, children }) {
 
 const PAGE_TITLES = {
   '/': '总览',
-  '/nodes': '服务器',
+  '/nodes': '节点',
+  '/servers': '服务器',
   '/users': '用户',
   '/packages': '套餐',
   '/forwards': '转发',
@@ -187,7 +188,8 @@ export function Layout({ children }) {
     {
       label: '服务器',
       items: [
-        { to: '/nodes', icon: 'servers', label: '服务器管理' },
+        { to: '/nodes', icon: 'plugs', label: '节点' },
+        { to: '/servers', icon: 'servers', label: '服务器' },
       ],
     },
     {

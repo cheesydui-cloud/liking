@@ -66,6 +66,19 @@ export function StatusWord({ online, fault }) {
   return <span className={`status-word ${online ? 'is-live' : 'is-off'}`}>{online ? '在线' : '离线'}</span>
 }
 
+export function LineStatus({ status }) {
+  if (!status) return null
+  const cls = {
+    '正常': 'is-live',
+    '在线': 'is-live',
+    '故障': 'is-fault',
+    '未安装': 'is-warn',
+    '停用': 'is-mute',
+    '离线': 'is-off',
+  }[status] || 'is-off'
+  return <span className={`status-word ${cls}`}>{status}</span>
+}
+
 export function FilterTabs({ value, onChange, items }) {
   return (
     <div className="filter-tabs" role="tablist">

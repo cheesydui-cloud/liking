@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
-import { Badge, DayBars, Empty, Icon, PageHead, SkeletonRows, StatusWord, fmtAgo, fmtBps, fmtBytes, machineTone } from '../components/ui'
+import { serverStatus } from '../lib/status'
+import { Badge, DayBars, Empty, Icon, LineStatus, PageHead, SkeletonRows, fmtAgo, fmtBps, fmtBytes, machineTone } from '../components/ui'
 
 function alertItemsOf(d) {
   if (Array.isArray(d.alert_items) && d.alert_items.length) return d.alert_items
-  return (d.alerts || []).map(text => ({ text, to: '/nodes', kind: 'warn' }))
+  return (d.alerts || []).map(text => ({ text, to: '/servers', kind: 'warn' }))
 }
 
 export default function Dashboard() {
@@ -22,7 +23,7 @@ export default function Dashboard() {
 
   const alerts = alertItemsOf(d)
   const steps = [
-    { n: 1, t: '添加服务器', to: '/nodes', done: (d.servers || 0) > 0 },
+    { n: 1, t: '添加服务器', to: '/servers', done: (d.servers || 0) > 0 },
     { n: 2, t: '安装 Agent', hint: '复制命令，在机器上以 root 执行', done: (d.online || 0) > 0 },
     { n: 3, t: '等 Agent 在线', done: (d.online || 0) > 0 },
     { n: 4, t: '增加节点', to: '/nodes', done: (d.inbounds || 0) > 0 },
@@ -55,7 +56,7 @@ export default function Dashboard() {
           {alerts.map((a, i) => (
             <Link
               key={i}
-              to={a.to || '/nodes'}
+              to={a.to || '/servers'}
               className={`alert-row ${a.kind === 'danger' ? 'is-fault' : 'is-warn'}`}
             >
               {a.text}
@@ -67,10 +68,10 @@ export default function Dashboard() {
       <div className="card overflow-hidden">
         <div className="panel-head">
           <div>服务器</div>
-          <Link to="/nodes" className="btn-ghost h-8">管理</Link>
+          <Link to="/servers" className="btn-ghost h-8">管理</Link>
         </div>
         {(d.server_list || []).length === 0 ? (
-          <Empty title="还没有服务器" hint="添加一台服务器，复制一键安装命令，在机器上以 root 执行。" action={<Link to="/nodes" className="btn-primary">去添加</Link>} />
+          <Empty title="还没有服务器" hint="添加一台服务器，复制一键安装命令，在机器上以 root 执行。" action={<Link to="/servers" className="btn-primary">去添加</Link>} />
         ) : (
           <div className="table-wrap">
             <table className="data">
@@ -81,7 +82,7 @@ export default function Dashboard() {
                     <td className="font-medium">{s.name}</td>
                     <td className="copy-text">{s.public_host || '—'}</td>
                     <td>
-                      <StatusWord online={s.online} fault={!!s.last_error} />
+                      <LineStatus status={serverStatus(s)} />
                       {s.last_error ? <Badge tone="danger" className="ml-2">下发失败</Badge> : null}
                       {s.needs_reinstall ? <Badge tone="warn" className="ml-2">需重装</Badge>
                         : s.needs_upgrade ? <Badge tone="warn" className="ml-2">可升级</Badge> : null}

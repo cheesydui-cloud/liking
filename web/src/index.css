@@ -388,6 +388,11 @@ table.data tbody tr.is-off td:first-child { border-left-color: #c8c8c8; }
 .status-word.is-live { color: var(--color-ok); }
 .status-word.is-fault { color: var(--color-danger); }
 .status-word.is-off { color: var(--color-ink-mut); }
+.status-word.is-warn { color: var(--color-warn); }
+.status-word.is-mute { color: var(--color-ink-mut); }
+
+.path-line { font-size: 13px; font-weight: 500; line-height: 1.55; }
+.path-arrow { color: var(--color-ink-mut); font-weight: 400; }
 
 .dot {
   display: inline-block;

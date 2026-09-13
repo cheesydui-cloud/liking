@@ -307,15 +307,15 @@ func dashboardAlerts(d *sql.DB, servers []*db.Server, users []*db.User) ([]dashA
 	}
 	for _, x := range servers {
 		if x.LastError != "" {
-			push(x.Name+" 下发失败", "/nodes", "danger")
+			push(x.Name+" 下发失败", "/servers", "danger")
 		}
 		if x.NeedsReinstall {
-			push(x.Name+" Agent 太旧，请用安装命令重装", "/nodes", "warn")
+			push(x.Name+" Agent 太旧，请用安装命令重装", "/servers", "warn")
 		} else if x.NeedsUpgrade {
-			push(x.Name+" Agent 可升级到 "+version.Version, "/nodes", "warn")
+			push(x.Name+" Agent 可升级到 "+version.Version, "/servers", "warn")
 		}
 		if x.OverQuota {
-			push(x.Name+" 已达流量上限，节点已停用", "/nodes", "danger")
+			push(x.Name+" 已达流量上限，节点已停用", "/servers", "danger")
 		}
 	}
 	for _, u := range users {

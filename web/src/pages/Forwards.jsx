@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, SearchInput } from '../components/ui'
+import { hopStatus, nodeStatus } from '../lib/status'
+import { Badge, Empty, Field, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput } from '../components/ui'
 
 const LAND_PROFILES = ['vless-reality', 'vless-reality-vision', 'vless-xhttp-tls', 'trojan-tls', 'ss2022', 'socks5']
 const MAX_HOPS = 5
@@ -186,6 +187,32 @@ function pathLine(inb, byID) {
   return [entryText(inb), ...hops.map(h => hopText(h, byID))].join(' → ')
 }
 
+function PathHops({ inb, byID, serversByID }) {
+  if (forwardKind(inb) === 'port') {
+    return <div className="path-line">{pathLine(inb, byID)}</div>
+  }
+  const hops = pathHops(inb)
+  const entrySrv = serversByID.get(Number(inb.server_id))
+  const entrySt = nodeStatus(inb, entrySrv, { skipLanding: true })
+  return (
+    <div className="path-line">
+      <span>{entryText(inb)}</span>
+      {' '}
+      <LineStatus status={entrySt} />
+      {hops.map((h, i) => {
+        const st = hopStatus(h, byID, serversByID)
+        return (
+          <span key={i}>
+            <span className="path-arrow"> → </span>
+            <span>{hopText(h, byID)}</span>
+            {st ? <>{' '}<LineStatus status={st} /></> : null}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
 function pathSub(inb, byID) {
   const k = forwardKind(inb)
   if (k === 'port') {
@@ -259,13 +286,24 @@ export default function Forwards() {
       setProfiles(d.profiles || [])
     } catch (e) { toast(e.message, 'error') }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    const t = setInterval(() => {
+      api.get('/servers').then(a => setServers(a.servers || [])).catch(() => {})
+    }, 5000)
+    return () => clearInterval(t)
+  }, [])
 
   const byID = useMemo(() => {
     const m = new Map()
     for (const x of list) m.set(Number(x.id), x)
     return m
   }, [list])
+  const serversByID = useMemo(() => {
+    const m = new Map()
+    for (const s of servers) m.set(Number(s.id), s)
+    return m
+  }, [servers])
 
   const forwards = useMemo(() => list.filter(x => forwardKind(x)), [list])
   const landings = useMemo(
@@ -494,7 +532,7 @@ export default function Forwards() {
                     return (
                       <tr key={inb.id} className={!inb.enabled ? 'opacity-50' : ''}>
                         <td className="min-w-0">
-                          <div className="font-medium truncate">{pathLine(inb, byID)}</div>
+                          <PathHops inb={inb} byID={byID} serversByID={serversByID} />
                           <div className="text-[11px] text-ink-mut mt-0.5">{pathSub(inb, byID)}</div>
                         </td>
                         <td>
@@ -532,7 +570,7 @@ export default function Forwards() {
                   <div key={inb.id} className={`px-3.5 py-3 ${!inb.enabled ? 'opacity-50' : ''}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="font-medium truncate">{pathLine(inb, byID)}</div>
+                        <PathHops inb={inb} byID={byID} serversByID={serversByID} />
                         <div className="text-[12px] text-ink-mut mt-0.5">
                           {kindLabel(k)}{n > 1 ? ` · ${n} 跳` : ''} · {pathSub(inb, byID)}
                           {!inb.enabled ? ' · 停用' : ''}
@@ -723,7 +761,7 @@ export default function Forwards() {
             </Field>
           )}
           {needsLanding && landings.length === 0 ? (
-            <div className="notice">还没有可落地的节点。先到「服务器管理」增加 VLESS / Trojan / SS2022 / SOCKS5 直出。</div>
+            <div className="notice">还没有可落地的节点。先到「节点」增加 VLESS / Trojan / SS2022 / SOCKS5 直出。</div>
           ) : null}
           {f.kind === 'chain' && selectedServer && !selectedServer.public_host ? (
             <div className="notice">入口机还没填公开地址。落地能建，用户连入口时需要地址。</div>

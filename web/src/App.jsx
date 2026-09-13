@@ -3,6 +3,7 @@ import { UserProvider, useUser, Layout } from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Nodes from './pages/Nodes'
+import Servers from './pages/Servers'
 import Users from './pages/Users'
 import Packages from './pages/Packages'
 import Forwards from './pages/Forwards'
@@ -55,7 +56,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<Root />} />
           <Route path="/nodes" element={<AdminRoute><Nodes /></AdminRoute>} />
-          <Route path="/servers" element={<Navigate to="/nodes" replace />} />
+          <Route path="/servers" element={<AdminRoute><Servers /></AdminRoute>} />
           <Route path="/inbounds" element={<Navigate to="/nodes" replace />} />
           <Route path="/users" element={<AdminRoute><Users /></AdminRoute>} />
           <Route path="/packages" element={<AdminRoute><Packages /></AdminRoute>} />

@@ -783,7 +783,7 @@ export default function Settings({ accountOnly = false }) {
       <form onSubmit={saveCF} className="card p-5 max-w-3xl space-y-4">
         <div className="text-[15px] font-medium">Cloudflare / Let&apos;s Encrypt</div>
         <p className="text-[12.5px] text-ink-mut leading-relaxed">
-          Token 权限：Zone · Zone · Read，Zone · DNS · Edit。同一 Token 也用来在服务器管理里拉取已托管域名。域名不必指向本面板，也不用开放 80 端口。
+          Token 权限：Zone · Zone · Read，Zone · DNS · Edit。同一 Token 也用来在服务器页拉取已托管域名。域名不必指向本面板，也不用开放 80 端口。
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="ACME 邮箱">

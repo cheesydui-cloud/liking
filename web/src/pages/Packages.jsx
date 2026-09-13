@@ -348,7 +348,7 @@ export default function Packages() {
               </div>
             )}
             {pickableIns.length === 0 ? (
-              <div className="text-[13px] text-ink-mut py-3">还没有节点。先到「服务器管理」增加节点。</div>
+              <div className="text-[13px] text-ink-mut py-3">还没有节点。先到「节点」增加节点。</div>
             ) : groups.length === 0 ? (
               <div className="text-[13px] text-ink-mut py-3">没有匹配的节点。</div>
             ) : (
