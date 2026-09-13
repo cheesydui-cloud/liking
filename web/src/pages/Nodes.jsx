@@ -117,30 +117,39 @@ function gbFromLimit(n) {
   return String(Math.round(gb * 1000) / 1000)
 }
 
-function ServerTraffic({ s, onSetLimit }) {
-  const used = (s.used_up || 0) + (s.used_down || 0)
-  const cap = Number(s.traffic_limit) || 0
-  const left = cap > 0 ? Math.max(0, cap - used) : null
+function protoShort(profile) {
+  switch (profile) {
+    case 'vless-reality-vision': return 'Vision'
+    case 'vless-reality': return 'REALITY'
+    case 'vless-xhttp-tls': return 'XHTTP'
+    case 'trojan-tls': return 'Trojan'
+    case 'ss2022': return 'SS2022'
+    case 'anytls': return 'AnyTLS'
+    case 'mieru': return 'Mieru'
+    default: return profile || ''
+  }
+}
+
+function Metric({ label, value }) {
   return (
-    <div className="mt-3">
-      <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 tabular-nums font-mono">
-        <span className="text-[13px] font-medium">↑ {s.online ? fmtBps(s.net_up_bps) : '—'}</span>
-        <span className="text-[13px] font-medium">↓ {s.online ? fmtBps(s.net_down_bps) : '—'}</span>
-        <span className="text-[12px] text-ink-mut font-sans">
-          {s.online ? '实时' : '离线'}
-        </span>
-      </div>
-      <div className="mt-2">
-        <Meter value={used} max={cap} />
-        <div className="flex items-center justify-between gap-2 mt-1">
-          <span className="text-[11.5px] text-ink-mut">
-            {cap > 0 ? `剩余 ${fmtBytes(left)}` : '未设上限'}
-          </span>
-          <button type="button" className="row-act" onClick={() => onSetLimit(s)}>上限</button>
-        </div>
-      </div>
+    <div className="metric">
+      <span className="metric-k">{label}</span>
+      <span className="metric-v">{value}</span>
     </div>
   )
+}
+
+function machineMeta(s) {
+  const cores = String(s.cores || '').split(',').map(x => x.trim()).filter(Boolean)
+  const bits = [
+    s.agent_ver ? `Agent ${s.agent_ver}` : null,
+    `心跳 ${fmtAgo(s.last_seen)}`,
+    [s.os, s.arch].filter(Boolean).join('/') || null,
+    s.disk_total ? `磁盘 ${fmtBytes(s.disk_free)}` : null,
+    s.conns != null && s.conns !== '' ? `连接 ${s.conns}` : null,
+    cores.length ? cores.join(', ') : null,
+  ].filter(Boolean)
+  return bits.join(' / ')
 }
 
 function formFromInbound(inb) {
@@ -567,7 +576,7 @@ export default function Nodes() {
     <div>
       <PageHead
         title="服务器管理"
-        desc="一台机器一个 Agent，下面挂节点。名称可留空；端口不填则随机，并错开已用端口。"
+        desc="一台机器一个 Agent，下面挂节点。"
         actions={
           <button type="button" className="btn-primary" onClick={openCreateNode}>
             <Icon name="plus" size={15} /> 添加服务器
@@ -575,18 +584,16 @@ export default function Nodes() {
         }
       />
       {servers.length > 0 && (
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
           <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索服务器 / 节点 / 地址" />
           <FilterTabs
             value={statusFilter}
             onChange={setStatusFilter}
             items={[['','全部'],['online','在线'],['offline','离线'],['upgrade','可升级']]}
           />
-        </div>
-      )}
-      {servers.length > 0 && (
-        <div className="text-[12px] text-ink-mut mb-3 font-mono">
-          {online} 在线 / {servers.length - online} 离线 / {list.length} 个节点
+          <div className="text-[12px] text-ink-mut font-mono sm:ml-auto whitespace-nowrap">
+            {online} 在线 / {servers.length - online} 离线 / {list.length} 节点
+          </div>
         </div>
       )}
       {servers.length === 0 ? (
@@ -604,91 +611,93 @@ export default function Nodes() {
           ) : null}
           {visibleServers.map(s => {
             const lines = linesOf(s.id)
-            const cores = String(s.cores || '').split(',').map(x => x.trim()).filter(Boolean)
+            const used = (s.used_up || 0) + (s.used_down || 0)
+            const load = s.online && s.load_milli ? (Number(s.load_milli) / 1000).toFixed(2) : '—'
+            const mem = s.mem_avail ? fmtBytes(s.mem_avail) : '—'
             return (
               <div key={s.id} className={`machine ${machineTone(s)}`}>
                 <div className="machine-head">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline gap-3 flex-wrap">
-                        <span className="text-[14px] font-semibold truncate">{s.name}</span>
-                        <StatusWord online={s.online} fault={!!s.last_error} />
-                        {s.needs_reinstall ? <Badge tone="warn">需重装</Badge>
-                          : s.needs_upgrade ? <Badge tone="warn">可升级</Badge> : null}
-                        {s.over_quota ? <Badge tone="danger">流量已满</Badge> : null}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                        <span className="text-[12px] font-mono text-ink-mut truncate">{s.public_host || '未填公开地址'}</span>
-                        <button type="button" className="row-act" onClick={() => saveHost(s)}>改</button>
-                        <button type="button" className="row-act" onClick={() => openCF(s)}>从 CF 同步</button>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {cores.length ? cores.map(c => <span key={c} className="chip">{c}</span>) : <span className="chip">未上报内核</span>}
-                      </div>
-                      <div className="text-[12px] text-ink-mut mt-1.5 font-mono">
-                        Agent {s.agent_ver || '—'} / 心跳 {fmtAgo(s.last_seen)}
-                        {s.os ? `  ${[s.os, s.arch].filter(Boolean).join('/')}` : ''}
-                        {s.cores_running ? ` / 内核 ${s.cores_running}` : ''}
-                      </div>
-                      {s.online && (s.disk_total || s.mem_total || s.conns || s.load_milli) ? (
-                        <div className="text-[12px] text-ink-mut mt-1 font-mono">
-                          {s.disk_total ? `磁盘剩余 ${fmtBytes(s.disk_free)}` : ''}
-                          {s.mem_total ? `${s.disk_total ? ' / ' : ''}内存 ${fmtBytes(s.mem_avail)}` : ''}
-                          {s.load_milli ? ` / 负载 ${(Number(s.load_milli) / 1000).toFixed(2)}` : ''}
-                          {s.conns != null && s.conns !== '' ? ` / 连接 ${s.conns}` : ''}
-                        </div>
-                      ) : null}
-                      {s.last_error ? (
-                        <div className="text-[12px] mt-1" style={{ color: 'var(--color-danger)' }}>{s.last_error}</div>
-                      ) : null}
-                      <ServerTraffic s={s} onSetLimit={saveLimit} />
+                  <div className="min-w-0 flex-1">
+                    <div className="machine-title">
+                      <span className="machine-name truncate">{s.name}</span>
+                      <StatusWord online={s.online} fault={!!s.last_error} />
+                      {s.needs_reinstall ? <Badge tone="warn">需重装</Badge>
+                        : s.needs_upgrade ? <Badge tone="warn">可升级</Badge> : null}
+                      {s.over_quota ? <Badge tone="danger">流量已满</Badge> : null}
                     </div>
-                    <div className="flex flex-wrap gap-2.5 shrink-0 items-center">
-                      <button type="button" className="row-act" onClick={() => sync(s.id)}>同步</button>
-                      <button type="button" className="row-act" onClick={() => showInstall(s.id)}>安装命令</button>
-                      <MoreMenu items={[
-                        {
-                          label: '一键升级',
-                          hint: s.needs_reinstall ? '版本太旧，将打开安装命令' : (s.online ? '升到面板版本并重启' : '需在线'),
-                          disabled: !s.online || busy,
-                          onSelect: () => upgradeAgent(s),
-                        },
-                        { label: '轮换令牌', onSelect: () => rotateToken(s) },
-                        { sep: true },
-                        { label: '一键卸载', danger: true, disabled: !s.online || busy, hint: s.needs_reinstall ? '版本太旧，无法远程卸载' : '同机不删面板', onSelect: () => uninstallAgent(s) },
-                        { label: '删除服务器', danger: true, onSelect: () => delNode(s.id) },
-                      ]} />
+                    <div className="machine-host">
+                      <span className="machine-host-addr">{s.public_host || '未填公开地址'}</span>
+                      <button type="button" className="icon-btn" onClick={() => saveHost(s)} aria-label="改公开地址" title="改公开地址">
+                        <Icon name="pencil" size={13} />
+                      </button>
                     </div>
+                  </div>
+                  <div className="machine-toolbar">
+                    <button type="button" className="btn-ghost h-8" onClick={() => openCreateLine(s.id)}>
+                      <Icon name="plus" size={14} /> 增加节点
+                    </button>
+                    <MoreMenu iconOnly items={[
+                      { label: '同步', hint: '把配置下发到这台机器', onSelect: () => sync(s.id) },
+                      { label: '安装命令', onSelect: () => showInstall(s.id) },
+                      { label: '从 CF 同步', onSelect: () => openCF(s) },
+                      { label: '改公开地址', onSelect: () => saveHost(s) },
+                      { label: '流量上限', onSelect: () => saveLimit(s) },
+                      { sep: true },
+                      {
+                        label: '一键升级',
+                        hint: s.needs_reinstall ? '版本太旧，将打开安装命令' : (s.online ? '升到面板版本并重启' : '需在线'),
+                        disabled: !s.online || busy,
+                        onSelect: () => upgradeAgent(s),
+                      },
+                      { label: '轮换令牌', onSelect: () => rotateToken(s) },
+                      { sep: true },
+                      { label: '一键卸载', danger: true, disabled: !s.online || busy, hint: s.needs_reinstall ? '版本太旧，无法远程卸载' : '同机不删面板', onSelect: () => uninstallAgent(s) },
+                      { label: '删除服务器', danger: true, onSelect: () => delNode(s.id) },
+                    ]} />
+                  </div>
                 </div>
+                <div className="machine-metrics">
+                  <Metric label="上行" value={s.online ? fmtBps(s.net_up_bps) : '—'} />
+                  <Metric label="下行" value={s.online ? fmtBps(s.net_down_bps) : '—'} />
+                  <Metric label="负载" value={load} />
+                  <Metric label="内存" value={mem} />
+                </div>
+                <div className="machine-meter">
+                  <Meter value={used} max={Number(s.traffic_limit) || 0} />
+                </div>
+                {s.last_error ? <div className="machine-fault">{s.last_error}</div> : null}
+                <div className="machine-meta">{machineMeta(s)}</div>
                 <div className="machine-nodes">
-                <div className="px-3.5 py-2 flex items-center justify-between">
-                  <span className="text-[12px] font-medium text-ink-mut">节点 {lines.length}</span>
-                  <button type="button" className="btn-ghost h-8" onClick={() => openCreateLine(s.id)}>
-                    <Icon name="plus" size={14} /> 增加节点
-                  </button>
-                </div>
                 {lines.length === 0 ? (
-                  <div className="px-4 pb-4 text-[13px] text-ink-mut">还没有节点。选协议即可，名称和端口都可以留空。</div>
+                  <div className="machine-nodes-empty">还没有节点。选协议即可，名称和端口都可以留空。</div>
                 ) : (
                   <>
                   <div className="hidden md:block table-wrap">
                     <table className="data">
-                      <thead><tr><th>名称</th><th>协议</th><th>端口</th><th>类型</th><th>流量</th><th>内核</th><th></th></tr></thead>
+                      <thead><tr><th>名称</th><th>协议</th><th>端口</th><th>流量</th><th></th></tr></thead>
                       <tbody>
                         {lines.map(inb => {
                           const dead = !serverHasCore(s, inb.core)
                           return (
                             <tr key={inb.id} className={!inb.enabled ? 'opacity-50' : ''}>
-                              <td className="font-medium">{inb.name}</td>
-                              <td><Badge tone="gold">{inb.profile}</Badge></td>
-                              <td className="tabular-nums">{inb.port}</td>
-                              <td>{inb.line_kind === 'chain' ? '链式' : '直出'}</td>
-                              <td className="tabular-nums text-[12px] whitespace-nowrap">{fmtBytes((inb.used_up || 0) + (inb.used_down || 0))}</td>
-                              <td className="text-ink-mut">{inb.core}{dead ? ' / 未安装' : ''}{!inb.enabled ? ' / 停用' : ''}</td>
+                              <td className="font-medium">
+                                {inb.name}
+                                {inb.line_kind === 'chain' ? <span className="text-ink-mut font-normal"> 链式</span> : null}
+                                {dead ? <span className="text-ink-mut font-normal"> 未安装</span> : null}
+                                {!inb.enabled ? <span className="text-ink-mut font-normal"> 停用</span> : null}
+                              </td>
+                              <td className="text-ink-mut" title={inb.profile}>{protoShort(inb.profile)}</td>
+                              <td className="tabular-nums font-mono text-[12px]">{inb.port}</td>
+                              <td className="tabular-nums font-mono text-[12px] whitespace-nowrap">{fmtBytes((inb.used_up || 0) + (inb.used_down || 0))}</td>
                               <td className="whitespace-nowrap">
-                                <div className="flex gap-2.5 justify-end items-center">
-                                  <button type="button" className="row-act" onClick={() => copyShare(inb)}>复制</button>
-                                  <button type="button" className="row-act" onClick={() => startEdit(inb)}>编辑</button>
-                                  <MoreMenu items={[
+                                <div className="icon-row">
+                                  <button type="button" className="icon-btn" onClick={() => copyShare(inb)} aria-label="复制节点链接" title="复制">
+                                    <Icon name="copy" size={14} />
+                                  </button>
+                                  <button type="button" className="icon-btn" onClick={() => startEdit(inb)} aria-label="编辑节点" title="编辑">
+                                    <Icon name="pencil" size={14} />
+                                  </button>
+                                  <MoreMenu iconOnly items={[
                                     { label: '参数', onSelect: () => setParamInb(inb) },
                                     { label: inb.enabled ? '停用' : '启用', onSelect: () => toggle(inb) },
                                     { sep: true },
@@ -706,19 +715,22 @@ export default function Nodes() {
                     {lines.map(inb => {
                       const dead = !serverHasCore(s, inb.core)
                       return (
-                        <div key={inb.id} className={`px-4 py-3 ${!inb.enabled ? 'opacity-50' : ''}`}>
+                        <div key={inb.id} className={`px-3.5 py-3 ${!inb.enabled ? 'opacity-50' : ''}`}>
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <div className="font-medium truncate">{inb.name}</div>
                               <div className="text-[12px] text-ink-mut mt-0.5">
-                                {inb.profile} / {inb.port} / {inb.line_kind === 'chain' ? '链式' : '直出'}
+                                {protoShort(inb.profile)} / {inb.port}
+                                {inb.line_kind === 'chain' ? ' / 链式' : ''}
                                 {dead ? ' / 未安装' : ''}
                               </div>
-                              <div className="text-[12px] text-ink-mut tabular-nums mt-0.5">{fmtBytes((inb.used_up || 0) + (inb.used_down || 0))}</div>
+                              <div className="text-[12px] text-ink-mut tabular-nums font-mono mt-0.5">{fmtBytes((inb.used_up || 0) + (inb.used_down || 0))}</div>
                             </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <button type="button" className="row-act" onClick={() => copyShare(inb)}>复制</button>
-                              <MoreMenu items={[
+                            <div className="icon-row shrink-0">
+                              <button type="button" className="icon-btn" onClick={() => copyShare(inb)} aria-label="复制节点链接" title="复制">
+                                <Icon name="copy" size={14} />
+                              </button>
+                              <MoreMenu iconOnly items={[
                                 { label: '编辑', onSelect: () => startEdit(inb) },
                                 { label: '参数', onSelect: () => setParamInb(inb) },
                                 { label: inb.enabled ? '停用' : '启用', onSelect: () => toggle(inb) },

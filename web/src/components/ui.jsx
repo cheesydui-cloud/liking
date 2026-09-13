@@ -38,6 +38,7 @@ export function Icon({ name, size = 18, className = '' }) {
     upload: <><path d="M12 20V9" /><path d="M7 13l5-5 5 5" /><path d="M5 4h14" /></>,
     bars: <><path d="M4 19V10M10 19V5M16 19v-7M22 19H2" /></>,
     more: <><circle cx="12" cy="5" r="1.15" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.15" fill="currentColor" stroke="none" /><circle cx="12" cy="19" r="1.15" fill="currentColor" stroke="none" /></>,
+    pencil: <><path d="M4 20h4L19.2 8.8l-4-4L4 16v4z" /><path d="M13.2 6.8l4 4" /></>,
   }
   return <svg {...common}>{p[name] || p.spark}</svg>
 }
@@ -291,7 +292,7 @@ export function SkeletonRows({ rows = 4 }) {
   )
 }
 
-export function MoreMenu({ label = '更多', items = [], disabled }) {
+export function MoreMenu({ label = '更多', items = [], disabled, iconOnly }) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState({ top: 0, left: 0 })
   const btnRef = useRef(null)
@@ -340,14 +341,14 @@ export function MoreMenu({ label = '更多', items = [], disabled }) {
       <button
         ref={btnRef}
         type="button"
-        className="row-act"
+        className={iconOnly ? 'icon-btn' : 'row-act'}
         disabled={disabled}
+        aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(v => !v)}
       >
-        {label}
-        <Icon name="more" size={14} />
+        {iconOnly ? <Icon name="more" size={16} /> : <>{label}<Icon name="more" size={14} /></>}
       </button>
       {open ? createPortal(
         <div
