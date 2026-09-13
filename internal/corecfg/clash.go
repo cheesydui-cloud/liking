@@ -73,6 +73,11 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 		b.WriteString("    udp: true\n")
 	case ProfilePortForward:
 		return "", "", fmt.Errorf("端口中转没有分享链接")
+	case ProfileSOCKS5:
+		b.WriteString("    type: socks5\n")
+		fmt.Fprintf(&b, "    username: %s\n", yq(clientSocksUser(c)))
+		fmt.Fprintf(&b, "    password: %s\n", yq(c.Password))
+		b.WriteString("    udp: true\n")
 	case ProfileMieru:
 		b.WriteString("    type: mieru\n")
 		user := c.Username

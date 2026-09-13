@@ -88,6 +88,17 @@ func SingboxOutbound(in *db.Inbound, c *db.Client) (map[string]any, error) {
 			"password":    c.Password,
 			"tls":         singClientTLS(st, sni),
 		}, nil
+	case ProfileSOCKS5:
+		ob := map[string]any{
+			"type":        "socks",
+			"tag":         tag,
+			"server":      host,
+			"server_port": in.Port,
+			"version":     "5",
+			"username":    clientSocksUser(c),
+			"password":    c.Password,
+		}
+		return ob, nil
 	case ProfileMieru:
 		return nil, ErrSkip
 	default:

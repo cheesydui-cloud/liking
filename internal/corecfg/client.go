@@ -83,6 +83,13 @@ func newClient(u *db.User, in *db.Inbound) (*db.Client, error) {
 			return nil, err
 		}
 		c.Password = pw
+	case ProfileSOCKS5:
+		c.Username = db.EmailFor(u.ID, in.ID)
+		pw, err := RandomHex(16)
+		if err != nil {
+			return nil, err
+		}
+		c.Password = pw
 	case ProfileTrojanTLS, ProfileAnyTLS:
 		pw, err := RandomHex(16)
 		if err != nil {

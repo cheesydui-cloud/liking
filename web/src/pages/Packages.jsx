@@ -14,6 +14,7 @@ function protoShort(profile) {
     case 'ss2022': return 'SS2022'
     case 'anytls': return 'AnyTLS'
     case 'mieru': return 'Mieru'
+    case 'socks5': return 'SOCKS5'
     case 'port-forward': return '中转'
     default: return profile || ''
   }

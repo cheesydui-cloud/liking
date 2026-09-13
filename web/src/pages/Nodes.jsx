@@ -129,6 +129,7 @@ function protoShort(profile) {
     case 'ss2022': return 'SS2022'
     case 'anytls': return 'AnyTLS'
     case 'mieru': return 'Mieru'
+    case 'socks5': return 'SOCKS5'
     case 'port-forward': return '中转'
     default: return profile || ''
   }
@@ -241,7 +242,7 @@ export default function Nodes() {
   const meta = profiles.find(p => p.id === f.profile)
   const selectedServer = servers.find(s => Number(s.id) === Number(f.server_id))
   const missingCore = selectedServer && meta && !serverHasCore(selectedServer, meta.core)
-  const landings = list.filter(x => x.line_kind === 'direct' && ['vless-reality', 'vless-reality-vision', 'vless-xhttp-tls', 'trojan-tls', 'ss2022'].includes(x.profile))
+  const landings = list.filter(x => x.line_kind === 'direct' && ['vless-reality', 'vless-reality-vision', 'vless-xhttp-tls', 'trojan-tls', 'ss2022', 'socks5'].includes(x.profile))
   const protoList = profiles.length ? profiles : [{ id: f.profile, title: f.profile, desc: '' }]
   const destHostName = String(f.dest || '').split(':')[0].trim().toLowerCase()
   const destIsSelf = isReality(f.profile) && destHostName && [selectedServer?.public_host, selectedServer?.connect_ip]
@@ -907,7 +908,7 @@ export default function Nodes() {
             </select>
           </Field>
           {f.line_kind === 'chain' && !f.exit_uri && (
-            <Field label="落地线路" hint="不可选 Mieru / AnyTLS。SK5 落地到「转发」页改。">
+            <Field label="落地线路" hint="不可选 Mieru / AnyTLS。SK5 落地到「转发」页改。SOCKS5 可选。">
               <select className="input-field" value={f.exit_inbound_id} onChange={e => setF({ ...f, exit_inbound_id: e.target.value })}>
                 <option value="">选择落地</option>
                 {landings.map(x => <option key={x.id} value={x.id}>{x.server_name} / {x.name}</option>)}
@@ -921,7 +922,10 @@ export default function Nodes() {
             <div className="notice sm:col-span-2">AnyTLS 走 sing-box，需要证书。不能当链式落地。</div>
           )}
           {f.profile === 'mieru' && (
-            <div className="notice sm:col-span-2">Mieru 只当入口。链式转发时请把它放在入口机，落地用 VLESS / Trojan / SS2022。</div>
+            <div className="notice sm:col-span-2">Mieru 只当入口。链式转发时请把它放在入口机，落地用 VLESS / Trojan / SS2022 / SOCKS5。</div>
+          )}
+          {f.profile === 'socks5' && (
+            <div className="notice sm:col-span-2">SOCKS5 走 sing-box，用户名密码认证，可 UDP。浏览器和 Clash 可直连，也可当链式落地。</div>
           )}
           {destIsSelf && (
             <div className="notice sm:col-span-2">dest 指向了这台机器自己，伪装会失效，也无法保存。请改成 microsoft / apple 这类真实网站。</div>

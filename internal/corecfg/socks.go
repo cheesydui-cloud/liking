@@ -69,6 +69,16 @@ func FormatSocksURI(t *SocksTarget) string {
 	return u.String()
 }
 
+func clientSocksUser(c *db.Client) string {
+	if c == nil {
+		return ""
+	}
+	if e := strings.TrimSpace(c.Email); e != "" {
+		return e
+	}
+	return strings.TrimSpace(c.Username)
+}
+
 func socksExit(entry *db.Inbound) (*SocksTarget, error) {
 	if entry == nil {
 		return nil, nil

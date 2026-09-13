@@ -2,6 +2,20 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.1.40 — 2026-09-13
+
+增加 SOCKS5 入站；转发改成下拉，链式可自行加跳。
+
+### 改进
+- 增加节点可选 SOCKS5：用户名密码，走 sing-box，可 UDP，可当链式落地
+- 转发空列表不再放筛选 Tab；类型和列表筛选改成下拉
+- 链式转发可增加跳数（最多 5 跳），每跳本面板节点或 SK5；入口机用 Xray dialerProxy / sing-box detour 串起来
+- 删除仍被中间跳指向的落地会拦截
+
+### 升级注意
+- 只升面板即可。同机 Agent 会随 `liking-upgrade` 重启
+- 回滚：`liking-upgrade --release v0.1.39`
+
 ## v0.1.39 — 2026-09-13
 
 Clash / sing-box 订阅可绑定分流；业务下增加转发表；套餐节点列改成数量和机器名。

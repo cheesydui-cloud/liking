@@ -448,3 +448,298 @@ func TestBuildSK5AndPortForward(t *testing.T) {
 		t.Fatal("missing socks outbound")
 	}
 }
+
+func TestBuildSOCKS5InboundAndLanding(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	entrySrv, err := db.CreateServer(d, "in", "10.0.0.1", "tok-in")
+	if err != nil {
+		t.Fatal(err)
+	}
+	landSrv, err := db.CreateServer(d, "out", "10.0.0.2", "tok-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	land := &db.Inbound{
+		ServerID: landSrv.ID, Name: "sk", Profile: ProfileSOCKS5,
+		Port: 1080, Enabled: true, LineKind: "direct", Settings: "{}", ServerHost: "10.0.0.2",
+	}
+	if err := Normalize(land, nil); err != nil {
+		t.Fatal(err)
+	}
+	createdLand, err := db.CreateInbound(d, land)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := &db.Inbound{
+		ServerID: entrySrv.ID, Name: "v-in", Profile: ProfileVLESSRealityVision,
+		Port: 8443, Enabled: true, LineKind: "chain", Settings: "{}",
+	}
+	exitID := createdLand.ID
+	entry.ExitInboundID = &exitID
+	if err := Normalize(entry, createdLand); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateInbound(d, entry); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := db.CreatePackage(d, "std", 0, 30, 0, "oneway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetPackageServers(d, pkg.ID, []int64{landSrv.ID}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := db.CreateUser(d, "alice", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.BindUserPackage(d, u.ID, pkg.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	u, _ = db.GetUser(d, u.ID)
+	if _, err := ProvisionUser(d, u); err != nil {
+		t.Fatal(err)
+	}
+	c, err := db.GetClient(d, createdLand.ID, u.ID)
+	if err != nil || c.Password == "" || c.Username != db.EmailFor(u.ID, createdLand.ID) {
+		t.Fatalf("client %+v %v", c, err)
+	}
+
+	landBundle, err := Build(d, landSrv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(landBundle.Apply.Singbox) == 0 || landBundle.Apply.SingboxAPI == "" {
+		t.Fatalf("singbox %d api %q", len(landBundle.Apply.Singbox), landBundle.Apply.SingboxAPI)
+	}
+	var sb map[string]any
+	if err := json.Unmarshal(landBundle.Apply.Singbox, &sb); err != nil {
+		t.Fatal(err)
+	}
+	foundUser, foundRelay := false, false
+	relayUser := ParseSettings(entry.Settings).String("relay_username")
+	for _, raw := range sb["inbounds"].([]any) {
+		obj, _ := raw.(map[string]any)
+		if obj["type"] != "socks" {
+			continue
+		}
+		if obj["listen_port"] != float64(1080) {
+			t.Fatalf("port %v", obj["listen_port"])
+		}
+		for _, uraw := range obj["users"].([]any) {
+			uu, _ := uraw.(map[string]any)
+			if uu["username"] == c.Email && uu["password"] == c.Password {
+				foundUser = true
+			}
+			if uu["username"] == relayUser {
+				foundRelay = true
+			}
+		}
+	}
+	if !foundUser || !foundRelay {
+		t.Fatalf("socks users user=%v relay=%v cfg=%s", foundUser, foundRelay, landBundle.Apply.Singbox)
+	}
+
+	entryBundle, err := Build(d, entrySrv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entryBundle.Apply.Xray) == 0 {
+		t.Fatal("xray")
+	}
+	var xray map[string]any
+	if err := json.Unmarshal(entryBundle.Apply.Xray, &xray); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, raw := range xray["outbounds"].([]any) {
+		obj, _ := raw.(map[string]any)
+		if obj["protocol"] != "socks" {
+			continue
+		}
+		found = true
+		st, _ := obj["settings"].(map[string]any)
+		srvs, _ := st["servers"].([]any)
+		s0, _ := srvs[0].(map[string]any)
+		if s0["address"] != "10.0.0.2" || s0["port"] != float64(1080) {
+			t.Fatalf("socks land %+v", s0)
+		}
+		users, _ := s0["users"].([]any)
+		if len(users) != 1 {
+			t.Fatalf("users %v", s0["users"])
+		}
+		u0, _ := users[0].(map[string]any)
+		if u0["user"] != relayUser {
+			t.Fatalf("relay user %+v want %s", u0, relayUser)
+		}
+	}
+	if !found {
+		t.Fatal("missing socks landing outbound")
+	}
+}
+
+func TestBuildMultiHopDialerProxy(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	entrySrv, err := db.CreateServer(d, "in", "10.0.0.1", "tok-in")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hopSrv, err := db.CreateServer(d, "hop", "10.0.0.2", "tok-hop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	landSrv, err := db.CreateServer(d, "out", "10.0.0.3", "tok-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hop := &db.Inbound{
+		ServerID: hopSrv.ID, Name: "hop", Profile: ProfileVLESSRealityVision,
+		Port: 443, Enabled: true, LineKind: "direct", Settings: "{}", ServerHost: "10.0.0.2",
+	}
+	if err := Normalize(hop, nil); err != nil {
+		t.Fatal(err)
+	}
+	createdHop, err := db.CreateInbound(d, hop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	land := &db.Inbound{
+		ServerID: landSrv.ID, Name: "land", Profile: ProfileVLESSRealityVision,
+		Port: 443, Enabled: true, LineKind: "direct", Settings: "{}", ServerHost: "10.0.0.3",
+	}
+	if err := Normalize(land, nil); err != nil {
+		t.Fatal(err)
+	}
+	createdLand, err := db.CreateInbound(d, land)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := Settings{"hops": []any{map[string]any{"kind": "panel", "inbound_id": createdHop.ID}}}
+	if err := ApplyHopRelays(st, map[int64]*db.Inbound{createdHop.ID: createdHop}, 0, createdLand.ID); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := st.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := &db.Inbound{
+		ServerID: entrySrv.ID, Name: "v-in", Profile: ProfileVLESSRealityVision,
+		Port: 8443, Enabled: true, LineKind: "chain", Settings: raw,
+	}
+	exitID := createdLand.ID
+	entry.ExitInboundID = &exitID
+	if err := Normalize(entry, createdLand); err != nil {
+		t.Fatal(err)
+	}
+	createdEntry, err := db.CreateInbound(d, entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hopBundle, err := Build(d, hopSrv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hopXray map[string]any
+	if err := json.Unmarshal(hopBundle.Apply.Xray, &hopXray); err != nil {
+		t.Fatal(err)
+	}
+	hopRelay := ParseHops(ParseSettings(createdEntry.Settings))[0].RelayUUID
+	if hopRelay == "" {
+		t.Fatal("hop relay")
+	}
+	foundHopRelay := false
+	for _, raw := range hopXray["inbounds"].([]any) {
+		obj, _ := raw.(map[string]any)
+		if obj["protocol"] != "vless" {
+			continue
+		}
+		st, _ := obj["settings"].(map[string]any)
+		for _, uraw := range st["clients"].([]any) {
+			uu, _ := uraw.(map[string]any)
+			if uu["id"] == hopRelay {
+				foundHopRelay = true
+			}
+		}
+	}
+	if !foundHopRelay {
+		t.Fatalf("hop inbound missing relay %s", hopRelay)
+	}
+
+	landBundle, err := Build(d, landSrv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var landXray map[string]any
+	if err := json.Unmarshal(landBundle.Apply.Xray, &landXray); err != nil {
+		t.Fatal(err)
+	}
+	landRelay := ParseSettings(createdEntry.Settings).String("relay_uuid")
+	foundLandRelay := false
+	for _, raw := range landXray["inbounds"].([]any) {
+		obj, _ := raw.(map[string]any)
+		if obj["protocol"] != "vless" {
+			continue
+		}
+		st, _ := obj["settings"].(map[string]any)
+		for _, uraw := range st["clients"].([]any) {
+			uu, _ := uraw.(map[string]any)
+			if uu["id"] == landRelay {
+				foundLandRelay = true
+			}
+		}
+	}
+	if !foundLandRelay {
+		t.Fatalf("land inbound missing relay %s", landRelay)
+	}
+
+	entryBundle, err := Build(d, entrySrv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var xray map[string]any
+	if err := json.Unmarshal(entryBundle.Apply.Xray, &xray); err != nil {
+		t.Fatal(err)
+	}
+	byTag := map[string]map[string]any{}
+	for _, raw := range xray["outbounds"].([]any) {
+		obj, _ := raw.(map[string]any)
+		tag, _ := obj["tag"].(string)
+		byTag[tag] = obj
+	}
+	hopTag := hopOutboundTag(createdEntry.ID, 0)
+	landTag := outboundTag(createdEntry.ID)
+	hopOb := byTag[hopTag]
+	landOb := byTag[landTag]
+	if hopOb == nil || landOb == nil {
+		t.Fatalf("outbounds %v", keysOf(byTag))
+	}
+	if hopOb["protocol"] != "vless" || landOb["protocol"] != "vless" {
+		t.Fatalf("proto hop=%v land=%v", hopOb["protocol"], landOb["protocol"])
+	}
+	stream, _ := landOb["streamSettings"].(map[string]any)
+	sockopt, _ := stream["sockopt"].(map[string]any)
+	if sockopt["dialerProxy"] != hopTag {
+		t.Fatalf("dialerProxy %v want %s", sockopt["dialerProxy"], hopTag)
+	}
+	hopStream, _ := hopOb["streamSettings"].(map[string]any)
+	if hopSock, _ := hopStream["sockopt"].(map[string]any); hopSock["dialerProxy"] != nil {
+		t.Fatalf("first hop should not proxy: %+v", hopSock)
+	}
+}
+
+func keysOf(m map[string]map[string]any) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}

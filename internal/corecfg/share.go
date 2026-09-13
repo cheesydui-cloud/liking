@@ -96,6 +96,13 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 		return fmt.Sprintf("anytls://%s@%s?%s#%s", url.QueryEscape(c.Password), hp, q.Encode(), name), nil
 	case ProfilePortForward:
 		return "", fmt.Errorf("端口中转没有分享链接")
+	case ProfileSOCKS5:
+		user := clientSocksUser(c)
+		if user == "" || strings.TrimSpace(c.Password) == "" {
+			return "", fmt.Errorf("SOCKS5 缺少用户名或密码")
+		}
+		uri := FormatSocksURI(&SocksTarget{Host: host, Port: in.Port, User: user, Pass: c.Password})
+		return uri + "#" + name, nil
 	case ProfileMieru:
 		// Shadowrocket: mierus://user:pass@host?udp=1&port=39198&profile=default
 		user := c.Username

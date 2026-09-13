@@ -1,28 +1,29 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, FilterTabs, Icon, Modal, MoreMenu, PageHead, SearchInput } from '../components/ui'
+import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, SearchInput } from '../components/ui'
 
-const LAND_PROFILES = ['vless-reality', 'vless-reality-vision', 'vless-xhttp-tls', 'trojan-tls', 'ss2022']
+const LAND_PROFILES = ['vless-reality', 'vless-reality-vision', 'vless-xhttp-tls', 'trojan-tls', 'ss2022', 'socks5']
+const MAX_HOPS = 5
+
+function emptyHop() {
+  return { kind: 'panel', inbound_id: '', sk5_host: '', sk5_port: '1080', sk5_user: '', sk5_pass: '' }
+}
 
 const emptyForm = {
-  kind: 'panel',
+  kind: 'chain',
   server_id: '',
   name: '',
   profile: 'vless-reality-vision',
   port: '',
   cert_id: '',
-  exit_inbound_id: '',
   dest: 'www.microsoft.com:443',
   method: '2022-blake3-aes-256-gcm',
   transport: 'BOTH',
   dest_host: '',
   dest_port: '',
   network: 'tcp',
-  sk5_host: '',
-  sk5_port: '1080',
-  sk5_user: '',
-  sk5_pass: '',
+  hops: [emptyHop()],
   enabled: true,
 }
 
@@ -35,6 +36,7 @@ function protoShort(profile) {
     case 'ss2022': return 'SS2022'
     case 'anytls': return 'AnyTLS'
     case 'mieru': return 'Mieru'
+    case 'socks5': return 'SOCKS5'
     case 'port-forward': return '中转'
     default: return profile || ''
   }
@@ -60,14 +62,12 @@ function inboundSettings(inb) {
 function forwardKind(inb) {
   if (!inb) return ''
   if (inb.profile === 'port-forward') return 'port'
-  if (inb.exit_uri) return 'socks'
-  if (inb.line_kind === 'chain') return 'panel'
+  if (inb.exit_uri || inb.line_kind === 'chain') return 'chain'
   return ''
 }
 
 function kindLabel(k) {
-  if (k === 'panel') return '链式'
-  if (k === 'socks') return 'SK5'
+  if (k === 'chain') return '链式'
   if (k === 'port') return '端口'
   return ''
 }
@@ -102,20 +102,88 @@ function socksHostPort(uri) {
   return `${s.host}:${s.port || 1080}`
 }
 
+function hopFromSaved(h) {
+  const hop = emptyHop()
+  if (!h) return hop
+  const uri = h.uri || ''
+  if (h.kind === 'socks' || uri) {
+    const sk = parseSocks(uri)
+    hop.kind = 'socks'
+    hop.sk5_host = sk.host
+    hop.sk5_port = sk.port
+    hop.sk5_user = sk.user
+    hop.sk5_pass = sk.pass
+    return hop
+  }
+  hop.kind = 'panel'
+  hop.inbound_id = h.inbound_id || ''
+  return hop
+}
+
+function hopsFromInbound(inb) {
+  const st = inboundSettings(inb)
+  const hops = []
+  const raw = Array.isArray(st.hops) ? st.hops : []
+  for (const h of raw) hops.push(hopFromSaved(h))
+  if (inb.exit_uri) hops.push(hopFromSaved({ kind: 'socks', uri: inb.exit_uri }))
+  else hops.push({ ...emptyHop(), inbound_id: inb.exit_inbound_id || '' })
+  return hops.length ? hops : [emptyHop()]
+}
+
+function serializeHop(h) {
+  if (h.kind === 'socks') {
+    return { kind: 'socks', uri: formatSocks(h.sk5_host, h.sk5_port, h.sk5_user, h.sk5_pass) }
+  }
+  return { kind: 'panel', inbound_id: Number(h.inbound_id) || 0 }
+}
+
+function hopText(h, byID) {
+  if (!h) return '—'
+  if (h.kind === 'socks' || h.uri) {
+    const uri = h.uri || formatSocks(h.sk5_host, h.sk5_port, h.sk5_user, h.sk5_pass)
+    return socksHostPort(uri)
+  }
+  const land = byID.get(Number(h.inbound_id))
+  return land ? land.name : '落地已删除'
+}
+
+function hopProto(h, byID) {
+  if (!h) return '—'
+  if (h.kind === 'socks' || h.uri) return 'SK5'
+  const land = byID.get(Number(h.inbound_id))
+  return land ? protoShort(land.profile) : '—'
+}
+
+function pathHops(inb) {
+  const st = inboundSettings(inb)
+  const hops = []
+  const raw = Array.isArray(st.hops) ? st.hops : []
+  for (const h of raw) hops.push(h)
+  if (inb.exit_uri) hops.push({ kind: 'socks', uri: inb.exit_uri })
+  else if (inb.exit_inbound_id) hops.push({ kind: 'panel', inbound_id: inb.exit_inbound_id })
+  return hops
+}
+
 function landingText(inb, byID) {
   const k = forwardKind(inb)
   if (k === 'port') {
     const st = inboundSettings(inb)
     return `${st.dest_host || '?'}:${st.dest_port || '?'}`
   }
-  if (k === 'socks') return socksHostPort(inb.exit_uri)
-  const land = byID.get(Number(inb.exit_inbound_id))
-  return land ? land.name : '落地已删除'
+  const hops = pathHops(inb)
+  const last = hops[hops.length - 1]
+  return hopText(last, byID)
 }
 
 function entryText(inb) {
   if (forwardKind(inb) === 'port') return `:${inb.port}`
   return inb.name || `:${inb.port}`
+}
+
+function pathLine(inb, byID) {
+  if (forwardKind(inb) === 'port') return `${entryText(inb)} → ${landingText(inb, byID)}`
+  const hops = pathHops(inb)
+  return [entryText(inb), ...hops.map(h => hopText(h, byID))].join(' → ')
 }
 
 function pathSub(inb, byID) {
@@ -124,9 +192,8 @@ function pathSub(inb, byID) {
     const st = inboundSettings(inb)
     return st.network === 'tcp,udp' ? 'TCP + UDP' : 'TCP'
   }
-  if (k === 'socks') return `${protoShort(inb.profile)} → SK5`
-  const land = byID.get(Number(inb.exit_inbound_id))
-  return `${protoShort(inb.profile)} → ${land ? protoShort(land.profile) : '—'}`
+  const hops = pathHops(inb)
+  return [protoShort(inb.profile), ...hops.map(h => hopProto(h, byID))].join(' → ')
 }
 
 function usedPortsText(serverId, list, excludeId = 0) {
@@ -139,27 +206,32 @@ function usedPortsText(serverId, list, excludeId = 0) {
 
 function formFromInbound(inb) {
   const st = inboundSettings(inb)
-  const sk = parseSocks(inb.exit_uri)
   return {
-    kind: forwardKind(inb) || 'panel',
+    kind: forwardKind(inb) || 'chain',
     server_id: inb.server_id,
     name: inb.name || '',
     profile: inb.profile === 'port-forward' ? 'vless-reality-vision' : inb.profile,
     port: inb.port,
     cert_id: inb.cert_id || '',
-    exit_inbound_id: inb.exit_inbound_id || '',
     dest: st.dest || 'www.microsoft.com:443',
     method: st.method || '2022-blake3-aes-256-gcm',
     transport: st.transport || 'BOTH',
     dest_host: st.dest_host || '',
     dest_port: st.dest_port || '',
     network: st.network || 'tcp',
-    sk5_host: sk.host,
-    sk5_port: sk.port,
-    sk5_user: sk.user,
-    sk5_pass: sk.pass,
+    hops: hopsFromInbound(inb),
     enabled: inb.enabled !== false,
   }
+}
+
+function hopUsedIds(hops, except) {
+  const s = new Set()
+  hops.forEach((h, i) => {
+    if (i === except || h.kind !== 'panel') return
+    const id = Number(h.inbound_id)
+    if (id) s.add(id)
+  })
+  return s
 }
 
 export default function Forwards() {
@@ -209,7 +281,7 @@ export default function Forwards() {
       if (kindFilter && k !== kindFilter) return false
       if (!needle) return true
       const land = landingText(inb, byID)
-      const hay = [inb.name, inb.server_name, inb.server_host, inb.port, land, kindLabel(k), protoShort(inb.profile)]
+      const hay = [inb.name, inb.server_name, inb.server_host, inb.port, land, pathLine(inb, byID), kindLabel(k), protoShort(inb.profile)]
       return hay.some(x => String(x || '').toLowerCase().includes(needle))
     })
   }, [forwards, kindFilter, q, byID])
@@ -221,7 +293,7 @@ export default function Forwards() {
   const openCreate = () => {
     reset()
     const sid = servers[0]?.id || ''
-    setF({ ...emptyForm, server_id: sid })
+    setF({ ...emptyForm, server_id: sid, hops: [emptyHop()] })
     setOpen(true)
   }
   const startEdit = (inb) => {
@@ -232,6 +304,21 @@ export default function Forwards() {
   const closeForm = () => {
     setOpen(false)
     reset()
+  }
+
+  const setHop = (i, patch) => {
+    const hops = f.hops.map((h, idx) => idx === i ? { ...h, ...patch } : h)
+    setF({ ...f, hops })
+  }
+  const addHop = () => {
+    if (f.hops.length >= MAX_HOPS) return
+    const hops = f.hops.slice()
+    hops.splice(Math.max(0, hops.length - 1), 0, emptyHop())
+    setF({ ...f, hops })
+  }
+  const removeHop = (i) => {
+    if (f.hops.length <= 1) return
+    setF({ ...f, hops: f.hops.filter((_, idx) => idx !== i) })
   }
 
   const bodyFromForm = () => {
@@ -259,6 +346,10 @@ export default function Forwards() {
     if (isReality(profile) && String(f.dest || '').trim()) settings.dest = f.dest.trim()
     if (profile === 'ss2022') settings.method = f.method
     if (profile === 'mieru') settings.transport = f.transport
+    const hops = f.hops.length ? f.hops : [emptyHop()]
+    const last = hops[hops.length - 1]
+    const mids = hops.slice(0, -1).map(serializeHop)
+    if (mids.length) settings.hops = mids
     const body = {
       server_id: Number(f.server_id),
       name: f.name,
@@ -272,8 +363,8 @@ export default function Forwards() {
       exit_uri: '',
     }
     if (f.cert_id) body.cert_id = Number(f.cert_id)
-    if (kind === 'panel') body.exit_inbound_id = Number(f.exit_inbound_id) || 0
-    else body.exit_uri = formatSocks(f.sk5_host, f.sk5_port, f.sk5_user, f.sk5_pass)
+    if (last.kind === 'panel') body.exit_inbound_id = Number(last.inbound_id) || 0
+    else body.exit_uri = formatSocks(last.sk5_host, last.sk5_port, last.sk5_user, last.sk5_pass)
     return body
   }
 
@@ -291,14 +382,25 @@ export default function Forwards() {
       toast('编辑时需要填写端口', 'error')
       return
     }
-    if (f.kind === 'panel' && !Number(f.exit_inbound_id)) {
-      toast('请选择落地节点', 'error')
-      return
-    }
-    if (f.kind === 'socks') {
-      if (!String(f.sk5_host || '').trim()) { toast('请填写 SK5 主机', 'error'); return }
-      const p = Number(f.sk5_port)
-      if (!Number.isInteger(p) || p < 1 || p > 65535) { toast('SK5 端口无效', 'error'); return }
+    if (f.kind === 'chain') {
+      const hops = f.hops.length ? f.hops : []
+      if (!hops.length) { toast('至少需要一跳落地', 'error'); return }
+      if (hops.length > MAX_HOPS) { toast(`最多 ${MAX_HOPS} 跳`, 'error'); return }
+      const seen = new Set()
+      for (let i = 0; i < hops.length; i++) {
+        const h = hops[i]
+        const label = i === hops.length - 1 ? '落地' : `第 ${i + 1} 跳`
+        if (h.kind === 'panel') {
+          const id = Number(h.inbound_id)
+          if (!id) { toast(`请选择${label}节点`, 'error'); return }
+          if (seen.has(id)) { toast('路径里不能重复同一节点', 'error'); return }
+          seen.add(id)
+        } else {
+          if (!String(h.sk5_host || '').trim()) { toast(`请填写${label} SK5 主机`, 'error'); return }
+          const p = Number(h.sk5_port)
+          if (!Number.isInteger(p) || p < 1 || p > 65535) { toast(`${label} SK5 端口无效`, 'error'); return }
+        }
+      }
     }
     if (f.kind === 'port') {
       if (!String(f.dest_host || '').trim()) { toast('请填写目标地址', 'error'); return }
@@ -350,34 +452,36 @@ export default function Forwards() {
 
   const selectedServer = servers.find(s => Number(s.id) === Number(f.server_id))
   const entryProfile = f.kind === 'port' ? 'port-forward' : f.profile
+  const hops = f.hops.length ? f.hops : [emptyHop()]
+  const needsLanding = f.kind === 'chain' && hops.some(h => h.kind === 'panel')
 
   return (
     <div>
       <PageHead
         title="转发"
-        desc="谁转发到谁。链式和 SK5 用户连入口协议；端口中转没有用户，只把本机端口转到目标。"
+        desc="入口连出去的路径。链式可自己加跳；端口中转没有用户，只把本机端口转到目标。"
         actions={
           <button type="button" className="btn-primary" onClick={openCreate}>
             <Icon name="plus" size={15} /> 新建转发
           </button>
         }
       />
-      <div className="flex flex-col sm:flex-row gap-2 mb-3">
-        <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索入口 / 落地 / 服务器" />
-        <FilterTabs
-          value={kindFilter}
-          onChange={setKindFilter}
-          items={[['', '全部'], ['panel', '链式'], ['socks', 'SK5'], ['port', '端口']]}
-        />
-      </div>
+      {forwards.length > 0 ? (
+        <div className="flex flex-col sm:flex-row gap-2 mb-3">
+          <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索入口 / 落地 / 服务器" />
+          <select className="input-field sm:w-48" value={kindFilter} onChange={e => setKindFilter(e.target.value)}>
+            <option value="">全部类型</option>
+            <option value="chain">链式</option>
+            <option value="port">端口中转</option>
+          </select>
+        </div>
+      ) : null}
 
       <div className="card overflow-hidden">
         {forwards.length === 0 ? (
-          <Empty title="还没有转发" hint="把入口指到本面板落地、SK5，或把本机端口转到别人的 IP。" action={
-            <button type="button" className="btn-primary" onClick={openCreate}><Icon name="plus" size={15} /> 新建转发</button>
-          } />
+          <Empty title="还没有转发" hint="点右上角新建。链式按跳走；端口中转只把本机端口转到别人的 IP。" />
         ) : rows.length === 0 ? (
-          <Empty title="没有匹配的转发" hint="换个关键词或类型筛选。" />
+          <Empty title="没有匹配的转发" hint="换个关键词或类型。" />
         ) : (
           <>
             <div className="hidden md:block table-wrap">
@@ -386,14 +490,16 @@ export default function Forwards() {
                 <tbody>
                   {rows.map(inb => {
                     const k = forwardKind(inb)
+                    const n = k === 'chain' ? pathHops(inb).length : 0
                     return (
                       <tr key={inb.id} className={!inb.enabled ? 'opacity-50' : ''}>
                         <td className="min-w-0">
-                          <div className="font-medium truncate">{entryText(inb)} → {landingText(inb, byID)}</div>
+                          <div className="font-medium truncate">{pathLine(inb, byID)}</div>
                           <div className="text-[11px] text-ink-mut mt-0.5">{pathSub(inb, byID)}</div>
                         </td>
                         <td>
                           <Badge tone="muted">{kindLabel(k)}</Badge>
+                          {n > 1 ? <span className="ml-1 text-[11px] text-ink-mut tabular-nums">{n} 跳</span> : null}
                           {!inb.enabled ? <Badge tone="muted" className="ml-1">停用</Badge> : null}
                         </td>
                         <td className="min-w-0">
@@ -421,13 +527,14 @@ export default function Forwards() {
             <div className="md:hidden divide-y" style={{ borderColor: 'var(--color-line-soft)' }}>
               {rows.map(inb => {
                 const k = forwardKind(inb)
+                const n = k === 'chain' ? pathHops(inb).length : 0
                 return (
                   <div key={inb.id} className={`px-3.5 py-3 ${!inb.enabled ? 'opacity-50' : ''}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="font-medium truncate">{entryText(inb)} → {landingText(inb, byID)}</div>
+                        <div className="font-medium truncate">{pathLine(inb, byID)}</div>
                         <div className="text-[12px] text-ink-mut mt-0.5">
-                          {kindLabel(k)} · {pathSub(inb, byID)}
+                          {kindLabel(k)}{n > 1 ? ` · ${n} 跳` : ''} · {pathSub(inb, byID)}
                           {!inb.enabled ? ' · 停用' : ''}
                         </div>
                         <div className="text-[12px] text-ink-mut mt-0.5 truncate">
@@ -465,18 +572,20 @@ export default function Forwards() {
         )}
       >
         <form id="fwd-form" onSubmit={save} className="space-y-3">
-          {editId ? (
-            <div className="text-[13px] text-ink-mut">类型：{kindLabel(f.kind)}</div>
-          ) : (
-            <div>
-              <div className="text-[12px] font-medium text-ink-soft mb-1.5">类型</div>
-              <FilterTabs
-                value={f.kind}
-                onChange={kind => setF({ ...f, kind })}
-                items={[['panel', '本面板节点'], ['socks', 'SK5'], ['port', 'IP+端口']]}
-              />
-            </div>
-          )}
+          <Field label="类型" hint={editId ? '创建后不能改类型' : '链式：用户连入口，再按跳走。端口中转没有用户。'}>
+            <select
+              className="input-field"
+              value={f.kind}
+              disabled={!!editId}
+              onChange={e => {
+                const kind = e.target.value
+                setF({ ...f, kind, hops: kind === 'chain' && (!f.hops || !f.hops.length) ? [emptyHop()] : f.hops })
+              }}
+            >
+              <option value="chain">链式转发</option>
+              <option value="port">端口中转</option>
+            </select>
+          </Field>
           <Field label="入口服务器">
             <select className="input-field" value={f.server_id} onChange={e => setF({ ...f, server_id: e.target.value })} required>
               <option value="">选择服务器</option>
@@ -484,7 +593,7 @@ export default function Forwards() {
             </select>
           </Field>
           {f.kind !== 'port' && (
-            <Field label="入口协议" hint={editId ? '创建后不能改协议' : '用户连这个协议，再转到落地。'}>
+            <Field label="入口协议" hint={editId ? '创建后不能改协议' : '用户连这个协议，再转到后面的跳。'}>
               <select className="input-field" value={f.profile} onChange={e => setF({ ...f, profile: e.target.value })} disabled={!!editId}>
                 {protoList.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
               </select>
@@ -498,35 +607,72 @@ export default function Forwards() {
               <input className="input-field font-mono tabular-nums" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} placeholder="随机" inputMode="numeric" />
             </Field>
           </div>
-          {f.kind === 'panel' && (
-            <Field label="落地节点" hint="只能选直出的 VLESS / Trojan / SS2022。">
-              <select className="input-field" value={f.exit_inbound_id} onChange={e => setF({ ...f, exit_inbound_id: e.target.value })}>
-                <option value="">选择落地</option>
-                {landings.map(x => (
-                  <option key={x.id} value={x.id}>{x.server_name} / {x.name} · {protoShort(x.profile)} :{x.port}</option>
-                ))}
-              </select>
-            </Field>
-          )}
-          {f.kind === 'socks' && (
-            <>
-              <div className="grid sm:grid-cols-2 gap-3">
-                <Field label="SK5 主机">
-                  <input className="input-field font-mono" value={f.sk5_host} onChange={e => setF({ ...f, sk5_host: e.target.value })} placeholder="1.2.3.4" />
-                </Field>
-                <Field label="SK5 端口">
-                  <input className="input-field font-mono tabular-nums" value={f.sk5_port} onChange={e => setF({ ...f, sk5_port: e.target.value })} inputMode="numeric" />
-                </Field>
-              </div>
-              <div className="grid sm:grid-cols-2 gap-3">
-                <Field label="用户" hint="可留空">
-                  <input className="input-field" value={f.sk5_user} onChange={e => setF({ ...f, sk5_user: e.target.value })} autoComplete="off" />
-                </Field>
-                <Field label="密码" hint="可留空">
-                  <input className="input-field" type="password" value={f.sk5_pass} onChange={e => setF({ ...f, sk5_pass: e.target.value })} autoComplete="new-password" />
-                </Field>
-              </div>
-            </>
+          {f.kind === 'chain' && (
+            <div className="space-y-3">
+              {hops.map((h, i) => {
+                const last = i === hops.length - 1
+                const used = hopUsedIds(hops, i)
+                const opts = landings.filter(x => !used.has(Number(x.id)) || Number(x.id) === Number(h.inbound_id))
+                return (
+                  <div
+                    key={i}
+                    className="space-y-3 pt-3"
+                    style={i ? { borderTop: '1px solid var(--color-line-soft)' } : undefined}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-[12px] font-medium text-ink-soft">
+                        {last ? `落地 · 第 ${i + 1} 跳` : `第 ${i + 1} 跳`}
+                      </div>
+                      {hops.length > 1 ? (
+                        <button type="button" className="btn-ghost px-2 text-[12px]" onClick={() => removeHop(i)}>去掉</button>
+                      ) : null}
+                    </div>
+                    <Field label="这一跳">
+                      <select className="input-field" value={h.kind} onChange={e => setHop(i, { kind: e.target.value })}>
+                        <option value="panel">本面板节点</option>
+                        <option value="socks">SK5</option>
+                      </select>
+                    </Field>
+                    {h.kind === 'panel' ? (
+                      <Field label={last ? '落地节点' : '节点'} hint="只能选直出的 VLESS / Trojan / SS2022 / SOCKS5。">
+                        <select className="input-field" value={h.inbound_id} onChange={e => setHop(i, { inbound_id: e.target.value })}>
+                          <option value="">选择节点</option>
+                          {opts.map(x => (
+                            <option key={x.id} value={x.id}>{x.server_name} / {x.name} · {protoShort(x.profile)} :{x.port}</option>
+                          ))}
+                        </select>
+                      </Field>
+                    ) : (
+                      <>
+                        <div className="grid sm:grid-cols-2 gap-3">
+                          <Field label="SK5 主机">
+                            <input className="input-field font-mono" value={h.sk5_host} onChange={e => setHop(i, { sk5_host: e.target.value })} placeholder="1.2.3.4" />
+                          </Field>
+                          <Field label="SK5 端口">
+                            <input className="input-field font-mono tabular-nums" value={h.sk5_port} onChange={e => setHop(i, { sk5_port: e.target.value })} inputMode="numeric" />
+                          </Field>
+                        </div>
+                        <div className="grid sm:grid-cols-2 gap-3">
+                          <Field label="用户" hint="可留空">
+                            <input className="input-field" value={h.sk5_user} onChange={e => setHop(i, { sk5_user: e.target.value })} autoComplete="off" />
+                          </Field>
+                          <Field label="密码" hint="可留空">
+                            <input className="input-field" type="password" value={h.sk5_pass} onChange={e => setHop(i, { sk5_pass: e.target.value })} autoComplete="new-password" />
+                          </Field>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )
+              })}
+              {hops.length < MAX_HOPS ? (
+                <button type="button" className="btn-ghost" onClick={addHop}>
+                  <Icon name="plus" size={15} /> 增加一跳
+                </button>
+              ) : (
+                <div className="text-[11.5px] text-ink-mut">最多 {MAX_HOPS} 跳</div>
+              )}
+            </div>
           )}
           {f.kind === 'port' && (
             <>
@@ -576,10 +722,10 @@ export default function Forwards() {
               </select>
             </Field>
           )}
-          {f.kind === 'panel' && landings.length === 0 ? (
-            <div className="notice">还没有可落地的节点。先到「服务器管理」增加 VLESS / Trojan / SS2022 直出。</div>
+          {needsLanding && landings.length === 0 ? (
+            <div className="notice">还没有可落地的节点。先到「服务器管理」增加 VLESS / Trojan / SS2022 / SOCKS5 直出。</div>
           ) : null}
-          {f.kind === 'panel' && selectedServer && !selectedServer.public_host ? (
+          {f.kind === 'chain' && selectedServer && !selectedServer.public_host ? (
             <div className="notice">入口机还没填公开地址。落地能建，用户连入口时需要地址。</div>
           ) : null}
         </form>

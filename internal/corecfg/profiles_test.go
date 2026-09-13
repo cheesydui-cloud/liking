@@ -81,10 +81,30 @@ func TestKnownPortForwardNotInCatalog(t *testing.T) {
 	if !UserFacing(ProfileVLESSReality) {
 		t.Fatal("vless is user-facing")
 	}
+	foundSOCKS := false
 	for _, m := range Catalog() {
 		if m.ID == ProfilePortForward {
 			t.Fatal("port-forward must not appear in 增加节点 catalog")
 		}
+		if m.ID == ProfileSOCKS5 {
+			foundSOCKS = true
+			if m.Core != CoreSingbox || !m.Landing || !m.Direct || m.NeedTLS {
+				t.Fatalf("socks5 meta %+v", m)
+			}
+		}
+	}
+	if !foundSOCKS {
+		t.Fatal("socks5 must appear in 增加节点 catalog")
+	}
+	if !Known(ProfileSOCKS5) || !UserFacing(ProfileSOCKS5) {
+		t.Fatal("socks5 should be known and user-facing")
+	}
+	if CoreFor(ProfileSOCKS5) != CoreSingbox || NeedTLS(ProfileSOCKS5) || !CanLand(ProfileSOCKS5) {
+		t.Fatal("socks5 spec")
+	}
+	p, n, sec := Spec(ProfileSOCKS5)
+	if p != "socks" || n != "tcp" || sec != "none" {
+		t.Fatalf("spec %s %s %s", p, n, sec)
 	}
 }
 
@@ -153,6 +173,52 @@ func TestParseSocksURI(t *testing.T) {
 	}
 	if _, err := ParseSocksURI("vless://x"); err == nil {
 		t.Fatal("expected reject")
+	}
+}
+
+func TestNormalizeChainKeepsHops(t *testing.T) {
+	exit := int64(8)
+	in := &db.Inbound{
+		Profile: ProfileVLESSReality, Port: 8443, LineKind: "chain",
+		ExitInboundID: &exit,
+		Settings:      `{"hops":[{"kind":"socks","uri":"socks5://u:p@10.0.0.2:1080"}]}`,
+	}
+	land := &db.Inbound{ID: 8, Profile: ProfileVLESSReality, Port: 443, LineKind: "direct"}
+	if err := Normalize(in, land); err != nil {
+		t.Fatal(err)
+	}
+	hops := ParseHops(ParseSettings(in.Settings))
+	if len(hops) != 1 || hops[0].Kind != "socks" || !strings.Contains(hops[0].URI, "10.0.0.2") {
+		t.Fatalf("%+v", hops)
+	}
+	if ParseSettings(in.Settings).String("relay_uuid") == "" {
+		t.Fatal("landing relay")
+	}
+}
+
+func TestNormalizeChainSOCKS5Landing(t *testing.T) {
+	entry := &db.Inbound{Name: "in", Profile: ProfileVLESSReality, Port: 443, LineKind: "chain", Settings: "{}"}
+	land := &db.Inbound{ID: 2, Name: "s", Profile: ProfileSOCKS5, Port: 1080, LineKind: "direct"}
+	if err := Normalize(entry, land); err != nil {
+		t.Fatal(err)
+	}
+	st := ParseSettings(entry.Settings)
+	if !strings.HasPrefix(st.String("relay_username"), "relay.") || st.String("relay_password") == "" {
+		t.Fatalf("relay %+v", st)
+	}
+	in := &db.Inbound{Profile: ProfileSOCKS5, Port: 1080, LineKind: "direct", Settings: "{}"}
+	if err := Normalize(in, nil); err != nil {
+		t.Fatal(err)
+	}
+	if in.Core != CoreSingbox || in.Protocol != "socks" {
+		t.Fatalf("spec %s %s", in.Core, in.Protocol)
+	}
+	sk := ParseSettings(in.Settings)
+	if !sk.Bool("udp", false) {
+		t.Fatal("udp")
+	}
+	if !strings.HasPrefix(sk.String("hold_user"), "hold.") || sk.String("hold_pass") == "" {
+		t.Fatalf("hold %+v", sk)
 	}
 }
 

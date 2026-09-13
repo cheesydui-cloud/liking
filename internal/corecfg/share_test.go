@@ -58,6 +58,9 @@ func TestAnyTLSNeedTLS(t *testing.T) {
 	if CoreFor(ProfileMieru) != CoreMita {
 		t.Fatal("mieru core")
 	}
+	if CoreFor(ProfileSOCKS5) != CoreSingbox || NeedTLS(ProfileSOCKS5) {
+		t.Fatal("socks5 core")
+	}
 }
 
 func TestClashAndSingboxSkipMieru(t *testing.T) {
@@ -105,6 +108,41 @@ func TestClashAndSingboxSkipMieru(t *testing.T) {
 	uri, err = ShareURI(in, c)
 	if err != nil || !strings.Contains(uri, "udp=1") {
 		t.Fatalf("both uri %s %v", uri, err)
+	}
+}
+
+func TestShareClashSingboxSOCKS5(t *testing.T) {
+	in := &db.Inbound{
+		Name: "sk", Profile: ProfileSOCKS5, Port: 1080, ServerHost: "1.2.3.4",
+		Settings: "{}",
+	}
+	if err := Normalize(in, nil); err != nil {
+		t.Fatal(err)
+	}
+	c := &db.Client{Email: "u1.i2", Username: "u1.i2", Password: "s3cret"}
+	uri, err := ShareURI(in, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(uri, "socks5://") || !strings.Contains(uri, "@1.2.3.4:1080") || !strings.HasSuffix(uri, "#sk") {
+		t.Fatalf("uri %s", uri)
+	}
+	if !strings.Contains(uri, "u1.i2") || !strings.Contains(uri, "s3cret") {
+		t.Fatalf("userinfo %s", uri)
+	}
+	name, yaml, err := ClashProxyYAML(in, c)
+	if err != nil || name != "sk" {
+		t.Fatalf("clash %v %s", err, yaml)
+	}
+	if !strings.Contains(yaml, "type: socks5") || !strings.Contains(yaml, `username: "u1.i2"`) || !strings.Contains(yaml, `password: "s3cret"`) || !strings.Contains(yaml, "udp: true") {
+		t.Fatalf("yaml %s", yaml)
+	}
+	ob, err := SingboxOutbound(in, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ob["type"] != "socks" || ob["version"] != "5" || ob["username"] != "u1.i2" || ob["password"] != "s3cret" || ob["server_port"] != 1080 {
+		t.Fatalf("outbound %+v", ob)
 	}
 }
 

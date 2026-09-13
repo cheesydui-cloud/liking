@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -117,7 +118,7 @@ func (s *Server) handleCreateInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	u := userFromCtx(r.Context())
 	db.AddAudit(s.DB, &u.ID, "inbound.create", created.Name)
-	s.respondAfterApply(w, map[string]any{"inbound": inboundJSON(created)}, created.ServerID, exitServerID(s, created))
+	s.respondAfterApply(w, map[string]any{"inbound": inboundJSON(created)}, applyTargets(s, created)...)
 }
 
 func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
@@ -176,7 +177,7 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fresh, _ := db.GetInbound(s.DB, in.ID)
-	s.respondAfterApply(w, map[string]any{"inbound": inboundJSON(fresh)}, in.ServerID, exitServerID(s, in))
+	s.respondAfterApply(w, map[string]any{"inbound": inboundJSON(fresh)}, applyTargets(s, in)...)
 }
 
 func (s *Server) handleInboundShare(w http.ResponseWriter, r *http.Request) {
@@ -252,16 +253,24 @@ func (s *Server) handleDeleteInbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	n, _ := db.CountExitsTo(s.DB, id)
+	if list, err := db.ListInbounds(s.DB); err == nil {
+		n += corecfg.CountHopsTo(list, id)
+	}
 	if n > 0 {
 		jsonErr(w, http.StatusConflict, "仍有链式线路指向此入站")
 		return
 	}
 	sid := in.ServerID
+	peers := chainPeerServerIDs(s, in)
 	if err := db.DeleteInbound(s.DB, id); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.respondAfterApply(w, map[string]any{"ok": true}, sid)
+	if _, err := corecfg.ProvisionAll(s.DB); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.respondAfterApply(w, map[string]any{"ok": true}, append([]int64{sid}, peers...)...)
 }
 
 func (s *Server) prepareInbound(in *db.Inbound) error {
@@ -289,6 +298,33 @@ func (s *Server) prepareInbound(in *db.Inbound) error {
 		return errPortInvalid
 	} else if _, ok := used[in.Port]; ok {
 		return errPortTaken
+	}
+	if in.LineKind == "chain" {
+		st := corecfg.ParseSettings(in.Settings)
+		hops := corecfg.ParseHops(st)
+		lands := map[int64]*db.Inbound{}
+		for _, h := range hops {
+			if h.InboundID == 0 {
+				continue
+			}
+			e, err := db.GetInbound(s.DB, h.InboundID)
+			if err != nil {
+				return fmt.Errorf("跳点不存在")
+			}
+			lands[e.ID] = e
+		}
+		var exitID int64
+		if exit != nil {
+			exitID = exit.ID
+		}
+		if err := corecfg.ApplyHopRelays(st, lands, in.ID, exitID); err != nil {
+			return err
+		}
+		raw, err := st.Marshal()
+		if err != nil {
+			return err
+		}
+		in.Settings = raw
 	}
 	if err := corecfg.Normalize(in, exit); err != nil {
 		return err
@@ -320,15 +356,40 @@ const (
 	errRealitySelf simpleError = "REALITY dest 不能指向本机，否则无法伪装成真实网站"
 )
 
-func exitServerID(s *Server, in *db.Inbound) int64 {
-	if in == nil || in.ExitInboundID == nil || *in.ExitInboundID == 0 {
-		return 0
+func chainPeerServerIDs(s *Server, in *db.Inbound) []int64 {
+	if in == nil || in.LineKind != "chain" {
+		return nil
 	}
-	land, err := db.GetInbound(s.DB, *in.ExitInboundID)
-	if err != nil {
-		return 0
+	seen := map[int64]struct{}{}
+	var ids []int64
+	add := func(inboundID int64) {
+		if inboundID == 0 {
+			return
+		}
+		land, err := db.GetInbound(s.DB, inboundID)
+		if err != nil || land == nil || land.ServerID == 0 {
+			return
+		}
+		if _, ok := seen[land.ServerID]; ok {
+			return
+		}
+		seen[land.ServerID] = struct{}{}
+		ids = append(ids, land.ServerID)
 	}
-	return land.ServerID
+	if in.ExitInboundID != nil {
+		add(*in.ExitInboundID)
+	}
+	for _, id := range corecfg.HopInboundIDs(in) {
+		add(id)
+	}
+	return ids
+}
+
+func applyTargets(s *Server, in *db.Inbound) []int64 {
+	if in == nil {
+		return nil
+	}
+	return append([]int64{in.ServerID}, chainPeerServerIDs(s, in)...)
 }
 
 func (s *Server) respondAfterApply(w http.ResponseWriter, payload map[string]any, ids ...int64) {

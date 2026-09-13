@@ -222,7 +222,7 @@ export default function Inbounds() {
     } catch (e) { toast(e.message, 'error') }
   }
 
-  const landings = list.filter(x => x.line_kind === 'direct' && ['vless-reality', 'vless-reality-vision', 'vless-xhttp-tls', 'trojan-tls', 'ss2022'].includes(x.profile))
+  const landings = list.filter(x => x.line_kind === 'direct' && ['vless-reality', 'vless-reality-vision', 'vless-xhttp-tls', 'trojan-tls', 'ss2022', 'socks5'].includes(x.profile))
   const shown = serverFilter ? list.filter(x => String(x.server_id) === String(serverFilter)) : list
 
   const copyParams = async (inb) => {

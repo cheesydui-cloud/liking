@@ -17,6 +17,7 @@ const (
 	ProfileSS2022             = "ss2022"
 	ProfileAnyTLS             = "anytls"
 	ProfileMieru              = "mieru"
+	ProfileSOCKS5             = "socks5"
 	ProfilePortForward        = "port-forward"
 
 	CoreXray    = "xray"
@@ -45,6 +46,7 @@ func Catalog() []Meta {
 		{ID: ProfileSS2022, Title: "Shadowsocks 2022", Core: CoreXray, Landing: true, Direct: true, Desc: "2022-blake3 AEAD。没有 TLS 指纹，实现干净。"},
 		{ID: ProfileAnyTLS, Title: "AnyTLS + TCP + TLS", Core: CoreSingbox, NeedTLS: true, Direct: true, Desc: "sing-box 实现，需要证书。不能当链式落地。"},
 		{ID: ProfileMieru, Title: "Mieru", Core: CoreMita, Direct: true, Desc: "只当入口，不能当链式落地。可同时开 TCP / UDP。"},
+		{ID: ProfileSOCKS5, Title: "SOCKS5", Core: CoreSingbox, Landing: true, Direct: true, Desc: "用户名密码认证，可 UDP。浏览器和 Clash 可直连。走 sing-box。可当链式落地。"},
 	}
 }
 
@@ -68,7 +70,7 @@ func UserFacing(profile string) bool {
 
 func CoreFor(profile string) string {
 	switch profile {
-	case ProfileAnyTLS:
+	case ProfileAnyTLS, ProfileSOCKS5:
 		return CoreSingbox
 	case ProfileMieru:
 		return CoreMita
@@ -91,6 +93,8 @@ func Spec(profile string) (protocol, network, security string) {
 		return "anytls", "tcp", "tls"
 	case ProfileMieru:
 		return "mieru", "tcp", "none"
+	case ProfileSOCKS5:
+		return "socks", "tcp", "none"
 	case ProfilePortForward:
 		return "dokodemo-door", "tcp", "none"
 	default:
@@ -104,7 +108,7 @@ func NeedTLS(profile string) bool {
 
 func CanLand(profile string) bool {
 	switch profile {
-	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP, ProfileTrojanTLS, ProfileSS2022:
+	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP, ProfileTrojanTLS, ProfileSS2022, ProfileSOCKS5:
 		return true
 	default:
 		return false
@@ -383,6 +387,22 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 			return fmt.Errorf("Mieru transport 必须是 TCP / UDP / BOTH")
 		}
 		st["transport"] = tr
+	case ProfileSOCKS5:
+		st["udp"] = true
+		if st.String("hold_user") == "" {
+			id, err := RandomHex(8)
+			if err != nil {
+				return err
+			}
+			st["hold_user"] = "hold." + id
+		}
+		if st.String("hold_pass") == "" {
+			pw, err := RandomHex(16)
+			if err != nil {
+				return err
+			}
+			st["hold_pass"] = pw
+		}
 	case ProfilePortForward:
 		host := strings.TrimSpace(st.String("dest_host"))
 		if host == "" {
@@ -406,9 +426,13 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 		in.LineKind = "direct"
 		in.ExitInboundID = nil
 		in.ExitURI = ""
+		delete(st, "hops")
 	}
 
 	if in.LineKind == "chain" {
+		if err := NormalizeHops(st); err != nil {
+			return err
+		}
 		uri := strings.TrimSpace(in.ExitURI)
 		if exit != nil && uri != "" {
 			return fmt.Errorf("落地节点和 SK5 不能同时填")
@@ -423,15 +447,26 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 			in.ExitURI = uri
 			in.ExitInboundID = nil
 		}
+		if len(ParseHops(st))+1 > MaxHops {
+			return fmt.Errorf("最多 %d 跳", MaxHops)
+		}
 		if exit != nil {
 			if exit.ID == in.ID && in.ID != 0 {
 				return fmt.Errorf("不能把本线路当作落地")
 			}
 			if !CanLand(exit.Profile) {
-				return fmt.Errorf("v1 链式落地仅支持 VLESS / Trojan / SS2022（Mieru / AnyTLS 不能当落地）")
+				return fmt.Errorf("v1 链式落地仅支持 VLESS / Trojan / SS2022 / SOCKS5（Mieru / AnyTLS 不能当落地）")
 			}
 			if exit.LineKind == "chain" {
 				return fmt.Errorf("落地必须是直出线路")
+			}
+			for _, h := range ParseHops(st) {
+				if h.InboundID == exit.ID {
+					return fmt.Errorf("路径里不能重复同一节点")
+				}
+				if in.ID != 0 && h.InboundID == in.ID {
+					return fmt.Errorf("不能把本线路当作跳点")
+				}
 			}
 			if err := ensureRelay(st, exit.Profile); err != nil {
 				return err
@@ -471,6 +506,21 @@ func ensureRelay(st Settings, landingProfile string) error {
 	case ProfileSS2022:
 		if st.String("relay_password") == "" {
 			pw, err := RandomBase64(16)
+			if err != nil {
+				return err
+			}
+			st["relay_password"] = pw
+		}
+	case ProfileSOCKS5:
+		if st.String("relay_username") == "" {
+			id, err := RandomHex(8)
+			if err != nil {
+				return err
+			}
+			st["relay_username"] = "relay." + id
+		}
+		if st.String("relay_password") == "" {
+			pw, err := RandomHex(16)
 			if err != nil {
 				return err
 			}

@@ -47,11 +47,11 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 		ins = append(ins, obj)
 
 		if in.LineKind == "chain" {
-			ob, obTag, err := xrayChainOutbound(in, byID)
+			obs, obTag, err := xrayChainOutbounds(in, byID)
 			if err != nil {
 				return nil, err
 			}
-			outs = append(outs, ob)
+			outs = append(outs, obs...)
 			rules = append(rules, map[string]any{
 				"type": "field", "inboundTag": []string{tag}, "outboundTag": obTag,
 			})
@@ -67,7 +67,7 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 		if in.Core != CoreMita || !in.Enabled || in.LineKind != "chain" {
 			continue
 		}
-		ob, obTag, err := xrayChainOutbound(in, byID)
+		obs, obTag, err := xrayChainOutbounds(in, byID)
 		if err != nil {
 			return nil, err
 		}
@@ -80,7 +80,7 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 			"protocol": "socks",
 			"settings": map[string]any{"udp": true, "auth": "noauth"},
 		})
-		outs = append(outs, ob)
+		outs = append(outs, obs...)
 		rules = append(rules, map[string]any{
 			"type": "field", "inboundTag": []string{tag}, "outboundTag": obTag,
 		})
@@ -196,12 +196,7 @@ func xrayUsers(in *db.Inbound, clients []*db.Client, st Settings) []any {
 
 func relayUsers(landing *db.Inbound, byID map[int64]*db.Inbound) []any {
 	var users []any
-	for _, in := range byID {
-		if in == nil || in.ExitInboundID == nil || *in.ExitInboundID != landing.ID || !in.Enabled {
-			continue
-		}
-		st := ParseSettings(in.Settings)
-		email := fmt.Sprintf("relay.i%d", in.ID)
+	forEachRelayTo(landing.ID, byID, func(email string, st Settings) {
 		switch landing.Profile {
 		case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP:
 			if id := st.String("relay_uuid"); id != "" {
@@ -220,7 +215,7 @@ func relayUsers(landing *db.Inbound, byID map[int64]*db.Inbound) []any {
 				users = append(users, map[string]any{"password": pw, "email": email})
 			}
 		}
-	}
+	})
 	return users
 }
 
@@ -311,11 +306,10 @@ func xrayXHTTPSettings(st Settings) map[string]any {
 	return xh
 }
 
-func xraySocksOutbound(id int64, t *SocksTarget) (map[string]any, string, error) {
+func xraySocksOutbound(tag string, t *SocksTarget) (map[string]any, string, error) {
 	if t == nil || t.Host == "" {
 		return nil, "", fmt.Errorf("SK5 缺少主机")
 	}
-	tag := outboundTag(id)
 	srv := map[string]any{
 		"address": t.Host,
 		"port":    t.Port,
@@ -330,26 +324,70 @@ func xraySocksOutbound(id int64, t *SocksTarget) (map[string]any, string, error)
 	}, tag, nil
 }
 
-func xrayChainOutbound(entry *db.Inbound, byID map[int64]*db.Inbound) (map[string]any, string, error) {
-	if t, err := socksExit(entry); err != nil {
-		return nil, "", err
-	} else if t != nil {
-		return xraySocksOutbound(entry.ID, t)
+func withDialerProxy(ob map[string]any, via string) {
+	if ob == nil || via == "" {
+		return
 	}
-	if entry.ExitInboundID == nil {
+	stream, _ := ob["streamSettings"].(map[string]any)
+	if stream == nil {
+		stream = map[string]any{}
+		ob["streamSettings"] = stream
+	}
+	sockopt, _ := stream["sockopt"].(map[string]any)
+	if sockopt == nil {
+		sockopt = map[string]any{}
+		stream["sockopt"] = sockopt
+	}
+	sockopt["dialerProxy"] = via
+}
+
+func xrayChainOutbounds(entry *db.Inbound, byID map[int64]*db.Inbound) ([]any, string, error) {
+	path, err := ChainPath(entry, byID)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(path) == 0 {
 		return nil, "", fmt.Errorf("链式线路 %s 没有落地", entry.Name)
 	}
-	land := byID[*entry.ExitInboundID]
-	if land == nil {
-		return nil, "", fmt.Errorf("链式线路 %s 的落地不存在", entry.Name)
+	var outs []any
+	var prev string
+	for _, p := range path {
+		ob, err := xrayPathOutbound(p)
+		if err != nil {
+			return nil, "", err
+		}
+		if prev != "" {
+			withDialerProxy(ob, prev)
+		}
+		outs = append(outs, ob)
+		prev = p.Tag
 	}
-	st := ParseSettings(entry.Settings)
+	return outs, path[len(path)-1].Tag, nil
+}
+
+func xrayPathOutbound(p PathHop) (map[string]any, error) {
+	if p.Socks != nil {
+		ob, _, err := xraySocksOutbound(p.Tag, p.Socks)
+		return ob, err
+	}
+	if p.Land == nil {
+		return nil, fmt.Errorf("没有落地")
+	}
+	return xrayLandOutbound(p.Tag, p.Land, p.Cred)
+}
+
+func xrayLandOutbound(tag string, land *db.Inbound, st Settings) (map[string]any, error) {
+	if land == nil {
+		return nil, fmt.Errorf("落地不存在")
+	}
+	if st == nil {
+		st = Settings{}
+	}
 	lst := ParseSettings(land.Settings)
 	host := land.ServerHost
 	if host == "" {
-		return nil, "", fmt.Errorf("落地 %s 未填写公开地址", land.Name)
+		return nil, fmt.Errorf("落地 %s 未填写公开地址", land.Name)
 	}
-	tag := outboundTag(entry.ID)
 
 	switch land.Profile {
 	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP:
@@ -398,7 +436,7 @@ func xrayChainOutbound(entry *db.Inbound, byID map[int64]*db.Inbound) (map[strin
 				}},
 			},
 			"streamSettings": stream,
-		}, tag, nil
+		}, nil
 	case ProfileTrojanTLS:
 		sni := lst.String("sni")
 		if sni == "" {
@@ -419,7 +457,7 @@ func xrayChainOutbound(entry *db.Inbound, byID map[int64]*db.Inbound) (map[strin
 				"security":    "tls",
 				"tlsSettings": xrayClientTLS(lst, sni),
 			},
-		}, tag, nil
+		}, nil
 	case ProfileSS2022:
 		return map[string]any{
 			"tag":      tag,
@@ -432,9 +470,17 @@ func xrayChainOutbound(entry *db.Inbound, byID map[int64]*db.Inbound) (map[strin
 					"password": lst.String("server_password") + ":" + st.String("relay_password"),
 				}},
 			},
-		}, tag, nil
+		}, nil
+	case ProfileSOCKS5:
+		ob, _, err := xraySocksOutbound(tag, &SocksTarget{
+			Host: host,
+			Port: land.Port,
+			User: st.String("relay_username"),
+			Pass: st.String("relay_password"),
+		})
+		return ob, err
 	default:
-		return nil, "", fmt.Errorf("不支持的落地协议 %s", land.Profile)
+		return nil, fmt.Errorf("不支持的落地协议 %s", land.Profile)
 	}
 }
 
