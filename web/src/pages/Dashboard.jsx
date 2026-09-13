@@ -67,7 +67,7 @@ export default function Dashboard() {
       <div className="card overflow-hidden">
         <div className="panel-head">
           <div>服务器</div>
-          <Link to="/nodes" className="row-act font-medium">管理</Link>
+          <Link to="/nodes" className="btn-ghost h-8">管理</Link>
         </div>
         {(d.server_list || []).length === 0 ? (
           <Empty title="还没有服务器" hint="添加一台服务器，复制一键安装命令，在机器上以 root 执行。" action={<Link to="/nodes" className="btn-primary">去添加</Link>} />
@@ -79,7 +79,7 @@ export default function Dashboard() {
                 {(d.server_list || []).map(s => (
                   <tr key={s.id} className={machineTone(s)}>
                     <td className="font-medium">{s.name}</td>
-                    <td className="font-mono text-[12px] text-ink-soft">{s.public_host || '—'}</td>
+                    <td className="copy-text">{s.public_host || '—'}</td>
                     <td>
                       <StatusWord online={s.online} fault={!!s.last_error} />
                       {s.last_error ? <Badge tone="danger" className="ml-2">下发失败</Badge> : null}
@@ -106,7 +106,7 @@ export default function Dashboard() {
         <div className="mt-5">
           <div className="flex items-center justify-between mb-3">
             <div className="text-[14px] font-semibold">近 14 日</div>
-            <Link to="/traffic" className="row-act">明细</Link>
+            <Link to="/traffic" className="btn-ghost h-8">明细</Link>
           </div>
           <DayBars days={d.days} />
         </div>

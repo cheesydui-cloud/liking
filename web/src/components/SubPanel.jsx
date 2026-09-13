@@ -58,8 +58,10 @@ export function SubPanel({ token, onCopied }) {
           <div key={k}>
             <div className="kicker mb-1">{k}</div>
             <div className="flex gap-2 items-center">
-              <code className="text-[12px] break-all flex-1 font-mono">{v}</code>
-              <button type="button" className="btn-ghost h-8 shrink-0" onClick={() => copy(v)}><Icon name="copy" size={14} /> 复制</button>
+              <code className="copy-text copy-text-wrap flex-1">{v}</code>
+              <button type="button" className="icon-btn" onClick={() => copy(v)} aria-label={`复制${k}`} title="复制">
+                <Icon name="copy" size={14} />
+              </button>
             </div>
           </div>
         ))}

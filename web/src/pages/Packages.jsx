@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Modal, PageHead, SearchInput } from '../components/ui'
+import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, SearchInput } from '../components/ui'
 
 const emptyForm = { name: '', gb: '', direction: 'oneway', inbound_ids: [], multipliers: {} }
 
@@ -209,7 +209,7 @@ export default function Packages() {
         </div>
       ) : (
         <div className="card overflow-hidden">
-          <div className="table-wrap">
+          <div className="hidden md:block table-wrap">
             <table className="data">
               <thead><tr><th>名称</th><th>流量</th><th>计费</th><th>节点</th><th>用户</th><th></th></tr></thead>
               <tbody>
@@ -225,9 +225,13 @@ export default function Packages() {
                       <td className="text-[13px] text-ink-soft max-w-[22rem] truncate" title={names.join('、')}>{nodeText}</td>
                       <td className="tabular-nums font-mono text-[12px]">{n}</td>
                       <td className="whitespace-nowrap">
-                        <div className="flex gap-2.5 justify-end">
-                          <button type="button" className="row-act" onClick={() => startEdit(p)}>编辑</button>
-                          <button type="button" className="row-act is-danger" onClick={() => del(p.id)}>删除</button>
+                        <div className="icon-row">
+                          <button type="button" className="icon-btn" onClick={() => startEdit(p)} aria-label="编辑套餐" title="编辑">
+                            <Icon name="pencil" size={14} />
+                          </button>
+                          <MoreMenu iconOnly items={[
+                            { label: '删除', danger: true, onSelect: () => del(p.id) },
+                          ]} />
                         </div>
                       </td>
                     </tr>
@@ -235,6 +239,34 @@ export default function Packages() {
                 })}
               </tbody>
             </table>
+          </div>
+          <div className="md:hidden divide-y" style={{ borderColor: 'var(--color-line-soft)' }}>
+            {list.map(p => {
+              const n = users.filter(u => u.role !== 'admin' && u.package_id === p.id).length
+              const names = packageNodeNames(p, ins, servers)
+              const nodeText = names.length === 0 ? '全部节点' : names.length <= 3 ? names.join('、') : `${names.slice(0, 3).join('、')} 等 ${names.length} 个`
+              return (
+                <div key={p.id} className="px-3.5 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{p.name}</div>
+                      <div className="text-[12px] text-ink-mut mt-0.5">
+                        {trafficLabel(p.traffic_bytes)} / {p.direction === 'twoway' ? '双向' : '单向'} / {n} 用户
+                      </div>
+                      <div className="text-[12px] text-ink-mut mt-0.5 truncate">{nodeText}</div>
+                    </div>
+                    <div className="icon-row shrink-0">
+                      <button type="button" className="icon-btn" onClick={() => startEdit(p)} aria-label="编辑套餐" title="编辑">
+                        <Icon name="pencil" size={14} />
+                      </button>
+                      <MoreMenu iconOnly items={[
+                        { label: '删除', danger: true, onSelect: () => del(p.id) },
+                      ]} />
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

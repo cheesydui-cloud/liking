@@ -57,7 +57,7 @@ export default function My() {
                 {nodes.nodes.map((n, i) => (
                   <tr key={i}>
                     <td className="font-medium">{n.name}</td>
-                    <td className="font-mono text-[12px]">{n.host}:{n.port}</td>
+                    <td className="copy-text">{n.host}:{n.port}</td>
                     <td className="text-[12px] text-ink-mut">{n.profile}</td>
                   </tr>
                 ))}

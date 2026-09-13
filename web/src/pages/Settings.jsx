@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import QRCode from 'qrcode'
 import { api } from '../lib/api'
 import { useToast, useDialog, useUser } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Modal, PageHead, Tabs, fmtBytes, fmtDate, fmtDateShort } from '../components/ui'
+import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, Tabs, fmtBytes, fmtDate, fmtDateShort } from '../components/ui'
 
 const emptyIssue = { channel: 'acme-cf', name: '', domains: '', cert_pem: '', key_pem: '' }
 
@@ -243,7 +243,7 @@ function backupLine(s) {
 
 function BackupStat({ n, label }) {
   return (
-    <div className="rounded-lg px-3 py-2.5" style={{ background: 'var(--color-fill)' }}>
+    <div className="px-3 py-2.5" style={{ background: 'var(--color-fill)', borderRadius: 2 }}>
       <div className="text-[16px] font-semibold tabular-nums leading-none">{n ?? '—'}</div>
       <div className="text-[11.5px] text-ink-mut mt-1.5">{label}</div>
     </div>
@@ -418,7 +418,7 @@ function BackupPanel() {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {steps.map(s => (
-            <div key={s.n} className="rounded-lg px-3 py-2.5 flex gap-2.5" style={{ background: 'var(--color-fill)' }}>
+            <div key={s.n} className="px-3 py-2.5 flex gap-2.5" style={{ background: 'var(--color-fill)', borderRadius: 2 }}>
               <div className="text-[12px] font-medium tabular-nums w-4 shrink-0 pt-px">{s.n}</div>
               <div>
                 <div className="text-[13px] font-medium">{s.t}</div>
@@ -466,7 +466,7 @@ function BackupPanel() {
             <button type="button" className="btn-primary" disabled={!filePass} onClick={retryPreview}>用密码打开</button>
           </div>
         ) : preview ? (
-          <div className="rounded-lg px-3 py-2.5 space-y-1.5" style={{ background: 'var(--color-fill)' }}>
+          <div className="px-3 py-2.5 space-y-1.5" style={{ background: 'var(--color-fill)', borderRadius: 2 }}>
             <div className="text-[12px] text-ink-mut">当前　{backupLine(live)}</div>
             <div className="text-[13px] font-medium">备份　{backupLine(preview)}</div>
             <div className="text-[12px] text-ink-mut">
@@ -731,16 +731,18 @@ export default function Settings({ accountOnly = false }) {
                       {c.last_error ? <div className="text-[11.5px] text-[var(--color-danger)] mt-0.5 leading-snug">{c.last_error}</div> : null}
                     </td>
                     <td><Badge tone={c.source === 'acme-cf' ? 'ok' : 'muted'}>{sourceLabel(c.source)}</Badge></td>
-                    <td className="text-ink-mut">{c.domains || '—'}</td>
+                    <td className="copy-text max-w-[16rem]">{c.domains || '—'}</td>
                     <td><Badge tone={expiryTone(c.expires_at)}>{expiryText(c.expires_at)}</Badge></td>
                     <td className="whitespace-nowrap">
-                      <div className="flex gap-1.5 justify-end items-center">
-                      {c.source === 'acme-cf' && (
-                        <button type="button" className="row-act" disabled={renewing === c.id} onClick={() => renew(c.id)}>
-                          {renewing === c.id ? '续期中…' : '续期'}
-                        </button>
-                      )}
-                      <button type="button" className="row-act is-danger" onClick={() => del(c.id)}>删除</button>
+                      <div className="icon-row">
+                        <MoreMenu iconOnly items={[
+                          c.source === 'acme-cf' ? {
+                            label: renewing === c.id ? '续期中…' : '续期',
+                            disabled: renewing === c.id,
+                            onSelect: () => renew(c.id),
+                          } : null,
+                          { label: '删除', danger: true, onSelect: () => del(c.id) },
+                        ]} />
                       </div>
                     </td>
                   </tr>

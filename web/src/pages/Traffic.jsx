@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useToast } from '../components/Layout'
-import { DayBars, Empty, FilterTabs, PageHead, SkeletonRows, fmtBps, fmtBytes } from '../components/ui'
+import { DayBars, Empty, FilterTabs, Icon, PageHead, SkeletonRows, fmtBps, fmtBytes } from '../components/ui'
 
 const RANGES = [7, 14, 30]
 
@@ -38,7 +38,9 @@ export default function Traffic() {
               onChange={setDaysN}
               items={RANGES.map(n => [n, `${n} 天`])}
             />
-            <button type="button" className="row-act" onClick={() => api.download(`/traffic.csv?days=${daysN}`, 'liking-traffic.csv').catch(e => toast(e.message, 'error'))}>导出 CSV</button>
+            <button type="button" className="btn-ghost h-8" onClick={() => api.download(`/traffic.csv?days=${daysN}`, 'liking-traffic.csv').catch(e => toast(e.message, 'error'))}>
+              <Icon name="download" size={14} /> 导出 CSV
+            </button>
           </div>
         }
       />
@@ -76,7 +78,7 @@ export default function Traffic() {
         <div className="card overflow-hidden">
           <div className="panel-head">
             <div>用户</div>
-            <Link to="/users" className="row-act font-medium">管理</Link>
+            <Link to="/users" className="btn-ghost h-8">管理</Link>
           </div>
           {(d.users || []).length === 0 ? (
             <div className="px-4 py-6 text-[13px] text-ink-mut">这个区间没有用户流量。</div>
@@ -101,7 +103,7 @@ export default function Traffic() {
         <div className="card overflow-hidden">
           <div className="panel-head">
             <div>节点</div>
-            <Link to="/nodes" className="row-act font-medium">管理</Link>
+            <Link to="/nodes" className="btn-ghost h-8">管理</Link>
           </div>
           {(d.inbounds || []).length === 0 ? (
             <div className="px-4 py-6 text-[13px] text-ink-mut">这个区间没有节点流量。</div>

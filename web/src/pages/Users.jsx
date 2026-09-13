@@ -50,6 +50,35 @@ function bytesFromGB(s) {
 
 const emptyForm = { username: '', password: '', remark: '', package_id: '', days: 30, expires: '', traffic_gb: '', enabled: true, traffic_reset_day: 0 }
 
+function UserFlags({ u }) {
+  if (u.role === 'admin') return null
+  if (u.expires_at && u.expires_at * 1000 < Date.now()) return <Badge tone="danger">到期</Badge>
+  if (u.traffic_cap > 0 && billedBytes(u) >= u.traffic_cap) return <Badge tone="danger">超量</Badge>
+  if (u.quota_ratio >= 80) return <Badge tone="warn">{u.quota_ratio}%</Badge>
+  if (u.enabled === false) return <Badge tone="muted">停用</Badge>
+  return null
+}
+
+function UserRowActs({ u, onEdit, onSub, onTraffic, onToggle, onRemove }) {
+  if (u.role === 'admin') return null
+  return (
+    <div className="icon-row">
+      <button type="button" className="icon-btn" onClick={() => onEdit(u)} aria-label="编辑用户" title="编辑">
+        <Icon name="pencil" size={14} />
+      </button>
+      <button type="button" className="icon-btn" onClick={() => onSub(u)} aria-label="订阅" title="订阅">
+        <Icon name="link" size={14} />
+      </button>
+      <MoreMenu iconOnly items={[
+        { label: '流量', onSelect: () => onTraffic(u) },
+        { label: u.enabled ? '停用' : '启用', onSelect: onToggle },
+        { sep: true },
+        { label: '删除', danger: true, onSelect: () => onRemove(u) },
+      ]} />
+    </div>
+  )
+}
+
 export default function Users() {
   const toast = useToast()
   const dialog = useDialog()
@@ -237,7 +266,7 @@ export default function Users() {
     <div>
       <PageHead
         title="用户"
-        desc="一人一套餐。点「编辑」改用户名、套餐、到期、流量和登录密码；到期或超量会从内核配置里摘掉客户端。"
+        desc="一人一套餐。点铅笔改资料，点链接看订阅。到期或超量会从内核配置里摘掉客户端。"
         actions={
           <div className="flex gap-2">
             <button type="button" className="btn-ghost" onClick={() => setBulkOpen(true)}>批量开户</button>
@@ -269,51 +298,77 @@ export default function Users() {
         ) : rows.length === 0 ? (
           <Empty title="没有匹配的用户" hint="换个关键词或套餐筛选。" />
         ) : (
-          <div className="table-wrap">
+          <>
+          <div className="hidden md:block table-wrap">
             <table className="data">
-              <thead><tr><th>用户</th><th>套餐</th><th>流量</th><th>到期</th><th>状态</th><th></th></tr></thead>
+              <thead><tr><th>用户</th><th>套餐</th><th>流量</th><th>到期</th><th></th></tr></thead>
               <tbody>
                 {rows.map(u => (
                   <tr key={u.id}>
                     <td>
-                      <div className="font-medium">{u.username}</div>
-                      <div className="text-[11px] text-ink-mut">{u.remark || (u.role === 'admin' ? '管理员' : '')}</div>
+                      <div className="flex items-center gap-2 flex-wrap min-w-0">
+                        <span className="font-medium truncate">{u.username}</span>
+                        <UserFlags u={u} />
+                      </div>
+                      <div className="text-[11px] text-ink-mut mt-0.5">{u.remark || (u.role === 'admin' ? '管理员' : '')}</div>
                     </td>
                     <td className="text-[13px]">{u.role === 'admin' ? '—' : (u.package_name || <span className="text-ink-mut">未绑定</span>)}</td>
                     <td className="min-w-[10rem]">
                       {u.role === 'admin' ? '—' : (
-                        <button type="button" className="hit-surface w-full" onClick={() => openTraffic(u)}>
+                        <div>
                           <Meter value={billedBytes(u)} max={u.traffic_cap || trafficCap(u, pkgs)} />
                           {u.direction === 'twoway' ? <div className="text-[11px] text-ink-mut mt-0.5">双向计费</div> : null}
-                        </button>
-                      )}
-                    </td>
-                    <td className="text-[12px] whitespace-nowrap">{u.expires_at ? fmtDateShort(u.expires_at) : '—'}</td>
-                    <td>
-                      {u.expires_at && u.expires_at * 1000 < Date.now() ? <Badge tone="danger">到期</Badge>
-                        : (u.traffic_cap > 0 && billedBytes(u) >= u.traffic_cap) ? <Badge tone="danger">超量</Badge>
-                        : (u.quota_ratio >= 80) ? <Badge tone="warn">{u.quota_ratio}%</Badge>
-                        : u.enabled ? <Badge tone="ok">启用</Badge> : <Badge tone="muted">停用</Badge>}
-                    </td>
-                    <td className="whitespace-nowrap">
-                      {u.role !== 'admin' && (
-                        <div className="flex gap-2.5 justify-end items-center">
-                          <button type="button" className="row-act" onClick={() => openEdit(u)}>编辑</button>
-                          <button type="button" className="row-act" onClick={() => setSubUser(u)}>订阅</button>
-                          <MoreMenu items={[
-                            { label: '流量', onSelect: () => openTraffic(u) },
-                            { label: u.enabled ? '停用' : '启用', onSelect: () => act(() => api.put(`/users/${u.id}`, { enabled: !u.enabled })) },
-                            { sep: true },
-                            { label: '删除', danger: true, onSelect: () => remove(u) },
-                          ]} />
                         </div>
                       )}
+                    </td>
+                    <td className="text-[12px] whitespace-nowrap font-mono tabular-nums">{u.expires_at ? fmtDateShort(u.expires_at) : '—'}</td>
+                    <td className="whitespace-nowrap">
+                      <UserRowActs
+                        u={u}
+                        onEdit={openEdit}
+                        onSub={setSubUser}
+                        onTraffic={openTraffic}
+                        onToggle={() => act(() => api.put(`/users/${u.id}`, { enabled: !u.enabled }))}
+                        onRemove={remove}
+                      />
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          <div className="md:hidden divide-y" style={{ borderColor: 'var(--color-line-soft)' }}>
+            {rows.map(u => (
+              <div key={u.id} className="px-3.5 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      <span className="font-medium truncate">{u.username}</span>
+                      <UserFlags u={u} />
+                    </div>
+                    <div className="text-[12px] text-ink-mut mt-0.5">
+                      {u.role === 'admin' ? '管理员' : (u.package_name || '未绑定')}
+                      {u.expires_at ? ` / ${fmtDateShort(u.expires_at)}` : ''}
+                    </div>
+                  </div>
+                  <UserRowActs
+                    u={u}
+                    onEdit={openEdit}
+                    onSub={setSubUser}
+                    onTraffic={openTraffic}
+                    onToggle={() => act(() => api.put(`/users/${u.id}`, { enabled: !u.enabled }))}
+                    onRemove={remove}
+                  />
+                </div>
+                {u.role !== 'admin' ? (
+                  <div className="mt-2">
+                    <Meter value={billedBytes(u)} max={u.traffic_cap || trafficCap(u, pkgs)} />
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          </>
         )}
       </div>
       <Modal open={formOpen} title={editing ? `编辑 ${editUser.username}` : '新建用户'} onClose={closeForm} size="lg" footer={
