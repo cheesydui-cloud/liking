@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, DayBars, Empty, Field, Icon, Meter, Modal, MoreMenu, PageHead, SearchInput, billedBytes, fmtBytes, fmtDateShort } from '../components/ui'
+import { Badge, DayBars, Empty, Field, FilterTabs, Icon, Meter, Modal, MoreMenu, PageHead, SearchInput, billedBytes, fmtBytes, fmtDateShort } from '../components/ui'
 import { SubPanel } from '../components/SubPanel'
 
 function randPassword() {
@@ -254,11 +254,11 @@ export default function Users() {
           <option value="none">未绑定</option>
           {pkgs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
-        <div className="flex gap-1 shrink-0">
-          {[['','全部'],['warn','将满 80%'],['expired','已到期']].map(([id, lab]) => (
-            <button key={id || 'all'} type="button" className={`chip ${statusFilter === id ? 'is-on' : ''}`} onClick={() => setStatusFilter(id)}>{lab}</button>
-          ))}
-        </div>
+        <FilterTabs
+          value={statusFilter}
+          onChange={setStatusFilter}
+          items={[['','全部'],['warn','将满 80%'],['expired','已到期']]}
+        />
       </div>
 
       <div className="card overflow-hidden">
@@ -339,7 +339,7 @@ export default function Users() {
               {pkgs.map(p => {
                 const n = (p.inbound_ids || []).length
                 const tag = n ? `${n} 个节点` : ((p.server_ids || []).length ? `${p.server_ids.length} 台服务器` : '全部节点')
-                return <option key={p.id} value={p.id}>{p.name} · {tag}</option>
+                return <option key={p.id} value={p.id}>{p.name} / {tag}</option>
               })}
             </select>
           </Field>
@@ -378,7 +378,7 @@ export default function Users() {
             </Field>
           )}
           {editing && (
-            <div className="sm:col-span-2 rounded-md px-3 py-2.5" style={{ background: 'var(--color-fill)' }}>
+            <div className="sm:col-span-2 px-3 py-2.5" style={{ background: 'var(--color-fill)' }}>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <div className="text-[12px] text-ink-mut mb-1">已用流量{editUser.direction === 'twoway' || selectedPkg?.direction === 'twoway' ? '（双向）' : ''}</div>

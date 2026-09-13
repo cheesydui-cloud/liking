@@ -52,19 +52,17 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-dvh grid place-items-center p-5 bg-app">
-      <div className="card w-full max-w-[380px] p-6 sm:p-7">
-        <div className="flex items-center gap-2.5 mb-6">
-          <BrandMark size={32} />
+    <div className="min-h-dvh bg-app flex items-start sm:items-center justify-center p-6">
+      <div className="login-box w-full max-w-[360px]">
+        <div className="flex items-end gap-3 mb-8">
+          <BrandMark size={28} />
           <div>
-            <div className="text-[16px] font-semibold leading-tight">{panelName}</div>
-            <div className="text-[12px] text-ink-mut mt-0.5">登录面板</div>
+            <div className="text-[16px] font-semibold leading-none">{panelName}</div>
+            <div className="text-[12px] text-ink-mut mt-1.5">登录面板</div>
           </div>
         </div>
         {error && (
-          <div role="alert" className="mb-4 text-[13px] rounded-lg px-3 py-2.5" style={{ color: 'var(--color-danger)', background: 'var(--color-danger-soft)' }}>
-            {error}
-          </div>
+          <div role="alert" className="alert-row is-fault mb-4">{error}</div>
         )}
         <form onSubmit={submit} className="flex flex-col gap-3.5">
           <label className="block">
@@ -86,7 +84,7 @@ export default function Login() {
               <input className="input-field h-10 font-mono tracking-widest" name="one-time-code" value={totp} onChange={e => setTotp(e.target.value)} required autoFocus inputMode="numeric" autoComplete="one-time-code" spellCheck={false} placeholder="123456" />
             </label>
           )}
-          <button className="btn-primary h-10 mt-1" disabled={loading}>{loading ? '登录中…' : '登录'}</button>
+          <button className="btn-primary w-full h-10 mt-2" disabled={loading}>{loading ? '登录中…' : '登录'}</button>
         </form>
       </div>
     </div>

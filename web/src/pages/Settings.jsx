@@ -112,7 +112,7 @@ function TotpBox() {
         <button type="button" className="btn-primary" disabled={busy} onClick={begin}>{busy ? '生成中…' : '开始绑定'}</button>
       ) : (
         <form onSubmit={enable} className="space-y-3">
-          {qr ? <img src={qr} alt="" width={160} height={160} className="rounded-md" /> : null}
+          {qr ? <img src={qr} alt="" width={160} height={160} /> : null}
           <code className="block text-[12px] font-mono break-all">{secret}</code>
           <Field label="验证码">
             <input className="input-field font-mono" value={code} onChange={e => setCode(e.target.value)} required inputMode="numeric" autoComplete="one-time-code" autoFocus />
@@ -789,8 +789,7 @@ export default function Settings({ accountOnly = false }) {
                 key={ch.id}
                 type="button"
                 onClick={() => setIssue({ ...issue, channel: ch.id })}
-                className={`text-left rounded-lg border p-3 transition-colors ${issue.channel === ch.id ? 'bg-raised' : ''}`}
-                style={{ borderColor: issue.channel === ch.id ? 'var(--color-ink)' : 'var(--color-line)' }}
+                className={`node-pick ${issue.channel === ch.id ? 'is-on' : ''}`}
               >
                 <div className="text-[13px] font-medium">{ch.title}</div>
                 <div className="text-[11.5px] text-ink-mut mt-1 leading-relaxed">{ch.desc}</div>

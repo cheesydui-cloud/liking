@@ -2,7 +2,8 @@
 
 Master: `design-system/MASTER.md`
 
-- Alerts first, then the status rail, then 14-day bars, then servers or setup.
-- Status rail is a single row of labeled numbers (not six hover-lift cards).
-- Setup checklist remains until `members > 0`. Current step is the only solid button.
-- Server table is the body, not a chart. Online uses live teal + 「在线」.
+- Hero is the giant online count + 「在线 / 共 N 台」 + 3px live/off spine.
+- Secondary numbers (节点 / 用户 / 计费 / 今日) sit in the hero meta row, not six KPI cards.
+- Alerts are left-spine rows, not banner cards.
+- Server table is the body. Each row has a status spine.
+- 14-day bars only if there is data. Setup steps sit below the table until there is a user.

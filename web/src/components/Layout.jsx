@@ -127,11 +127,7 @@ export function UserProvider({ children }) {
 function SideLink({ to, end, icon, children }) {
   return (
     <NavLink to={to} end={end}
-      className={({ isActive }) =>
-        `flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[13px] ${
-          isActive ? 'sidebar-link-active font-medium' : 'text-ink-soft hover:text-ink hover:bg-raised'
-        }`
-      }>
+      className={({ isActive }) => `sidebar-link${isActive ? ' is-active' : ''}`}>
       <Icon name={icon} size={16} />
       <span>{children}</span>
     </NavLink>
@@ -219,11 +215,11 @@ export function Layout({ children }) {
         <button type="button" className="fixed inset-0 bg-black/45 z-30 lg:hidden" aria-label="关闭菜单" onClick={() => setOpen(false)} />
       )}
       <aside
-        className={`fixed lg:static z-40 h-full w-[216px] flex flex-col border-r bg-surface ${open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+        className={`fixed lg:static z-40 h-full w-[200px] flex flex-col border-r bg-surface ${open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
         style={{ borderColor: 'var(--color-line)', transition: 'transform var(--duration-med) ease', overscrollBehavior: 'contain' }}
         aria-label="主导航"
       >
-        <div className="px-4 pt-4 pb-3 flex items-center gap-2.5">
+        <div className="px-4 pt-4 pb-3 flex items-end gap-2.5">
           <BrandMark size={28} />
           <div className="min-w-0">
             <div className="text-[15px] font-semibold truncate leading-tight">{panelName || 'liking'}</div>
@@ -244,7 +240,7 @@ export function Layout({ children }) {
         </nav>
         <div className="p-3 border-t" style={{ borderColor: 'var(--color-line)' }}>
           <div className="flex items-center gap-2 px-1">
-            <span className="w-7 h-7 rounded-md grid place-items-center text-[11px] font-semibold bg-raised text-ink-soft">
+            <span className="user-mark">
               {(user?.username || '?').slice(0, 1).toUpperCase()}
             </span>
             <div className="min-w-0 flex-1">
@@ -271,7 +267,7 @@ export function Layout({ children }) {
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 sm:py-5 pb-24 sm:pb-5">
-          <div className="max-w-[1280px] mx-auto">
+          <div className="max-w-[1280px]">
             {announceLong ? <div className="notice mb-4">{announceText}</div> : null}
             {children}
           </div>

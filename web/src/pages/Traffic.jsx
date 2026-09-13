@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useToast } from '../components/Layout'
-import { Badge, DayBars, Empty, PageHead, SkeletonRows, fmtBps, fmtBytes } from '../components/ui'
+import { DayBars, Empty, FilterTabs, PageHead, SkeletonRows, fmtBps, fmtBytes } from '../components/ui'
 
 const RANGES = [7, 14, 30]
 
@@ -32,42 +32,39 @@ export default function Traffic() {
         title="流量"
         desc="日统计和排行是节点原始流量。用户已用按套餐单向 / 双向和节点倍率计，超量会从内核摘掉。1 GiB = 1024³ 字节。"
         actions={
-          <div className="flex flex-wrap gap-1">
-            {RANGES.map(n => (
-              <button key={n} type="button" className={`chip ${daysN === n ? 'is-on' : ''}`} onClick={() => setDaysN(n)}>{n} 天</button>
-            ))}
-            <button type="button" className="chip" onClick={() => api.download(`/traffic.csv?days=${daysN}`, 'liking-traffic.csv').catch(e => toast(e.message, 'error'))}>导出 CSV</button>
+          <div className="flex flex-wrap items-center gap-4">
+            <FilterTabs
+              value={daysN}
+              onChange={setDaysN}
+              items={RANGES.map(n => [n, `${n} 天`])}
+            />
+            <button type="button" className="row-act" onClick={() => api.download(`/traffic.csv?days=${daysN}`, 'liking-traffic.csv').catch(e => toast(e.message, 'error'))}>导出 CSV</button>
           </div>
         }
       />
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
-        <div className="card card-emphasis p-4">
+      <div className="stat-row">
+        <div>
           <div className="kicker">计费合计</div>
-          <div className="text-[20px] font-semibold mt-1.5 tabular-nums">{fmtBytes(d.billed_bytes || 0)}</div>
-          <div className="text-[12px] text-ink-mut mt-1">用户已用，含双向和倍率</div>
+          <span className="stat-val">{fmtBytes(d.billed_bytes || 0)}</span>
         </div>
-        <div className="card p-4">
+        <div>
           <div className="kicker">原始累计</div>
-          <div className="text-[20px] font-semibold mt-1.5 tabular-nums">{fmtBytes(d.raw_bytes || rangeRaw)}</div>
-          <div className="text-[12px] text-ink-mut mt-1">用户上下行之和</div>
+          <span className="stat-val">{fmtBytes(d.raw_bytes || rangeRaw)}</span>
         </div>
-        <div className="card p-4">
+        <div>
           <div className="kicker">区间原始</div>
-          <div className="text-[20px] font-semibold mt-1.5 tabular-nums">{fmtBytes(rangeRaw)}</div>
-          <div className="text-[12px] text-ink-mut mt-1">{d.from} ~ {d.to}</div>
+          <span className="stat-val">{fmtBytes(rangeRaw)}</span>
         </div>
-        <div className="card p-4">
+        <div>
           <div className="kicker">本月原始</div>
-          <div className="text-[20px] font-semibold mt-1.5 tabular-nums">{fmtBytes(d.month_bytes || 0)}</div>
-          <div className="text-[12px] text-ink-mut mt-1">{d.month || '—'}</div>
+          <span className="stat-val">{fmtBytes(d.month_bytes || 0)}</span>
         </div>
-        <div className="card p-4">
+        <div>
           <div className="kicker">实时网卡</div>
-          <div className="text-[20px] font-semibold mt-1.5 tabular-nums">{fmtBps((d.nic_up_bps || 0) + (d.nic_down_bps || 0))}</div>
-          <div className="text-[12px] text-ink-mut mt-1">在线 Agent 合计</div>
+          <span className="stat-val">{fmtBps((d.nic_up_bps || 0) + (d.nic_down_bps || 0))}</span>
         </div>
       </div>
-      <div className="card p-4 mb-4">
+      <div className="mb-5">
         <div className="text-[14px] font-semibold mb-3">每日流量</div>
         {rangeRaw === 0 ? (
           <Empty title="还没有统计" hint="Agent 每 5 秒上报一次。Xray、AnyTLS、Mieru 都会计入。" />
@@ -77,9 +74,9 @@ export default function Traffic() {
       </div>
       <div className="grid lg:grid-cols-2 gap-4">
         <div className="card overflow-hidden">
-          <div className="px-4 py-3 flex items-center justify-between border-b" style={{ borderColor: 'var(--color-line-soft)' }}>
-            <div className="text-[14px] font-semibold">用户</div>
-            <Link to="/users" className="row-act">管理</Link>
+          <div className="panel-head">
+            <div>用户</div>
+            <Link to="/users" className="row-act font-medium">管理</Link>
           </div>
           {(d.users || []).length === 0 ? (
             <div className="px-4 py-6 text-[13px] text-ink-mut">这个区间没有用户流量。</div>
@@ -102,9 +99,9 @@ export default function Traffic() {
           )}
         </div>
         <div className="card overflow-hidden">
-          <div className="px-4 py-3 flex items-center justify-between border-b" style={{ borderColor: 'var(--color-line-soft)' }}>
-            <div className="text-[14px] font-semibold">节点</div>
-            <Link to="/nodes" className="row-act">管理</Link>
+          <div className="panel-head">
+            <div>节点</div>
+            <Link to="/nodes" className="row-act font-medium">管理</Link>
           </div>
           {(d.inbounds || []).length === 0 ? (
             <div className="px-4 py-6 text-[13px] text-ink-mut">这个区间没有节点流量。</div>
@@ -128,8 +125,7 @@ export default function Traffic() {
         </div>
       </div>
       <div className="mt-4 text-[12px] text-ink-mut">
-        <Badge>说明</Badge>
-        <span className="ml-2">1 GiB = 1024³ 字节。链式只计入站，不重复计落地。计费含双向和节点倍率，原始是内核累计，网卡是 Agent 实时。</span>
+        1 GiB = 1024³ 字节。链式只计入站，不重复计落地。计费含双向和节点倍率，原始是内核累计，网卡是 Agent 实时。
       </div>
     </div>
   )

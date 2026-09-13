@@ -43,10 +43,48 @@ export function Icon({ name, size = 18, className = '' }) {
 }
 
 export function BrandMark({ size = 28, className = '' }) {
+  const w = Math.max(2, Math.round(size * 0.11))
   return (
-    <span className={`brand-mark ${className}`} style={{ width: size, height: size, fontSize: Math.round(size * 0.46) }} aria-hidden>
-      L
+    <span className={`brand-mark ${className}`} style={{ width: size, height: size }} aria-hidden>
+      <span style={{ width: w, height: '58%' }} />
+      <span style={{ width: w, height: '100%' }} />
     </span>
+  )
+}
+
+export function machineTone(s) {
+  if (!s) return 'is-off'
+  if (s.last_error || s.over_quota) return 'is-fault'
+  if (s.online) return 'is-live'
+  return 'is-off'
+}
+
+export function StatusWord({ online, fault }) {
+  if (fault) return <span className="status-word is-fault">故障</span>
+  return <span className={`status-word ${online ? 'is-live' : 'is-off'}`}>{online ? '在线' : '离线'}</span>
+}
+
+export function FilterTabs({ value, onChange, items }) {
+  return (
+    <div className="filter-tabs" role="tablist">
+      {items.map(it => {
+        const id = Array.isArray(it) ? it[0] : it.id
+        const lab = Array.isArray(it) ? it[1] : it.label
+        const on = value === id
+        return (
+          <button
+            key={id || 'all'}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            className={`filter-tab${on ? ' is-on' : ''}`}
+            onClick={() => onChange(id)}
+          >
+            {lab}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 
@@ -142,7 +180,7 @@ export function PageHead({ title, desc, actions }) {
     <div className="mb-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="page-title text-[20px] font-semibold tracking-tight leading-tight">{title}</h1>
+          <h1 className="page-title text-[16px] font-semibold tracking-tight leading-tight">{title}</h1>
           {desc && <p className="text-[13px] text-ink-mut mt-1 max-w-2xl leading-relaxed">{desc}</p>}
         </div>
         {actions && <div className="hidden sm:flex flex-wrap items-center gap-2 shrink-0">{actions}</div>}
@@ -173,13 +211,10 @@ export function Tabs({ value, onChange, items }) {
 
 export function Empty({ title, hint, action }) {
   return (
-    <div className="py-12 px-6 text-center">
-      <div className="mx-auto w-10 h-10 rounded-lg grid place-items-center mb-3 bg-raised text-ink-mut">
-        <Icon name="spark" size={16} />
-      </div>
-      <div className="text-[15px] font-medium">{title}</div>
-      {hint && <p className="text-[13px] text-ink-mut mt-1.5 max-w-md mx-auto">{hint}</p>}
-      {action && <div className="mt-4">{action}</div>}
+    <div className="empty-state">
+      <div className="text-[14px] font-medium">{title}</div>
+      {hint && <p className="text-[13px] text-ink-mut mt-1 max-w-xl">{hint}</p>}
+      {action && <div className="mt-3">{action}</div>}
     </div>
   )
 }
@@ -195,18 +230,8 @@ export function Field({ label, hint, children }) {
 }
 
 export function Badge({ tone = 'muted', children, className = '' }) {
-  const map = {
-    gold: { color: 'var(--color-accent)', bg: 'var(--color-accent-soft)' },
-    warn: { color: 'var(--color-warn)', bg: 'var(--color-warn-soft)' },
-    ok: { color: 'var(--color-ok)', bg: 'var(--color-ok-soft)' },
-    danger: { color: 'var(--color-danger)', bg: 'var(--color-danger-soft)' },
-    muted: { color: 'var(--color-ink-mut)', bg: 'var(--color-raised)' },
-  }
-  const t = map[tone] || map.muted
   return (
-    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-medium ${className}`} style={{ color: t.color, background: t.bg }}>
-      {children}
-    </span>
+    <span className={`badge badge-${tone} ${className}`}>{children}</span>
   )
 }
 
@@ -244,7 +269,7 @@ export function Modal({ open, title, onClose, children, footer, wide, size }) {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`relative card w-full ${max} p-5 m-0 sm:m-auto rounded-t-xl sm:rounded-xl max-h-[92dvh] overflow-y-auto`}
+        className={`relative card w-full ${max} p-5 m-0 sm:m-auto max-h-[92dvh] overflow-y-auto`}
         style={{ overscrollBehavior: 'contain' }}
       >
         <div className="flex items-start justify-between gap-3 mb-4">

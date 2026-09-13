@@ -13,8 +13,8 @@ import { BrandMark } from './components/ui'
 function Loading() {
   return (
     <div className="min-h-dvh grid place-items-center">
-      <div className="text-center">
-        <BrandMark size={36} className="mx-auto mb-3" />
+      <div>
+        <BrandMark size={36} className="mb-3" />
         <div className="text-[15px] font-semibold">liking</div>
         <div className="text-[12px] text-ink-mut mt-1">加载中…</div>
       </div>

@@ -1,12 +1,10 @@
 # liking design system
 
-Source of truth for the panel UI. Generated 2026-09-13 by running:
+Source of truth for the panel UI. Identity: **运行图**.
 
-1. `ui-ux-pro-max` (`--design-system --variance 2 --motion 3 --density 8`, then domain searches)
-2. Anthropic `frontend-design`
-3. Vercel `web-design-guidelines`
+Generated 2026-09-13 from ui-ux-pro-max (Data-Dense + Swiss Modernism 2.0), Anthropic frontend-design, and Vercel web-design-guidelines — then rejected landing/Inter/mint defaults.
 
-Do not re-derive from Inter + navy SaaS defaults.
+Do not re-derive from Inter + navy SaaS, or from white-gray-black with no distinctive spend.
 
 ## Brief
 
@@ -15,71 +13,59 @@ Do not re-derive from Inter + navy SaaS defaults.
 - Job: is the machine up, can I change a node, can I open an account, is traffic over quota
 - Platform: React + Vite + Tailwind 4, desktop-first, phone secondary
 - Light is default. Dark is a night switch, not the brand.
+- Chinese UI. 纯白. List-first. One solid black CTA.
 
-## What the skills said, and what we kept
+## Distinctive spend
 
-| Skill output | Decision |
-|---|---|
-| ui-ux-pro-max first pass: Exaggerated Minimalism, Inter, `#0F172A` / `#0369A1`, 12rem type, landing hero | **Reject.** Wrong product. Density 8 + admin console wins over the landing pattern. |
-| ui-ux-pro-max product search: Data-Dense + Real-Time Monitoring | **Keep.** |
-| ui-ux-pro-max style: Data-Dense Dashboard + Swiss Modernism 2.0 (black/white, 8px grid, one accent) | **Keep.** |
-| ui-ux-pro-max type: Inter | **Reject.** Inter is the current AI default. Keep Fira Sans + Fira Code already in the app. |
-| frontend-design: one memorable thing; no SaaS KPI card kit; no `#111` fake-black; no middle-dots; no ALL-CAPS eyebrows | **Keep.** The memorable thing is the **carrier / live link** (teal), used only for online/ok. |
-| frontend-design: follow the brief when it pins a direction | **Keep 纯白 + 实心黑主按钮.** Teal is not the brand, only the live state. |
-| Vercel guidelines: skip link, labels, focus-visible, `…`, tabular-nums, theme-color, 44px touch on phone, `aria-live`, no `transition: all` | **Keep.** Chinese UI does not use Title Case. |
+1. **3px status spine** on every operational row / machine block: live teal `#0F766E`, fault red `#B91C1C`, offline gray `#C8C8C8`. Not a glowing dot.
+2. **Giant dashboard count** (`40–64px`) of online machines + 「在线 / 共 N 台」.
+3. True black `#000000`, max **2px** radius, **no drop shadow**.
+4. Sidebar active = 3px ink left spine + heavier type. Never a gray pill.
+5. Tables, not SaaS cards. Filters are text + underline, not chips.
 
 ## Tokens
 
-### Color (4–6 named)
+### Color
 
 | Name | Light | Role |
 |---|---|---|
-| paper | `#FFFFFF` | canvas, cards |
-| ink | `#0A0A0A` | text, primary CTA |
-| mute | `#6B6B6B` | secondary text |
-| rule | `#E3E3E3` | borders |
-| live | `#0F766E` | online / ok only |
+| paper | `#FFFFFF` | canvas |
+| ink | `#000000` | text, primary CTA |
+| mute | `#5C5C5C` | secondary text |
+| rule | `#E8E8E8` | borders |
+| live | `#0F766E` | spine + 「在线」 only |
 | fault | `#B91C1C` | errors, over-quota |
 
-Warn is `#C2410C`. Dark mode remaps paper/ink and brightens live/fault; do not invert.
+Warn is `#C2410C`. Dark remaps paper/ink and brightens live/fault; do not invert.
 
-Primary CTA is ink-on-paper (black button), never live-teal and never sky-blue.
+Primary CTA is ink-on-paper (black button), never live-teal.
 
 ### Type
 
-- UI: Fira Sans 400/500/600/700
-- Data: Fira Code + `tabular-nums` on ports, bytes, versions, heartbeats
-- Scale: 12 / 13 / 14 / 16 / 20. Body 14px (dense dashboard). Headings `text-wrap: pretty`
-- No Inter, no display serif, no all-caps labels
+- UI: IBM Plex Sans 400/500/600 + PingFang SC / 思源黑体
+- Data: IBM Plex Mono + `tabular-nums` on IP, port, version, heartbeat, bytes
+- Scale: 11 / 13 / 14 / 16. Only the dashboard 在线 count may be 40–64
+- No Inter, no ALL-CAPS, no middle dots in chrome
 
 ### Layout
 
-- Sidebar 216px, header 48px, content max 1280px, left-aligned
-- 8px spacing. Cards: 1px rule, no drop shadow
-- One solid primary button per page
-- Phone: primary action in the bottom bar; touch targets ≥ 44px
+- Sidebar ~200px, header 48px, content left-aligned, tables full width of the pane
+- Radius max 2px. No drop shadow
+- One solid black CTA per page; sync/install as text; uninstall in 更多
+- Phone: primary in bottom bar, 44px, tables scroll-x
 
 ### Motion
 
-- 150–200ms, `transform` / `opacity` / `colors` only
+- 150–200ms opacity / transform
 - Honor `prefers-reduced-motion`
-- No scroll-reveal, no KPI count-up
-
-## Principles
-
-1. Lists over marketing cards. Status is a rail of numbers, not six identical KPI tiles.
-2. Problems first: alerts above counts.
-3. State is shape + word: green/teal dot **and** 「在线」.
-4. Empty states tell the next action. Setup steps stay until there is a user, not until a server name exists.
-5. Dangerous actions live in 「更多」.
-6. Copy is Chinese, sentence-like, active. Loading ends with `…`. Errors say how to fix.
 
 ## Anti-patterns
 
-- Inter + slate-900 + sky-600
-- Cream `#F4F1EA` + terracotta
-- Dark OLED monitoring wall as default
-- Soft grey shadow under every card
-- Middle dots in chrome (`A · B · C`)
-- Emoji as navigation icons
-- Color as the only status signal
+- Inter + mint `#ECFDF5` / `#059669` landing kit
+- Six KPI cards
+- Shadows, 8–12px radius
+- Dark Grafana as default
+- Cream + serif + terracotta
+- Full newspaper broadsheet
+- Middle dots `A · B · C`
+- Teal as the brand / CTA

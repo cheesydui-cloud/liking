@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Meter, Modal, MoreMenu, PageHead, SearchInput, fmtAgo, fmtBps, fmtBytes, fmtDateShort } from '../components/ui'
+import { Badge, Empty, Field, FilterTabs, Icon, Meter, Modal, MoreMenu, PageHead, SearchInput, StatusWord, fmtAgo, fmtBps, fmtBytes, fmtDateShort, machineTone } from '../components/ui'
 
 const DEST_PRESETS = [
   'www.microsoft.com:443',
@@ -122,11 +122,11 @@ function ServerTraffic({ s, onSetLimit }) {
   const cap = Number(s.traffic_limit) || 0
   const left = cap > 0 ? Math.max(0, cap - used) : null
   return (
-    <div className="mt-3 rounded-md px-3 py-2.5" style={{ background: 'var(--color-fill, var(--color-raised))' }}>
-      <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 tabular-nums">
-        <span className="text-[13px] font-medium" style={{ color: 'var(--color-accent)' }}>↑ {s.online ? fmtBps(s.net_up_bps) : '—'}</span>
-        <span className="text-[13px] font-medium" style={{ color: 'var(--color-ok)' }}>↓ {s.online ? fmtBps(s.net_down_bps) : '—'}</span>
-        <span className="text-[12px] text-ink-mut">
+    <div className="mt-3">
+      <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 tabular-nums font-mono">
+        <span className="text-[13px] font-medium">↑ {s.online ? fmtBps(s.net_up_bps) : '—'}</span>
+        <span className="text-[13px] font-medium">↓ {s.online ? fmtBps(s.net_down_bps) : '—'}</span>
+        <span className="text-[12px] text-ink-mut font-sans">
           {s.online ? '实时' : '离线'}
         </span>
       </div>
@@ -575,18 +575,18 @@ export default function Nodes() {
         }
       />
       {servers.length > 0 && (
-        <div className="flex flex-col sm:flex-row gap-2 mb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-3">
           <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索服务器 / 节点 / 地址" />
-          <div className="flex gap-1 shrink-0">
-            {[['','全部'],['online','在线'],['offline','离线'],['upgrade','可升级']].map(([id, lab]) => (
-              <button key={id || 'all'} type="button" className={`chip ${statusFilter === id ? 'is-on' : ''}`} aria-pressed={statusFilter === id} onClick={() => setStatusFilter(id)}>{lab}</button>
-            ))}
-          </div>
+          <FilterTabs
+            value={statusFilter}
+            onChange={setStatusFilter}
+            items={[['','全部'],['online','在线'],['offline','离线'],['upgrade','可升级']]}
+          />
         </div>
       )}
       {servers.length > 0 && (
-        <div className="text-[12px] text-ink-mut mb-3">
-          {online} 在线，{servers.length - online} 离线，{list.length} 个节点
+        <div className="text-[12px] text-ink-mut mb-3 font-mono">
+          {online} 在线 / {servers.length - online} 离线 / {list.length} 个节点
         </div>
       )}
       {servers.length === 0 ? (
@@ -596,7 +596,7 @@ export default function Nodes() {
           } />
         </div>
       ) : (
-        <div className="space-y-3">
+        <div>
           {visibleServers.length === 0 ? (
             <div className="card overflow-hidden">
               <Empty title="没有匹配的服务器" hint="换个关键词或筛选。" />
@@ -606,14 +606,12 @@ export default function Nodes() {
             const lines = linesOf(s.id)
             const cores = String(s.cores || '').split(',').map(x => x.trim()).filter(Boolean)
             return (
-              <div key={s.id} className="card overflow-hidden">
-                <div className="p-4">
-                  <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[15px] font-semibold truncate">{s.name}</span>
-                        <span className={`dot ${s.online ? 'dot-on' : 'dot-off'}`} />
-                        {s.online ? <Badge tone="ok">在线</Badge> : <Badge tone="muted">离线</Badge>}
+              <div key={s.id} className={`machine ${machineTone(s)}`}>
+                <div className="machine-head">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline gap-3 flex-wrap">
+                        <span className="text-[14px] font-semibold truncate">{s.name}</span>
+                        <StatusWord online={s.online} fault={!!s.last_error} />
                         {s.needs_reinstall ? <Badge tone="warn">需重装</Badge>
                           : s.needs_upgrade ? <Badge tone="warn">可升级</Badge> : null}
                         {s.over_quota ? <Badge tone="danger">流量已满</Badge> : null}
@@ -626,22 +624,23 @@ export default function Nodes() {
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         {cores.length ? cores.map(c => <span key={c} className="chip">{c}</span>) : <span className="chip">未上报内核</span>}
                       </div>
-                      <div className="text-[12px] text-ink-mut mt-1.5">
-                        Agent {s.agent_ver || '—'} · 心跳 {fmtAgo(s.last_seen)}
+                      <div className="text-[12px] text-ink-mut mt-1.5 font-mono">
+                        Agent {s.agent_ver || '—'} / 心跳 {fmtAgo(s.last_seen)}
                         {s.os ? `  ${[s.os, s.arch].filter(Boolean).join('/')}` : ''}
-                        {s.cores_running ? ` · 内核 ${s.cores_running}` : ''}
+                        {s.cores_running ? ` / 内核 ${s.cores_running}` : ''}
                       </div>
                       {s.online && (s.disk_total || s.mem_total || s.conns || s.load_milli) ? (
-                        <div className="text-[12px] text-ink-mut mt-1">
+                        <div className="text-[12px] text-ink-mut mt-1 font-mono">
                           {s.disk_total ? `磁盘剩余 ${fmtBytes(s.disk_free)}` : ''}
-                          {s.mem_total ? `${s.disk_total ? ' · ' : ''}内存 ${fmtBytes(s.mem_avail)}` : ''}
-                          {s.load_milli ? ` · 负载 ${(Number(s.load_milli) / 1000).toFixed(2)}` : ''}
-                          {s.conns != null && s.conns !== '' ? ` · 连接 ${s.conns}` : ''}
+                          {s.mem_total ? `${s.disk_total ? ' / ' : ''}内存 ${fmtBytes(s.mem_avail)}` : ''}
+                          {s.load_milli ? ` / 负载 ${(Number(s.load_milli) / 1000).toFixed(2)}` : ''}
+                          {s.conns != null && s.conns !== '' ? ` / 连接 ${s.conns}` : ''}
                         </div>
                       ) : null}
                       {s.last_error ? (
                         <div className="text-[12px] mt-1" style={{ color: 'var(--color-danger)' }}>{s.last_error}</div>
                       ) : null}
+                      <ServerTraffic s={s} onSetLimit={saveLimit} />
                     </div>
                     <div className="flex flex-wrap gap-2.5 shrink-0 items-center">
                       <button type="button" className="row-act" onClick={() => sync(s.id)}>同步</button>
@@ -659,11 +658,10 @@ export default function Nodes() {
                         { label: '删除服务器', danger: true, onSelect: () => delNode(s.id) },
                       ]} />
                     </div>
-                  </div>
-                  <ServerTraffic s={s} onSetLimit={saveLimit} />
                 </div>
-                <div className="px-4 py-2 flex items-center justify-between border-t" style={{ borderColor: 'var(--color-line-soft)' }}>
-                  <span className="text-[12px] font-medium text-ink-mut">节点 · {lines.length}</span>
+                <div className="machine-nodes">
+                <div className="px-3.5 py-2 flex items-center justify-between">
+                  <span className="text-[12px] font-medium text-ink-mut">节点 {lines.length}</span>
                   <button type="button" className="row-act" onClick={() => openCreateLine(s.id)}>
                     <span className="inline-flex items-center gap-1"><Icon name="plus" size={12} /> 增加节点</span>
                   </button>
@@ -685,7 +683,7 @@ export default function Nodes() {
                               <td className="tabular-nums">{inb.port}</td>
                               <td>{inb.line_kind === 'chain' ? '链式' : '直出'}</td>
                               <td className="tabular-nums text-[12px] whitespace-nowrap">{fmtBytes((inb.used_up || 0) + (inb.used_down || 0))}</td>
-                              <td className="text-ink-mut">{inb.core}{dead ? ' · 未安装' : ''}{!inb.enabled ? ' · 停用' : ''}</td>
+                              <td className="text-ink-mut">{inb.core}{dead ? ' / 未安装' : ''}{!inb.enabled ? ' / 停用' : ''}</td>
                               <td className="whitespace-nowrap">
                                 <div className="flex gap-2.5 justify-end items-center">
                                   <button type="button" className="row-act" onClick={() => copyShare(inb)}>复制</button>
@@ -713,8 +711,8 @@ export default function Nodes() {
                             <div className="min-w-0">
                               <div className="font-medium truncate">{inb.name}</div>
                               <div className="text-[12px] text-ink-mut mt-0.5">
-                                {inb.profile} · {inb.port} · {inb.line_kind === 'chain' ? '链式' : '直出'}
-                                {dead ? ' · 未安装' : ''}
+                                {inb.profile} / {inb.port} / {inb.line_kind === 'chain' ? '链式' : '直出'}
+                                {dead ? ' / 未安装' : ''}
                               </div>
                               <div className="text-[12px] text-ink-mut tabular-nums mt-0.5">{fmtBytes((inb.used_up || 0) + (inb.used_down || 0))}</div>
                             </div>
@@ -735,6 +733,7 @@ export default function Nodes() {
                   </div>
                   </>
                 )}
+                </div>
               </div>
             )
           })}
@@ -770,7 +769,7 @@ export default function Nodes() {
         </>
       }>
         <p className="text-[13px] text-ink-mut mb-3">在服务器上以 root 执行。明文 http 会自动带 --insecure。</p>
-        <pre className="text-[12px] font-mono bg-raised p-3 rounded-lg overflow-x-auto whitespace-pre-wrap">{cmd}</pre>
+        <pre className="text-[12px] font-mono bg-raised p-3 overflow-x-auto whitespace-pre-wrap">{cmd}</pre>
       </Modal>
 
       <Modal open={lineOpen} title={editId ? '编辑节点' : '增加节点'} onClose={closeLine} size="xl" footer={
@@ -782,7 +781,7 @@ export default function Nodes() {
         <form id="line-form" onSubmit={submitLine} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="服务器">
             <select className="input-field" value={f.server_id} disabled>
-              {servers.map(s => <option key={s.id} value={s.id}>{s.name}{s.cores ? ` · ${s.cores}` : ''}</option>)}
+              {servers.map(s => <option key={s.id} value={s.id}>{s.name}{s.cores ? ` / ${s.cores}` : ''}</option>)}
             </select>
           </Field>
           <div className="sm:col-span-2">
@@ -824,7 +823,7 @@ export default function Nodes() {
             <Field label="TLS 证书" hint="在设置里签发或上传">
               <select className="input-field" value={f.cert_id} onChange={e => setF({ ...f, cert_id: e.target.value })}>
                 <option value="">选择证书</option>
-                {certs.map(c => <option key={c.id} value={c.id}>{c.name}{c.expires_at ? ` · ${fmtDateShort(c.expires_at)}` : ''}</option>)}
+                {certs.map(c => <option key={c.id} value={c.id}>{c.name}{c.expires_at ? ` / ${fmtDateShort(c.expires_at)}` : ''}</option>)}
               </select>
             </Field>
           )}
@@ -902,7 +901,7 @@ export default function Nodes() {
           )}
           <div className="sm:col-span-2">
             <button type="button" className="row-act" onClick={() => setShowAdv(v => !v)} aria-expanded={showAdv}>
-              {showAdv ? '收起高级选项' : '高级选项 · 指纹 / 密钥 / TLS'}
+              {showAdv ? '收起高级选项' : '高级选项 / 指纹 / 密钥 / TLS'}
             </button>
           </div>
           {showAdv && (
@@ -1030,7 +1029,7 @@ export default function Nodes() {
         </>
       }>
         <p className="text-[12px] text-ink-mut mb-2">粘贴到小火箭 / v2rayN / Nekobox 即可导入。</p>
-        <code className="block text-[12px] break-all font-mono p-3 rounded-md" style={{ background: 'var(--color-fill)' }}>{shareText}</code>
+        <code className="block text-[12px] break-all font-mono p-3" style={{ background: 'var(--color-fill)' }}>{shareText}</code>
       </Modal>
 
       <Modal open={cfOpen} title="从 Cloudflare 同步域名" onClose={() => setCfOpen(false)} wide footer={

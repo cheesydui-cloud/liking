@@ -208,43 +208,34 @@ export default function Packages() {
           } />
         </div>
       ) : (
-        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {list.map(p => {
-            const n = users.filter(u => u.role !== 'admin' && u.package_id === p.id).length
-            const names = packageNodeNames(p, ins, servers)
-            return (
-              <div key={p.id} className="card plan-card">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-[15px] font-semibold truncate">{p.name}</div>
-                    <div className="text-[12px] text-ink-mut mt-0.5">{n} 个用户</div>
-                  </div>
-                  <Badge tone="gold">{p.direction === 'twoway' ? '双向' : '单向'}</Badge>
-                </div>
-                <div>
-                  <div className="kicker">流量</div>
-                  <div className="mt-0.5 font-medium text-[13px]">{trafficLabel(p.traffic_bytes)}</div>
-                </div>
-                <div>
-                  <div className="kicker mb-1.5">节点</div>
-                  <div className="plan-nodes">
-                    {names.length === 0 ? (
-                      <span className="chip">全部节点</span>
-                    ) : (
-                      <>
-                        {names.slice(0, 6).map((name, i) => <span key={i} className="chip">{name}</span>)}
-                        {names.length > 6 ? <span className="chip">+{names.length - 6}</span> : null}
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div className="flex gap-3 mt-auto pt-1">
-                  <button type="button" className="row-act" onClick={() => startEdit(p)}>编辑</button>
-                  <button type="button" className="row-act is-danger" onClick={() => del(p.id)}>删除</button>
-                </div>
-              </div>
-            )
-          })}
+        <div className="card overflow-hidden">
+          <div className="table-wrap">
+            <table className="data">
+              <thead><tr><th>名称</th><th>流量</th><th>计费</th><th>节点</th><th>用户</th><th></th></tr></thead>
+              <tbody>
+                {list.map(p => {
+                  const n = users.filter(u => u.role !== 'admin' && u.package_id === p.id).length
+                  const names = packageNodeNames(p, ins, servers)
+                  const nodeText = names.length === 0 ? '全部节点' : names.length <= 4 ? names.join('、') : `${names.slice(0, 4).join('、')} 等 ${names.length} 个`
+                  return (
+                    <tr key={p.id}>
+                      <td className="font-medium">{p.name}</td>
+                      <td className="tabular-nums font-mono text-[12px]">{trafficLabel(p.traffic_bytes)}</td>
+                      <td>{p.direction === 'twoway' ? '双向' : '单向'}</td>
+                      <td className="text-[13px] text-ink-soft max-w-[22rem] truncate" title={names.join('、')}>{nodeText}</td>
+                      <td className="tabular-nums font-mono text-[12px]">{n}</td>
+                      <td className="whitespace-nowrap">
+                        <div className="flex gap-2.5 justify-end">
+                          <button type="button" className="row-act" onClick={() => startEdit(p)}>编辑</button>
+                          <button type="button" className="row-act is-danger" onClick={() => del(p.id)}>删除</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
       <Modal open={formOpen} title={editId ? '编辑套餐' : '新建套餐'} onClose={closeForm} size="lg" footer={
