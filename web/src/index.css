@@ -1351,6 +1351,21 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
 
 .empty-state { padding: 40px 8px; }
 
+.node-cluster + .node-cluster { margin-top: 20px; }
+.node-cluster-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 10px;
+  padding: 0 2px;
+}
+.node-cluster-count {
+  font-size: 12px;
+  color: var(--color-ink-mut);
+  font-variant-numeric: tabular-nums;
+}
+
 .panel-head {
   display: flex;
   align-items: center;

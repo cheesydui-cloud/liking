@@ -5,6 +5,7 @@ import { copyText } from '../lib/copy'
 import { formatPortRange, serverPortRange } from '../lib/ports'
 import { isDirectNode, nodeStatus, serverHasCore } from '../lib/status'
 import { useToast, useDialog } from '../components/Layout'
+import { coreLabel } from '../lib/display'
 import { Badge, Empty, Field, FilterTabs, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, StatusWord, fmtBytes, fmtDateShort } from '../components/ui'
 
 const DEST_PRESETS = [
@@ -123,6 +124,25 @@ function protoShort(profile) {
     case 'port-forward': return '中转'
     default: return profile || ''
   }
+}
+
+function coreId(core) {
+  return String(core || 'xray').toLowerCase().replace(/sing-box/g, 'singbox')
+}
+
+function nodeTone(st) {
+  if (st === '正常') return 'is-live'
+  if (st === '故障') return 'is-fault'
+  return 'is-off'
+}
+
+function Metric({ label, value, plain }) {
+  return (
+    <div className="metric">
+      <span className="metric-k">{label}</span>
+      <span className={`metric-v${plain ? ' is-plain' : ''}`}>{value}</span>
+    </div>
+  )
 }
 
 function formFromInbound(inb) {
@@ -422,99 +442,71 @@ export default function Nodes() {
           <Empty title="没有匹配的节点" hint="换个关键词或筛选。" />
         </div>
       ) : (
-        <div className="space-y-3">
+        <div>
           {groups.map(({ server: s, nodes }) => (
-            <div key={s.id} className="card overflow-hidden">
-              <div className="panel-head">
-                <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                  <span className="machine-name truncate">{s.name}</span>
-                  <StatusWord online={s.online} fault={!!s.last_error} />
-                  <span className="text-[12px] text-ink-mut">{nodes.length} 个</span>
-                </div>
+            <section key={s.id} className="node-cluster">
+              <div className="node-cluster-head">
+                <span className="machine-name truncate">{s.name}</span>
+                <StatusWord online={s.online} fault={!!s.last_error} />
+                <span className="node-cluster-count">{nodes.length} 个</span>
               </div>
               {nodes.length === 0 ? (
-                <Empty
-                  title={statusFilter || q ? '没有匹配的节点' : '这台实例还没有节点'}
-                  hint={statusFilter || q ? '换个关键词或筛选。' : '选协议即可，名称和端口都可以留空。'}
-                  action={!statusFilter && !q ? (
-                    <button type="button" className="btn-primary" onClick={() => openCreateLine(s.id)}>
-                      <Icon name="plus" size={15} /> 增加节点
-                    </button>
-                  ) : null}
-                />
+                <div className="card overflow-hidden">
+                  <Empty
+                    title={statusFilter || q ? '没有匹配的节点' : '这台实例还没有节点'}
+                    hint={statusFilter || q ? '换个关键词或筛选。' : '选协议即可，名称和端口都可以留空。'}
+                    action={!statusFilter && !q ? (
+                      <button type="button" className="btn-primary" onClick={() => openCreateLine(s.id)}>
+                        <Icon name="plus" size={15} /> 增加节点
+                      </button>
+                    ) : null}
+                  />
+                </div>
               ) : (
-                <>
-                  <div className="hidden md:block table-wrap">
-                    <table className="data">
-                      <thead><tr><th>名称</th><th>协议</th><th>端口</th><th>流量</th><th>状态</th><th></th></tr></thead>
-                      <tbody>
-                        {nodes.map(inb => {
-                          const st = nodeStatus(inb, s)
-                          return (
-                            <tr key={inb.id} className={st === '停用' ? 'opacity-50' : ''}>
-                              <td className="font-medium">{inb.name}</td>
-                              <td className="text-ink-mut" title={inb.profile}>{protoShort(inb.profile)}</td>
-                              <td className="tabular-nums font-mono text-[12px]">{inb.port}</td>
-                              <td className="tabular-nums font-mono text-[12px] whitespace-nowrap">{fmtBytes((inb.used_up || 0) + (inb.used_down || 0))}</td>
-                              <td><LineStatus status={st} /></td>
-                              <td className="whitespace-nowrap">
-                                <div className="icon-row">
-                                  <button type="button" className="icon-btn" onClick={() => copyShare(inb)} aria-label="复制节点链接" title="复制">
-                                    <Icon name="copy" size={14} />
-                                  </button>
-                                  <button type="button" className="icon-btn" onClick={() => startEdit(inb)} aria-label="编辑节点" title="编辑">
-                                    <Icon name="pencil" size={14} />
-                                  </button>
-                                  <MoreMenu iconOnly items={[
-                                    { label: '参数', onSelect: () => setParamInb(inb) },
-                                    { label: inb.enabled ? '停用' : '启用', onSelect: () => toggle(inb) },
-                                    { sep: true },
-                                    { label: '删除', danger: true, onSelect: () => delLine(inb.id) },
-                                  ]} />
-                                </div>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="md:hidden divide-y" style={{ borderColor: 'var(--color-line-soft)' }}>
-                    {nodes.map(inb => {
-                      const st = nodeStatus(inb, s)
-                      return (
-                        <div key={inb.id} className={`px-3.5 py-3 ${st === '停用' ? 'opacity-50' : ''}`}>
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="font-medium truncate">{inb.name}</div>
-                              <div className="text-[12px] text-ink-mut mt-0.5">
-                                {protoShort(inb.profile)} / {inb.port}
-                              </div>
-                              <div className="text-[12px] text-ink-mut tabular-nums font-mono mt-0.5">{fmtBytes((inb.used_up || 0) + (inb.used_down || 0))}</div>
-                              <div className="mt-0.5"><LineStatus status={st} /></div>
-                            </div>
-                            <div className="icon-row shrink-0">
-                              <button type="button" className="icon-btn" onClick={() => copyShare(inb)} aria-label="复制节点链接" title="复制">
-                                <Icon name="copy" size={14} />
-                              </button>
-                              <button type="button" className="icon-btn" onClick={() => startEdit(inb)} aria-label="编辑节点" title="编辑">
-                                <Icon name="pencil" size={14} />
-                              </button>
-                              <MoreMenu iconOnly items={[
-                                { label: '参数', onSelect: () => setParamInb(inb) },
-                                { label: inb.enabled ? '停用' : '启用', onSelect: () => toggle(inb) },
-                                { sep: true },
-                                { label: '删除', danger: true, onSelect: () => delLine(inb.id) },
-                              ]} />
+                <div className="machine-grid">
+                  {nodes.map(inb => {
+                    const st = nodeStatus(inb, s)
+                    const used = (inb.used_up || 0) + (inb.used_down || 0)
+                    return (
+                      <div key={inb.id} className={`machine ${nodeTone(st)}`}>
+                        <div className="machine-head">
+                          <div className="min-w-0 flex-1">
+                            <div className="machine-title">
+                              <span className="machine-name truncate">{inb.name}</span>
+                              <LineStatus status={st} />
                             </div>
                           </div>
+                          <div className="machine-toolbar">
+                            <button type="button" className="icon-btn" onClick={() => startEdit(inb)} aria-label="编辑节点" title="编辑">
+                              <Icon name="pencil" size={14} />
+                            </button>
+                            <MoreMenu iconOnly items={[
+                              { label: '编辑', onSelect: () => startEdit(inb) },
+                              { label: '复制', onSelect: () => copyShare(inb) },
+                              { label: '参数', onSelect: () => setParamInb(inb) },
+                              { sep: true },
+                              { label: inb.enabled ? '停用' : '启用', onSelect: () => toggle(inb) },
+                              { sep: true },
+                              { label: '删除', danger: true, onSelect: () => delLine(inb.id) },
+                            ]} />
+                          </div>
                         </div>
-                      )
-                    })}
-                  </div>
-                </>
+                        <div className="machine-metrics">
+                          <Metric label="协议" value={protoShort(inb.profile)} plain />
+                          <Metric label="端口" value={String(inb.port || '')} />
+                          <Metric label="流量" value={fmtBytes(used)} />
+                          <Metric label="核心" value={coreLabel(coreId(inb.core))} plain />
+                        </div>
+                        <div className="machine-foot">
+                          <button type="button" className="machine-ports" onClick={() => setParamInb(inb)}>参数</button>
+                          <button type="button" className="row-act" onClick={() => copyShare(inb)}>复制</button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
               )}
-            </div>
+            </section>
           ))}
         </div>
       )}
