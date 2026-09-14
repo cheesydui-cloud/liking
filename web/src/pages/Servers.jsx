@@ -22,6 +22,25 @@ function Metric({ label, value }) {
   )
 }
 
+const DEFAULT_GH_PROXY = 'https://gh-proxy.com/'
+
+function loadGhProxyPref() {
+  try {
+    const j = JSON.parse(localStorage.getItem('lk-agent-gh-proxy') || '{}')
+    return { on: !!j.on, url: String(j.url || DEFAULT_GH_PROXY) }
+  } catch {
+    return { on: false, url: DEFAULT_GH_PROXY }
+  }
+}
+
+function withGhProxyFlag(cmd, on, url) {
+  if (!on || !cmd) return cmd
+  const p = String(url || '').trim()
+  if (!/^https?:\/\/[^ \t;|&`$<>\\]+$/i.test(p)) return cmd
+  const norm = p.replace(/\/+$/, '') + '/'
+  return `${cmd.replace(/\s+$/, '')} --gh-proxy ${norm}`
+}
+
 function machineMeta(s) {
   const cores = String(s.cores || '').split(',').map(x => x.trim()).filter(Boolean)
   const bits = [
@@ -43,6 +62,8 @@ export default function Servers() {
   const [name, setName] = useState('')
   const [host, setHost] = useState('')
   const [cmd, setCmd] = useState('')
+  const [cnInstall, setCnInstall] = useState(() => loadGhProxyPref().on)
+  const [ghProxy, setGhProxy] = useState(() => loadGhProxyPref().url)
   const [formOpen, setFormOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [cfOpen, setCfOpen] = useState(false)
@@ -69,6 +90,14 @@ export default function Servers() {
     }, 5000)
     return () => clearInterval(t)
   }, [])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('lk-agent-gh-proxy', JSON.stringify({ on: cnInstall, url: ghProxy }))
+    } catch {}
+  }, [cnInstall, ghProxy])
+
+  const installCmd = useMemo(() => withGhProxyFlag(cmd, cnInstall, ghProxy), [cmd, cnInstall, ghProxy])
 
   const openCreate = () => {
     setName('')
@@ -394,7 +423,7 @@ export default function Servers() {
         <>
           <button type="button" className="btn-ghost" onClick={() => setCmd('')}>关闭</button>
           <button type="button" className="btn-primary" onClick={async () => {
-            try { await copyText(cmd); toast('已复制') }
+            try { await copyText(installCmd); toast('已复制') }
             catch { toast('浏览器不允许自动复制，请手动选中命令', 'error') }
           }}>
             <Icon name="copy" size={15} /> 复制
@@ -402,7 +431,21 @@ export default function Servers() {
         </>
       }>
         <p className="text-[13px] text-ink-mut mb-3">在服务器上以 root 执行。明文 http 会自动带 --insecure。</p>
-        <pre className="text-[12px] font-mono bg-raised p-3 overflow-x-auto whitespace-pre-wrap">{cmd}</pre>
+        <pre className="text-[12px] font-mono bg-raised p-3 overflow-x-auto whitespace-pre-wrap">{installCmd}</pre>
+        <label className="flex items-start gap-2 mt-3 text-[13px] text-ink-soft">
+          <input type="checkbox" className="mt-0.5" checked={cnInstall} onChange={e => setCnInstall(e.target.checked)} />
+          <span>
+            <span className="font-medium text-ink">国内机器</span>
+            <span className="block text-[12px] text-ink-mut mt-0.5">Agent 从本面板下载。勾选后第一次下发节点时，Xray / sing-box 走 GitHub 镜像。</span>
+          </span>
+        </label>
+        {cnInstall ? (
+          <div className="mt-3">
+            <Field label="镜像地址" hint="国内可访问的 GitHub 前缀，一般不用改。">
+              <input className="input-field font-mono" value={ghProxy} onChange={e => setGhProxy(e.target.value)} spellCheck={false} autoComplete="off" />
+            </Field>
+          </div>
+        ) : null}
       </Modal>
 
       <Modal open={cfOpen} title="从 Cloudflare 同步域名" onClose={() => setCfOpen(false)} wide footer={

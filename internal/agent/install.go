@@ -79,8 +79,22 @@ func linuxArch() string {
 	}
 }
 
-func withGHProxy(u string) string {
+var githubProxyFile = "/etc/liking/gh-proxy"
+
+func githubProxy() string {
 	p := strings.TrimRight(strings.TrimSpace(os.Getenv("LIKING_GITHUB_PROXY")), "/")
+	if p != "" {
+		return p
+	}
+	b, err := os.ReadFile(githubProxyFile)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(string(b)), "/")
+}
+
+func withGHProxy(u string) string {
+	p := githubProxy()
 	if p == "" {
 		return u
 	}

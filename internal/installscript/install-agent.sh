@@ -25,6 +25,7 @@ require_val() {
 PANEL_URL="${LIKING_PANEL_URL:-}"
 TOKEN="${AGENT_TOKEN:-}"
 ALLOW_INSECURE="${LIKING_ALLOW_INSECURE:-}"
+GH_PROXY="${LIKING_GITHUB_PROXY:-}"
 CURL_TLS=()
 
 while [[ $# -gt 0 ]]; do
@@ -34,6 +35,8 @@ while [[ $# -gt 0 ]]; do
     --token) require_val --token "${2:-}"; TOKEN="$2"; shift 2 ;;
     --token=*) TOKEN="${1#*=}"; shift ;;
     --insecure) ALLOW_INSECURE=1; shift ;;
+    --gh-proxy) require_val --gh-proxy "${2:-}"; GH_PROXY="$2"; shift 2 ;;
+    --gh-proxy=*) GH_PROXY="${1#*=}"; shift ;;
     -k|--insecure-tls) CURL_TLS=(-k); shift ;;
     -h|--help)
       cat <<'H'
@@ -41,6 +44,7 @@ liking 节点安装
   --panel-url URL   面板地址，缺省用脚本内置
   --token TOKEN     节点 token（必填）
   --insecure        允许明文 http / ws 控制信道
+  --gh-proxy URL    GitHub 镜像前缀，国内机器装内核用，如 https://gh-proxy.com/
   -k                curl 跳过 TLS 校验
 H
       exit 0 ;;
@@ -73,6 +77,20 @@ fi
 printf '%s\n' "$TOKEN" > "$ETC_DIR/panel.token"
 chmod 600 "$ETC_DIR/panel.token"
 printf '%s\n' "$PANEL_URL" > "$ETC_DIR/panel.url"
+
+PROXY_ENV=""
+if [[ -n "$GH_PROXY" ]]; then
+  case "$GH_PROXY" in
+    http://*|https://*) ;;
+    *) die "--gh-proxy 需要 http(s) 地址，例如 https://gh-proxy.com/" ;;
+  esac
+  if [[ "$GH_PROXY" != */ ]]; then
+    GH_PROXY="$GH_PROXY/"
+  fi
+  printf '%s\n' "$GH_PROXY" > "$ETC_DIR/gh-proxy"
+  chmod 644 "$ETC_DIR/gh-proxy"
+  PROXY_ENV="Environment=\"LIKING_GITHUB_PROXY=$GH_PROXY\""
+fi
 
 note "下载 liking-agent ($GOARCH) …"
 BIN_URL="${PANEL_URL%/}/v1/agent-bin?os=linux&arch=${GOARCH}"
@@ -112,6 +130,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+$PROXY_ENV
 ExecStart=$INSTALL_DIR/liking-agent --connect $CONNECT --token-file $ETC_DIR/panel.token --dir $DATA_DIR $INSECURE_FLAG
 Restart=always
 RestartSec=3
@@ -125,5 +144,9 @@ systemctl daemon-reload
 systemctl enable liking-agent.service
 systemctl restart liking-agent.service
 ok "liking-agent 已启动"
-note "内核会在第一次下发对应入站时自动安装（Xray / sing-box / mita），节点需要能访问 GitHub"
+if [[ -n "$GH_PROXY" ]]; then
+  note "内核下载走镜像 $GH_PROXY"
+else
+  note "内核会在第一次下发对应入站时自动安装（Xray / sing-box / mita），节点需要能访问 GitHub"
+fi
 systemctl --no-pager --full status liking-agent.service || true

@@ -2,6 +2,20 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.1.45 — 2026-09-14
+
+国内机器装 Agent：安装框可勾选走 GitHub 镜像拉内核。面板在国外时 Agent 本体仍从本面板下载。
+
+### 改进
+- 一键安装框加「国内机器」。勾选后命令带 `--gh-proxy https://gh-proxy.com/`，镜像地址可改，勾选会记住
+- 安装脚本把镜像写入 `/etc/liking/gh-proxy` 和 systemd 环境。第一次下发节点时 Xray / sing-box / mita 走镜像
+- Agent 本体仍从本面板 `/v1/agent-bin` 下载，不走 GitHub。没勾选时行为和以前一样
+
+### 升级注意
+- 只升面板即可。同机 Agent 会随 `liking-upgrade` 重启
+- 已经装好的国内机器要再复制一次带勾选的安装命令执行，内核镜像才会生效
+- 回滚：`liking-upgrade --release v0.1.44`
+
 ## v0.1.44 — 2026-09-14
 
 去掉 AI 风：冰蓝灰渐变、毛玻璃、大标题和胶囊按钮。信息架构不变。
