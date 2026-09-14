@@ -491,6 +491,14 @@ func TestServerTrafficTotals(t *testing.T) {
 	if inTot[in.ID].Up != 150 || inTot[in.ID].Down != 300 {
 		t.Fatalf("inbound %+v", inTot[in.ID])
 	}
+	userTot, err := UserInboundTrafficTotals(d, u.ID)
+	if err != nil || userTot[in.ID].Up != 150 || userTot[in.ID].Down != 300 {
+		t.Fatalf("user inbound %+v %v", userTot, err)
+	}
+	empty, err := UserInboundTrafficTotals(d, 99999)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty user inbound %+v %v", empty, err)
+	}
 	series, err := TrafficSeries(d, "2026-09-13", "2026-09-13", 0, 0)
 	if err != nil || len(series) != 1 || series[0].Up != 150 {
 		t.Fatalf("series %+v %v", series, err)

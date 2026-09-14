@@ -1089,6 +1089,24 @@ func InboundTrafficTotals(d *sql.DB) (map[int64]TrafficSum, error) {
 	return out, rows.Err()
 }
 
+func UserInboundTrafficTotals(d *sql.DB, userID int64) (map[int64]TrafficSum, error) {
+	rows, err := d.Query(`SELECT inbound_id, COALESCE(SUM(up),0), COALESCE(SUM(down),0) FROM traffic_daily WHERE user_id=? GROUP BY inbound_id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]TrafficSum{}
+	for rows.Next() {
+		var id int64
+		var s TrafficSum
+		if err := rows.Scan(&id, &s.Up, &s.Down); err != nil {
+			return nil, err
+		}
+		out[id] = s
+	}
+	return out, rows.Err()
+}
+
 func UserBilledBytes(u *User, pkg *Package) int64 {
 	raw := u.UsedUp + u.UsedDown
 	if pkg != nil && pkg.Direction == "twoway" {

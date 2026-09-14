@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useUser, useToast } from '../components/Layout'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
-import { DayBars, Icon, Meter, Modal, PageHead, billedBytes, fmtDate } from '../components/ui'
+import { DayBars, Icon, Meter, Modal, PageHead, billedBytes, fmtBytes, fmtDate } from '../components/ui'
 import { SubPanel } from '../components/SubPanel'
 
 export default function My() {
@@ -71,13 +71,17 @@ export default function My() {
           <div className="panel-head">可用节点</div>
           <div className="table-wrap">
             <table className="data">
-              <thead><tr><th>名称</th><th>地址</th><th>协议</th><th></th></tr></thead>
+              <thead><tr><th>名称</th><th>地址</th><th>协议</th><th>已用流量</th><th></th></tr></thead>
               <tbody>
                 {nodes.nodes.map((n, i) => (
                   <tr key={n.id || i}>
-                    <td className="font-medium">{n.name}</td>
+                    <td className="font-medium">
+                      {n.name}
+                      {n.line_kind === 'chain' ? <span className="line-tag">中转</span> : null}
+                    </td>
                     <td className="copy-text">{n.host}:{n.port}</td>
                     <td className="text-[12px] text-ink-mut">{n.profile}</td>
+                    <td className="tabular-nums text-[12px] font-mono whitespace-nowrap">{fmtBytes((n.used_up || 0) + (n.used_down || 0))}</td>
                     <td className="text-right whitespace-nowrap w-px">
                       <button type="button" className="row-act" disabled={!n.uri} onClick={() => copyNode(n)}>复制</button>
                     </td>

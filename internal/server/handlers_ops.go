@@ -121,6 +121,7 @@ func (s *Server) handleMeNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	over := s.serverOverMap()
+	totals, _ := db.UserInboundTrafficTotals(s.DB, u.ID)
 	type node struct {
 		ID         int64  `json:"id"`
 		Name       string `json:"name"`
@@ -128,6 +129,9 @@ func (s *Server) handleMeNodes(w http.ResponseWriter, r *http.Request) {
 		Port       int    `json:"port"`
 		Profile    string `json:"profile"`
 		ServerName string `json:"server_name"`
+		LineKind   string `json:"line_kind"`
+		UsedUp     int64  `json:"used_up"`
+		UsedDown   int64  `json:"used_down"`
 		URI        string `json:"uri,omitempty"`
 	}
 	out := []node{}
@@ -140,6 +144,10 @@ func (s *Server) handleMeNodes(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		host := corecfg.ShareHost(in)
+		kind := in.LineKind
+		if kind == "" {
+			kind = "direct"
+		}
 		n := node{
 			ID:         in.ID,
 			Name:       in.Name,
@@ -147,6 +155,11 @@ func (s *Server) handleMeNodes(w http.ResponseWriter, r *http.Request) {
 			Port:       in.Port,
 			Profile:    in.Profile,
 			ServerName: in.ServerName,
+			LineKind:   kind,
+		}
+		if t, ok := totals[in.ID]; ok {
+			n.UsedUp = t.Up
+			n.UsedDown = t.Down
 		}
 		if cl, err := db.GetClient(s.DB, in.ID, u.ID); err == nil && cl != nil && cl.Enabled {
 			if uri, err := corecfg.ShareURI(in, cl); err == nil {

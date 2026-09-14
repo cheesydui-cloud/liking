@@ -515,6 +515,186 @@ func TestAdminSubscriptionAllNodes(t *testing.T) {
 	}
 }
 
+func TestMeNodesTrafficAndChain(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	body, _ := json.Marshal(map[string]string{"name": "n1", "public_host": "10.0.0.1"})
+	res, err = c.Post(ts.URL+"/api/servers", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		Server struct {
+			ID int64 `json:"id"`
+		} `json:"server"`
+	}
+	decodeRes(t, res, &created)
+
+	inBody, _ := json.Marshal(map[string]any{
+		"server_id": created.Server.ID,
+		"name":      "direct-1",
+		"profile":   "vless-reality-vision",
+		"port":      8443,
+	})
+	res, err = c.Post(ts.URL+"/api/inbounds", "application/json", bytes.NewReader(inBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var direct struct {
+		Inbound struct {
+			ID int64 `json:"id"`
+		} `json:"inbound"`
+	}
+	decodeRes(t, res, &direct)
+
+	chainBody, _ := json.Marshal(map[string]any{
+		"server_id":       created.Server.ID,
+		"name":            "relay-1",
+		"profile":         "vless-reality-vision",
+		"port":            8444,
+		"line_kind":       "chain",
+		"exit_inbound_id": direct.Inbound.ID,
+	})
+	res, err = c.Post(ts.URL+"/api/inbounds", "application/json", bytes.NewReader(chainBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chain struct {
+		Inbound struct {
+			ID int64 `json:"id"`
+		} `json:"inbound"`
+	}
+	decodeRes(t, res, &chain)
+
+	pkgBody, _ := json.Marshal(map[string]any{
+		"name": "std", "traffic_bytes": 0, "cycle_days": 30, "direction": "oneway",
+		"server_ids": []int64{created.Server.ID},
+	})
+	res, err = c.Post(ts.URL+"/api/packages", "application/json", bytes.NewReader(pkgBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkg struct {
+		Package struct {
+			ID int64 `json:"id"`
+		} `json:"package"`
+	}
+	decodeRes(t, res, &pkg)
+
+	uBody, _ := json.Marshal(map[string]any{
+		"username": "alice", "password": "alice12", "package_id": pkg.Package.ID, "days": 30,
+	})
+	res, err = c.Post(ts.URL+"/api/users", "application/json", bytes.NewReader(uBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var createdUser struct {
+		User struct {
+			ID int64 `json:"id"`
+		} `json:"user"`
+	}
+	decodeRes(t, res, &createdUser)
+
+	admin, err := db.GetUserByName(d, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AddDailyTraffic(d, "2026-09-13", admin.ID, direct.Inbound.ID, 100, 200); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AddDailyTraffic(d, "2026-09-13", createdUser.User.ID, direct.Inbound.ID, 10, 20); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AddDailyTraffic(d, "2026-09-13", createdUser.User.ID, chain.Inbound.ID, 5, 7); err != nil {
+		t.Fatal(err)
+	}
+
+	type meNode struct {
+		Name     string `json:"name"`
+		LineKind string `json:"line_kind"`
+		UsedUp   int64  `json:"used_up"`
+		UsedDown int64  `json:"used_down"`
+	}
+	findNode := func(list []meNode, name string) meNode {
+		t.Helper()
+		for _, n := range list {
+			if n.Name == name {
+				return n
+			}
+		}
+		t.Fatalf("missing node %s in %+v", name, list)
+		return meNode{}
+	}
+
+	res, err = c.Get(ts.URL + "/api/me/nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var adminNodes struct {
+		Nodes []meNode `json:"nodes"`
+	}
+	decodeRes(t, res, &adminNodes)
+	dNode := findNode(adminNodes.Nodes, "direct-1")
+	if dNode.LineKind != "direct" || dNode.UsedUp != 100 || dNode.UsedDown != 200 {
+		t.Fatalf("admin direct %+v", dNode)
+	}
+	rNode := findNode(adminNodes.Nodes, "relay-1")
+	if rNode.LineKind != "chain" || rNode.UsedUp != 0 || rNode.UsedDown != 0 {
+		t.Fatalf("admin relay %+v", rNode)
+	}
+
+	aliceJar, _ := cookiejar.New(nil)
+	aliceC := &http.Client{Jar: aliceJar}
+	aliceLogin, _ := json.Marshal(map[string]string{"username": "alice", "password": "alice12"})
+	res, err = aliceC.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(aliceLogin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+	res, err = aliceC.Get(ts.URL + "/api/me/nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var aliceNodes struct {
+		Nodes []meNode `json:"nodes"`
+	}
+	decodeRes(t, res, &aliceNodes)
+	dNode = findNode(aliceNodes.Nodes, "direct-1")
+	if dNode.LineKind != "direct" || dNode.UsedUp != 10 || dNode.UsedDown != 20 {
+		t.Fatalf("alice direct %+v", dNode)
+	}
+	rNode = findNode(aliceNodes.Nodes, "relay-1")
+	if rNode.LineKind != "chain" || rNode.UsedUp != 5 || rNode.UsedDown != 7 {
+		t.Fatalf("alice relay %+v", rNode)
+	}
+}
+
 func vlessUUID(uri string) string {
 	rest := strings.TrimPrefix(uri, "vless://")
 	at := strings.Index(rest, "@")
