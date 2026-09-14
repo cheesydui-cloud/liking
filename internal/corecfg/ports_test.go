@@ -1,6 +1,10 @@
 package corecfg
 
-import "testing"
+import (
+	"testing"
+
+	"liking/internal/db"
+)
 
 func TestPickFreePortAvoidsUsed(t *testing.T) {
 	used := map[int]struct{}{10000: {}, 10001: {}, 54321: {}}
@@ -68,5 +72,28 @@ func TestNormalizePortRange(t *testing.T) {
 	}
 	if _, _, err := NormalizePortRange(1, 70000); err == nil {
 		t.Fatal("too high")
+	}
+}
+
+func TestSocksPortOutOfUserPool(t *testing.T) {
+	if SocksPort(1) != SocksPortBase+1 {
+		t.Fatalf("socks %d", SocksPort(1))
+	}
+	if SocksPort(1) <= DefaultPortMax {
+		t.Fatal("socks in user pool")
+	}
+	used := map[int]struct{}{}
+	MarkReservedPorts(used, []*db.Inbound{{ID: 1}, {ID: 2}})
+	if _, ok := used[XrayAPIPort]; !ok {
+		t.Fatal("xray api")
+	}
+	if _, ok := used[SingboxAPIPort]; !ok {
+		t.Fatal("singbox api")
+	}
+	if _, ok := used[SocksPort(1)]; !ok {
+		t.Fatal("socks 1")
+	}
+	if _, ok := used[SocksPort(2)]; !ok {
+		t.Fatal("socks 2")
 	}
 }

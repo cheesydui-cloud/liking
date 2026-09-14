@@ -55,8 +55,8 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 	// landing server we must see every chain entry pointing here — ListInbounds
 	// already loaded them.
 
-	apiPort := pickAPIPort(ins, 10085)
-	sbPort := pickAPIPort(ins, 19090, apiPort)
+	apiPort := pickAPIPort(ins, XrayAPIPort)
+	sbPort := pickAPIPort(ins, SingboxAPIPort, apiPort)
 	xray, err := buildXray(ins, clients, certs, byID, apiPort)
 	if err != nil {
 		return nil, err
@@ -107,6 +107,7 @@ func pickAPIPort(ins []*db.Inbound, start int, extra ...int) int {
 	used := map[int]struct{}{}
 	for _, in := range ins {
 		used[in.Port] = struct{}{}
+		used[SocksPort(in.ID)] = struct{}{}
 	}
 	for _, p := range extra {
 		if p > 0 {

@@ -49,6 +49,9 @@ func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
 		over := db.ServerOverQuota(srv, used.Up+used.Down)
 		c.Enabled = ok && in.Enabled && !over
 		c.Email = db.EmailFor(u.ID, in.ID)
+		if in.Profile == ProfileMieru {
+			c.Username = db.EmailFor(u.ID, in.ID)
+		}
 		if err := db.UpsertClient(d, c); err != nil {
 			return nil, err
 		}
@@ -73,7 +76,7 @@ func newClient(u *db.User, in *db.Inbound) (*db.Client, error) {
 	st := ParseSettings(in.Settings)
 	switch in.Profile {
 	case ProfileMieru:
-		c.Username = fmt.Sprintf("u%d", u.ID)
+		c.Username = db.EmailFor(u.ID, in.ID)
 		pw, err := RandomHex(8)
 		if err != nil {
 			return nil, err

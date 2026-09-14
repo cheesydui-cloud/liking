@@ -26,7 +26,7 @@ func spaHandler() http.Handler {
 		if _, err := fs.Stat(dist, p); err == nil {
 			if strings.HasPrefix(p, "assets/") {
 				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			} else if p == "index.html" || strings.HasSuffix(p, ".svg") {
+			} else if p == "index.html" || p == "theme-boot.js" || strings.HasSuffix(p, ".svg") {
 				w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			}
 			files.ServeHTTP(w, r)

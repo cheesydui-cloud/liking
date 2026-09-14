@@ -362,7 +362,7 @@ export default function Nodes() {
       const d = await api.get(`/inbounds/${inb.id}/share`)
       try {
         await copyText(d.uri)
-        toast('已复制节点链接')
+        toast('已复制当前账号的节点链接')
       } catch {
         setShareText(d.uri)
         toast('浏览器不允许自动复制，请手动选中链接', 'error')
@@ -494,7 +494,7 @@ export default function Nodes() {
                         <div className="machine-metrics">
                           <Metric label="协议" value={protoShort(inb.profile)} plain />
                           <Metric label="端口" value={String(inb.port || '')} />
-                          <Metric label="流量" value={fmtBytes(used)} />
+                          <Metric label="全站" value={fmtBytes(used)} />
                           <Metric label="核心" value={coreLabel(coreId(inb.core))} plain />
                         </div>
                         <div className="machine-foot">

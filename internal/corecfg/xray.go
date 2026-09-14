@@ -24,7 +24,7 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 		map[string]any{"tag": "block", "protocol": "blackhole"},
 	)
 	// API inbound must route to the api module tag, not freedom.
-	// freedom here loops 127.0.0.1:10085 onto itself and opens tens of thousands of fds.
+	// freedom here loops 127.0.0.1:API onto itself and opens tens of thousands of fds.
 	rules = append(rules, map[string]any{
 		"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api",
 	})
@@ -76,7 +76,7 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 		ins = append(ins, map[string]any{
 			"tag":      tag,
 			"listen":   "127.0.0.1",
-			"port":     socksPort(in.ID),
+			"port":     SocksPort(in.ID),
 			"protocol": "socks",
 			"settings": map[string]any{"udp": true, "auth": "noauth"},
 		})
@@ -110,7 +110,6 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 func inboundTag(id int64) string  { return fmt.Sprintf("in-%d", id) }
 func outboundTag(id int64) string { return fmt.Sprintf("ob-%d", id) }
 func socksTag(id int64) string    { return fmt.Sprintf("socks-%d", id) }
-func socksPort(id int64) int      { return 20000 + int(id) }
 
 func xrayInbound(in *db.Inbound, clients []*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound) (map[string]any, error) {
 	st := ParseSettings(in.Settings)

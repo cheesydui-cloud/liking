@@ -35,6 +35,10 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "需要套餐名")
 		return
 	}
+	if len(req.ServerIDs) == 0 && len(req.InboundIDs) == 0 {
+		jsonErr(w, http.StatusBadRequest, "请选择实例或节点")
+		return
+	}
 	p, err := db.CreatePackage(s.DB, strings.TrimSpace(req.Name), req.TrafficBytes, req.CycleDays, req.ResetDay, req.Direction)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
@@ -113,6 +117,10 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.InboundIDs != nil {
+		if len(req.InboundIDs) == 0 {
+			jsonErr(w, http.StatusBadRequest, "请选择实例或节点")
+			return
+		}
 		if err := db.SetPackageInbounds(s.DB, p.ID, req.InboundIDs, req.Multipliers); err != nil {
 			jsonErr(w, http.StatusBadRequest, err.Error())
 			return
@@ -122,6 +130,10 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if req.ServerIDs != nil {
+		if len(req.ServerIDs) == 0 {
+			jsonErr(w, http.StatusBadRequest, "请选择实例或节点")
+			return
+		}
 		if err := db.SetPackageServers(s.DB, p.ID, req.ServerIDs); err != nil {
 			jsonErr(w, http.StatusBadRequest, "节点无效")
 			return

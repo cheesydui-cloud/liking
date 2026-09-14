@@ -54,6 +54,10 @@ func New(d *sql.DB) (*Server, error) {
 		if err != nil {
 			return
 		}
+		need, err := db.UserNeedsProvision(d, u)
+		if err != nil || !need {
+			return
+		}
 		s.provisionAndSyncUser(u)
 	}
 	hub.Redispatch = func(ids []int64) { s.syncServers(ids...) }
@@ -71,7 +75,8 @@ func (s *Server) Close() {
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.RealIP)
+	r.Use(secureHeaders)
+	r.Use(trustedForwarded)
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]any{"ok": true, "version": version.Version})
@@ -139,6 +144,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/api/users/{id}/reset-traffic", s.handleResetTraffic)
 			r.Post("/api/users/{id}/rotate-sub", s.handleRotateSub)
 			r.Post("/api/users/{id}/password", s.handleSetUserPassword)
+			r.Post("/api/users/{id}/forget-password", s.handleForgetPassword)
 
 			r.Get("/api/packages", s.handleListPackages)
 			r.Post("/api/packages", s.handleCreatePackage)
@@ -156,7 +162,6 @@ func (s *Server) Router() http.Handler {
 
 			r.Get("/api/settings", s.handleGetSettings)
 			r.Put("/api/settings", s.handlePutSettings)
-			r.Get("/api/backup", s.handleBackupDownload)
 			r.Post("/api/backup", s.handleBackupDownload)
 			r.Get("/api/backup/summary", s.handleBackupSummary)
 			r.Post("/api/backup/preview", s.handleBackupPreview)

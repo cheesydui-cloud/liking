@@ -1,6 +1,7 @@
 package server
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -199,45 +200,29 @@ func (s *Server) handleInboundShare(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "节点未填写公开地址，也还没有上报连接 IP。先点「改」填 IP 或域名。")
 		return
 	}
-	clients, err := db.ListClientsByInbound(s.DB, in.ID)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, err.Error())
+	u := userFromCtx(r.Context())
+	if u == nil {
+		jsonErr(w, http.StatusUnauthorized, "未登录")
 		return
 	}
-	var picked *db.Client
-	var pickedUser *db.User
-	for _, c := range clients {
-		if c == nil || !c.Enabled {
-			continue
-		}
-		u, err := db.GetUser(s.DB, c.UserID)
-		if err != nil || u == nil || u.Role == "admin" {
-			continue
-		}
-		var pkg *db.Package
-		if u.PackageID != nil {
-			pkg, _ = db.GetPackage(s.DB, *u.PackageID)
-		}
-		if !db.UserAccessOK(u, pkg) {
-			continue
-		}
-		picked, pickedUser = c, u
-		break
+	c, err := db.GetClient(s.DB, in.ID, u.ID)
+	if err == sql.ErrNoRows {
+		s.provisionAndSyncUser(u)
+		c, err = db.GetClient(s.DB, in.ID, u.ID)
 	}
-	if picked == nil {
-		jsonErr(w, http.StatusBadRequest, "还没有绑定此节点的用户。管理员点右上角「用户页」复制自己的订阅。")
+	if err != nil || c == nil {
+		jsonErr(w, http.StatusBadRequest, "还没有当前账号在此节点的客户端。先打开用户页。")
 		return
 	}
-	uri, err := corecfg.ShareURI(in, picked)
+	uri, err := corecfg.ShareURI(in, c)
 	if err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	jsonOK(w, map[string]any{
-		"uri":       uri,
-		"username":  pickedUser.Username,
-		"profile":   in.Profile,
-		"sub_token": pickedUser.SubToken,
+		"uri":      uri,
+		"username": u.Username,
+		"profile":  in.Profile,
 	})
 }
 
@@ -287,6 +272,9 @@ func (s *Server) prepareInbound(in *db.Inbound) error {
 	used, err := db.UsedPortsOnServer(s.DB, in.ServerID, in.ID)
 	if err != nil {
 		return err
+	}
+	if ins, err := db.ListInboundsByServer(s.DB, in.ServerID); err == nil {
+		corecfg.MarkReservedPorts(used, ins)
 	}
 	if in.Port == 0 {
 		srv, err := db.GetServer(s.DB, in.ServerID)

@@ -472,6 +472,7 @@ func (h *Hub) noteLive(ac *agentConn, st wsproto.Stats) {
 func (h *Hub) applyStats(samples []wsproto.Sample) {
 	day := db.ClockDay(h.DB)
 	touched := map[int64]struct{}{}
+	var items []db.TrafficWrite
 	for _, s := range samples {
 		if s.Email == "" || strings.HasPrefix(s.Email, "relay.") {
 			continue
@@ -500,9 +501,19 @@ func (h *Hub) applyStats(samples []wsproto.Sample) {
 		}
 		upB := int64(float64(up) * mult)
 		downB := int64(float64(down) * mult)
-		_ = db.AddUserTraffic(h.DB, u.ID, upB, downB)
-		_ = db.AddDailyTraffic(h.DB, day, u.ID, in.ID, up, down)
+		items = append(items, db.TrafficWrite{
+			UserID:     u.ID,
+			InboundID:  in.ID,
+			BilledUp:   upB,
+			BilledDown: downB,
+			RawUp:      up,
+			RawDown:    down,
+		})
 		touched[u.ID] = struct{}{}
+	}
+	if err := db.AddTrafficBatch(h.DB, day, items); err != nil {
+		log.Printf("hub: traffic batch: %v", err)
+		return
 	}
 	if h.OnTrafficUpdate != nil {
 		for uid := range touched {

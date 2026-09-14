@@ -22,13 +22,17 @@ function ymd(ts) {
   if (!ts) return ''
   const d = new Date(ts * 1000)
   if (Number.isNaN(d.getTime())) return ''
-  const z = n => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d)
 }
 
 function ymdToUnix(s) {
   if (!s) return 0
-  const d = new Date(`${s}T23:59:59`)
+  const d = new Date(`${s}T23:59:59+08:00`)
   const n = d.getTime()
   return Number.isNaN(n) ? 0 : Math.floor(n / 1000)
 }
@@ -63,8 +67,12 @@ function cardDate(ts) {
   if (!ts) return '不限期'
   const d = new Date(Number(ts) * 1000)
   if (Number.isNaN(d.getTime())) return '—'
-  const z = n => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d)
 }
 
 function formatUserCard(u, pkgs = []) {
@@ -211,8 +219,11 @@ export default function Users() {
             password: f.password.trim(),
             enabled: f.enabled !== false,
           }, pkgs)
-          try { await copyText(card); toast('已保存，名片已复制') }
-          catch { toast('已保存') }
+          try {
+            await copyText(card)
+            try { await api.post(`/users/${editUser.id}/forget-password`) } catch { /* keep going */ }
+            toast('已保存，名片已复制。密码只这一次。')
+          } catch { toast('已保存') }
         } else toast('已保存')
       } else {
         const body = { username, remark: f.remark, days: Number(f.days) || 0 }
@@ -222,8 +233,13 @@ export default function Users() {
         const pw = d.password || f.password
         const created = d.user ? { ...d.user, password: pw || d.user.password || '' } : null
         if (created) {
-          try { await copyText(formatUserCard(created, pkgs)); toast('已创建，名片已复制') }
-          catch { toast(pw ? `已创建，密码 ${pw}` : '已创建') }
+          try {
+            await copyText(formatUserCard(created, pkgs))
+            if (created.id) {
+              try { await api.post(`/users/${created.id}/forget-password`) } catch { /* keep going */ }
+            }
+            toast('已创建，名片已复制。密码只这一次。')
+          } catch { toast(pw ? `已创建，密码 ${pw}` : '已创建') }
         } else if (pw) {
           try { await copyText(pw); toast('已创建，密码已复制') } catch { toast(`已创建，密码 ${pw}`) }
         } else toast('已创建')
@@ -268,10 +284,34 @@ export default function Users() {
   const copyCard = async (u) => {
     try {
       await copyText(formatUserCard(u, pkgs))
-      toast(u.password ? '已复制名片' : '已复制名片。此账号没有保存的密码，编辑用户并重设后才会出现在名片里。')
+      if (u.password) {
+        try { await api.post(`/users/${u.id}/forget-password`) } catch { /* keep going */ }
+        setList(cur => cur.map(x => x.id === u.id ? { ...x, password: '' } : x))
+        toast('已复制名片。密码只这一次，下次请重置。')
+      } else {
+        toast('已复制名片。没有保存的密码，可用「重置密码」生成一次。')
+      }
     } catch {
       toast('浏览器不允许自动复制', 'error')
     }
+  }
+
+  const resetPassword = async (u) => {
+    if (!(await dialog.confirm({ title: '重置密码', message: '会生成新密码，旧密码和其它登录立刻失效。', danger: true }))) return
+    try {
+      const d = await api.post(`/users/${u.id}/password`, { password: '' })
+      const next = { ...u, password: d.password || '' }
+      try {
+        await copyText(formatUserCard(next, pkgs))
+        try { await api.post(`/users/${u.id}/forget-password`) } catch { /* keep going */ }
+        toast('已重置并复制名片。密码只这一次。')
+      } catch {
+        toast('已重置。浏览器不允许自动复制，请再点复制名片。')
+        setList(cur => cur.map(x => x.id === u.id ? next : x))
+        return
+      }
+      load()
+    } catch (e) { toast(e.message, 'error') }
   }
 
   const rotate = async (u) => {
@@ -373,6 +413,7 @@ export default function Users() {
                       { label: '编辑', onSelect: () => openEdit(u) },
                       { label: '订阅', onSelect: () => setSubUser(u) },
                       { label: '复制名片', onSelect: () => copyCard(u) },
+                      { label: '重置密码', onSelect: () => resetPassword(u) },
                       { sep: true },
                       { label: '流量', onSelect: () => openTraffic(u) },
                       { label: u.enabled ? '停用' : '启用', onSelect: () => act(() => api.put(`/users/${u.id}`, { enabled: !u.enabled })) },
@@ -421,7 +462,7 @@ export default function Users() {
               <option value="">不绑定</option>
               {pkgs.map(p => {
                 const n = (p.inbound_ids || []).length
-                const tag = n ? `${n} 个节点` : ((p.server_ids || []).length ? `${p.server_ids.length} 台实例` : '全部节点')
+                const tag = n ? `${n} 个节点` : ((p.server_ids || []).length ? `${p.server_ids.length} 台实例` : '未选节点')
                 return <option key={p.id} value={p.id}>{p.name} / {tag}</option>
               })}
             </select>

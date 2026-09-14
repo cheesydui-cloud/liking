@@ -14,9 +14,20 @@ func (s *Server) handleTOTPBegin(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnauthorized, "未登录")
 		return
 	}
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效请求")
+		return
+	}
 	fresh, err := db.GetUser(s.DB, u.ID)
 	if err != nil {
 		jsonErr(w, http.StatusUnauthorized, "登录已过期")
+		return
+	}
+	if !checkPassword(fresh.PasswordHash, req.Password) {
+		jsonErr(w, http.StatusBadRequest, "当前密码错误")
 		return
 	}
 	if fresh.TOTPEnabled {

@@ -1,89 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { useToast, useDialog } from '../components/Layout'
-import { formatPortRange, serverPortRange } from '../lib/ports'
+import { formatPortRange } from '../lib/ports'
 import { hopStatus, isDirectNode, nodeStatus } from '../lib/status'
-import { parseShareURI, shareProto } from '../lib/share'
+import { parseShareURI } from '../lib/share'
+import {
+  LAND_PROFILES, inboundSettings, forwardKind, kindLabel, protoShort,
+  hopProto, pathHops, landingText, usedPortsText,
+} from '../lib/forwards'
 import { Empty, Field, FilterTabs, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput } from '../components/ui'
-
-const LAND_PROFILES = ['vless-reality', 'vless-reality-vision', 'vless-xhttp-tls', 'trojan-tls', 'ss2022', 'socks5']
-
-function inboundSettings(inb) {
-  const st = inb?.settings
-  if (!st) return {}
-  if (typeof st === 'string') {
-    try { return JSON.parse(st) || {} } catch { return {} }
-  }
-  return st
-}
-
-function forwardKind(inb) {
-  if (!inb) return ''
-  if (inb.profile === 'port-forward') return 'port'
-  if (inb.exit_uri || inb.line_kind === 'chain') return 'chain'
-  return ''
-}
-
-function kindLabel(k) {
-  if (k === 'chain') return '链式'
-  if (k === 'port') return '端口'
-  return ''
-}
-
-function protoShort(profile) {
-  switch (profile) {
-    case 'vless-reality-vision': return 'Vision'
-    case 'vless-reality': return 'REALITY'
-    case 'vless-xhttp-tls': return 'XHTTP'
-    case 'trojan-tls': return 'Trojan'
-    case 'ss2022': return 'SS2022'
-    case 'anytls': return 'AnyTLS'
-    case 'mieru': return 'Mieru'
-    case 'socks5': return 'SOCKS5'
-    case 'port-forward': return '端口'
-    default: return profile || ''
-  }
-}
-
-function pathHops(inb) {
-  const st = inboundSettings(inb)
-  const hops = []
-  const raw = Array.isArray(st.hops) ? st.hops : []
-  for (const h of raw) hops.push(h)
-  if (inb.exit_uri) hops.push({ kind: 'uri', uri: inb.exit_uri })
-  else if (inb.exit_inbound_id) hops.push({ kind: 'panel', inbound_id: inb.exit_inbound_id })
-  return hops
-}
-
-function hopText(h, byID) {
-  if (!h) return '—'
-  const uri = h.uri || ''
-  if (h.kind === 'uri' || h.kind === 'socks' || uri) {
-    if (uri) {
-      const t = parseShareURI(uri)
-      if (t.ok) return t.label
-    }
-    return '出口链接'
-  }
-  const land = byID.get(Number(h.inbound_id))
-  return land ? land.name : '落地已删除'
-}
-
-function hopProto(h, byID) {
-  if (!h) return '—'
-  if (h.kind === 'uri' || h.kind === 'socks' || h.uri) return shareProto(h.uri || '')
-  const land = byID.get(Number(h.inbound_id))
-  return land ? protoShort(land.profile) : '—'
-}
-
-function landingText(inb, byID) {
-  if (forwardKind(inb) === 'port') {
-    const st = inboundSettings(inb)
-    return `${st.dest_host || '?'}:${st.dest_port || '?'}`
-  }
-  const hops = pathHops(inb)
-  return hopText(hops[hops.length - 1], byID)
-}
 
 function landingProto(inb, byID) {
   if (forwardKind(inb) === 'port') {
@@ -108,15 +33,6 @@ function cloneEntrySettings(inb) {
   if (st.mode) out.mode = st.mode
   if (st.xver != null && st.xver !== '') out.xver = st.xver
   return out
-}
-
-function usedPortsText(server, list, excludeId = 0) {
-  const { min, max } = serverPortRange(server)
-  const ports = list
-    .filter(x => Number(x.server_id) === Number(server?.id) && Number(x.id) !== Number(excludeId))
-    .map(x => x.port)
-  const used = ports.length ? `已用 ${[...new Set(ports)].sort((a, b) => a - b).join('、')}` : '这台实例还没有节点'
-  return `不填则在 ${min}–${max} 随机。${used}`
 }
 
 function cardTone(inb, entrySrv) {

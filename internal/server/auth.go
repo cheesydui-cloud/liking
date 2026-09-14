@@ -43,20 +43,77 @@ func checkPassword(hash, pw string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(pw)) == nil
 }
 
-func isSecureRequest(r *http.Request) bool {
-	if r.TLS != nil {
-		return true
-	}
+func remoteIP(r *http.Request) net.IP {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate()) {
+	return net.ParseIP(host)
+}
+
+func isLoopbackRequest(r *http.Request) bool {
+	ip := remoteIP(r)
+	return ip != nil && ip.IsLoopback()
+}
+
+func isSecureRequest(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if isLoopbackRequest(r) {
 		if proto := r.Header.Get("X-Forwarded-Proto"); strings.EqualFold(proto, "https") {
 			return true
 		}
 	}
 	return false
+}
+
+// trustedForwarded copies X-Real-IP / X-Forwarded-For into RemoteAddr only when
+// the immediate peer is loopback (nginx on this machine). Public :8899 ignores spoofed headers.
+func trustedForwarded(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isLoopbackRequest(r) {
+			if ip := forwardedClientIP(r); ip != "" {
+				_, port, err := net.SplitHostPort(r.RemoteAddr)
+				if err != nil {
+					port = "0"
+				}
+				r.RemoteAddr = net.JoinHostPort(ip, port)
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func forwardedClientIP(r *http.Request) string {
+	if v := strings.TrimSpace(r.Header.Get("X-Real-IP")); v != "" {
+		if ip := net.ParseIP(v); ip != nil {
+			return ip.String()
+		}
+	}
+	xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For"))
+	if xff == "" {
+		return ""
+	}
+	parts := strings.Split(xff, ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		p := strings.TrimSpace(parts[i])
+		if ip := net.ParseIP(p); ip != nil {
+			return ip.String()
+		}
+	}
+	return ""
+}
+
+func secureHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "same-origin")
+		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func newSessionCookie(r *http.Request, value string, maxAge int) *http.Cookie {
@@ -173,11 +230,19 @@ func originOK(r *http.Request, origin string) bool {
 }
 
 func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
+	ip := remoteIP(r)
+	if ip == nil {
 		return r.RemoteAddr
 	}
-	return host
+	return ip.String()
+}
+
+func currentSessionToken(r *http.Request) string {
+	c, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return ""
+	}
+	return c.Value
 }
 
 func ResetAdminPassword(d *sql.DB, username, pw string) (string, error) {

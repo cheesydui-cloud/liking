@@ -568,3 +568,138 @@ func TestClientByIdentityAndBilling(t *testing.T) {
 		t.Fatalf("billing %+v", u)
 	}
 }
+
+func TestPackageEmptyMeansZero(t *testing.T) {
+	d, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	tok, _ := RandomHex(8)
+	s1, err := CreateServer(d, "n1", "1.1.1.1", tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateInbound(d, &Inbound{
+		ServerID: s1.ID, Name: "a", Profile: "vless-reality", Protocol: "vless",
+		Network: "tcp", Security: "reality", Core: "xray", Listen: "0.0.0.0",
+		Port: 443, Enabled: true, Settings: "{}", LineKind: "direct",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := CreatePackage(d, "empty", 0, 0, 0, "oneway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids, err := PackageInboundIDs(d, p)
+	if err != nil || len(ids) != 0 {
+		t.Fatalf("empty package ids %+v %v", ids, err)
+	}
+}
+
+func TestAddTrafficBatch(t *testing.T) {
+	d, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	u, err := CreateUser(d, "bob", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, _ := RandomHex(8)
+	s1, err := CreateServer(d, "n1", "1.1.1.1", tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := CreateInbound(d, &Inbound{
+		ServerID: s1.ID, Name: "a", Profile: "vless-reality", Protocol: "vless",
+		Network: "tcp", Security: "reality", Core: "xray", Listen: "0.0.0.0",
+		Port: 443, Enabled: true, Settings: "{}", LineKind: "direct",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := []TrafficWrite{
+		{UserID: u.ID, InboundID: in.ID, BilledUp: 10, BilledDown: 20, RawUp: 10, RawDown: 20},
+		{UserID: u.ID, InboundID: in.ID, BilledUp: 1, BilledDown: 2, RawUp: 1, RawDown: 2},
+	}
+	if err := AddTrafficBatch(d, "2026-09-15", items); err != nil {
+		t.Fatal(err)
+	}
+	u, err = GetUser(d, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.UsedUp != 11 || u.UsedDown != 22 {
+		t.Fatalf("user traffic %+v", u)
+	}
+}
+
+func TestUserNeedsProvisionQuota(t *testing.T) {
+	d, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	u, err := CreateUser(d, "bob", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := CreatePackage(d, "std", 100, 0, 0, "oneway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := BindUserPackage(d, u.ID, p.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	tok, _ := RandomHex(8)
+	s1, err := CreateServer(d, "n1", "1.1.1.1", tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := CreateInbound(d, &Inbound{
+		ServerID: s1.ID, Name: "a", Profile: "vless-reality", Protocol: "vless",
+		Network: "tcp", Security: "reality", Core: "xray", Listen: "0.0.0.0",
+		Port: 443, Enabled: true, Settings: "{}", LineKind: "direct",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertClient(d, &Client{
+		InboundID: in.ID, UserID: u.ID, Email: EmailFor(u.ID, in.ID), Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	u, _ = GetUser(d, u.ID)
+	need, err := UserNeedsProvision(d, u)
+	if err != nil || need {
+		t.Fatalf("under quota %v %v", need, err)
+	}
+	if err := AddUserTraffic(d, u.ID, 100, 0); err != nil {
+		t.Fatal(err)
+	}
+	u, _ = GetUser(d, u.ID)
+	need, err = UserNeedsProvision(d, u)
+	if err != nil || !need {
+		t.Fatalf("over quota still enabled %v %v", need, err)
+	}
+	c, err := GetClient(d, in.ID, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Enabled = false
+	if err := UpsertClient(d, c); err != nil {
+		t.Fatal(err)
+	}
+	need, err = UserNeedsProvision(d, u)
+	if err != nil || need {
+		t.Fatalf("already disabled %v %v", need, err)
+	}
+}
+
+func TestEmailForPerInbound(t *testing.T) {
+	if EmailFor(3, 9) != "u3.i9" {
+		t.Fatalf("%s", EmailFor(3, 9))
+	}
+}

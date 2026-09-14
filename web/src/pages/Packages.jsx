@@ -147,12 +147,8 @@ export default function Packages() {
     const name = f.name.trim()
     if (!name) { toast('请填写名称', 'error'); return }
     if (!f.inbound_ids.length) {
-      const ok = await dialog.confirm({
-        title: '包含全部节点？',
-        message: '没有勾选节点时，绑定该套餐的用户可以使用所有节点（含以后新建的）。',
-        okText: '全部节点',
-      })
-      if (!ok) return
+      toast('请勾选实例上的节点', 'error')
+      return
     }
     const gbRaw = String(f.gb).trim()
     const gb = gbRaw === '' ? 0 : Number(gbRaw)
@@ -242,7 +238,7 @@ export default function Packages() {
           {list.map(p => {
             const n = users.filter(u => u.role !== 'admin' && u.package_id === p.id).length
             const meta = packageNodes(p, ins, servers)
-            const nodeLine = meta.all ? '全部节点' : `${meta.count} 个节点`
+            const nodeLine = meta.all ? '未选节点' : `${meta.count} 个节点`
             const nodeTip = meta.names.length ? meta.names.join('、') : (meta.servers.join(' · ') || undefined)
             return (
               <div key={p.id} className="machine is-pkg">
@@ -270,7 +266,7 @@ export default function Packages() {
                 <div className="machine-metrics">
                   <Metric label="流量" value={trafficLabel(p.traffic_bytes)} />
                   <Metric label="计费" value={p.direction === 'twoway' ? '双向' : '单向'} />
-                  <Metric label="节点" value={meta.all ? '全部' : String(meta.count)} />
+                  <Metric label="节点" value={meta.all ? '0' : String(meta.count)} />
                   <Metric label="用户" value={String(n)} />
                 </div>
                 <div className="machine-foot">
@@ -309,7 +305,7 @@ export default function Packages() {
               <div>
                 <div className="text-[12px] font-medium text-ink-soft">节点</div>
                 <div className="text-[12px] text-ink-mut mt-0.5">
-                  {f.inbound_ids.length ? `已选 ${f.inbound_ids.length} / ${pickableIns.length}` : '未勾选 = 全部节点'}
+                  {f.inbound_ids.length ? `已选 ${f.inbound_ids.length} / ${pickableIns.length}` : '请勾选节点，不选则套餐里没有节点'}
                 </div>
               </div>
               <div className="flex gap-2 shrink-0">

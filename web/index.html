@@ -6,15 +6,7 @@
     <meta name="theme-color" content="#F3F2EE" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>liking</title>
-    <script>
-      (function () {
-        var t = localStorage.getItem('lk-theme')
-        var dark = t === 'dark'
-        document.documentElement.classList.toggle('dark', dark)
-        var m = document.querySelector('meta[name="theme-color"]')
-        if (m) m.setAttribute('content', dark ? '#161618' : '#F3F2EE')
-      })()
-    </script>
+    <script src="/theme-boot.js"></script>
   </head>
   <body>
     <div id="root"></div>

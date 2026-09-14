@@ -232,6 +232,18 @@ func SetUserPasswordPlain(d *sql.DB, id int64, plain string) error {
 	return err
 }
 
+func ClearUserPasswordPlain(d *sql.DB, id int64) error {
+	return SetUserPasswordPlain(d, id, "")
+}
+
+func DeleteSessionsForUserExcept(d *sql.DB, userID int64, keep string) error {
+	if strings.TrimSpace(keep) == "" {
+		return DeleteSessionsForUser(d, userID)
+	}
+	_, err := d.Exec(`DELETE FROM sessions WHERE user_id=? AND token!=?`, userID, keep)
+	return err
+}
+
 func RotateSubToken(d *sql.DB, id int64) (string, error) {
 	tok, err := RandomHex(16)
 	if err != nil {
@@ -249,6 +261,49 @@ func ResetUserTraffic(d *sql.DB, id int64) error {
 func AddUserTraffic(d *sql.DB, id int64, up, down int64) error {
 	_, err := d.Exec(`UPDATE users SET used_up=used_up+?, used_down=used_down+? WHERE id=?`, up, down, id)
 	return err
+}
+
+type TrafficWrite struct {
+	UserID     int64
+	InboundID  int64
+	BilledUp   int64
+	BilledDown int64
+	RawUp      int64
+	RawDown    int64
+}
+
+func AddTrafficBatch(d *sql.DB, day string, items []TrafficWrite) error {
+	if len(items) == 0 {
+		return nil
+	}
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	upStmt, err := tx.Prepare(`UPDATE users SET used_up=used_up+?, used_down=used_down+? WHERE id=?`)
+	if err != nil {
+		return err
+	}
+	defer upStmt.Close()
+	dayStmt, err := tx.Prepare(`INSERT INTO traffic_daily(day,user_id,inbound_id,up,down) VALUES(?,?,?,?,?)
+		ON CONFLICT(day,user_id,inbound_id) DO UPDATE SET up=up+excluded.up, down=down+excluded.down`)
+	if err != nil {
+		return err
+	}
+	defer dayStmt.Close()
+	for _, it := range items {
+		if it.BilledUp == 0 && it.BilledDown == 0 && it.RawUp == 0 && it.RawDown == 0 {
+			continue
+		}
+		if _, err := upStmt.Exec(it.BilledUp, it.BilledDown, it.UserID); err != nil {
+			return err
+		}
+		if _, err := dayStmt.Exec(day, it.UserID, it.InboundID, it.RawUp, it.RawDown); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func DeleteUser(d *sql.DB, id int64) error {
@@ -872,7 +927,7 @@ func UpsertClient(d *sql.DB, c *Client) error {
 }
 
 func ListClientsByInbound(d *sql.DB, inboundID int64) ([]*Client, error) {
-	rows, err := d.Query(`SELECT id,inbound_id,user_id,email,uuid,password,username,enabled FROM clients WHERE inbound_id=?`, inboundID)
+	rows, err := d.Query(`SELECT id,inbound_id,user_id,email,uuid,password,username,enabled FROM clients WHERE inbound_id=? ORDER BY id`, inboundID)
 	if err != nil {
 		return nil, err
 	}
@@ -881,7 +936,7 @@ func ListClientsByInbound(d *sql.DB, inboundID int64) ([]*Client, error) {
 }
 
 func ListClientsByUser(d *sql.DB, userID int64) ([]*Client, error) {
-	rows, err := d.Query(`SELECT id,inbound_id,user_id,email,uuid,password,username,enabled FROM clients WHERE user_id=?`, userID)
+	rows, err := d.Query(`SELECT id,inbound_id,user_id,email,uuid,password,username,enabled FROM clients WHERE user_id=? ORDER BY id`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -1145,9 +1200,33 @@ func UserAccessOK(u *User, pkg *Package) bool {
 	return true
 }
 
+func UserNeedsProvision(d *sql.DB, u *User) (bool, error) {
+	if u == nil {
+		return false, nil
+	}
+	var pkg *Package
+	if u.PackageID != nil {
+		p, err := GetPackage(d, *u.PackageID)
+		if err == nil {
+			pkg = p
+		}
+	}
+	ok := UserAccessOK(u, pkg)
+	clients, err := ListClientsByUser(d, u.ID)
+	if err != nil {
+		return true, err
+	}
+	for _, c := range clients {
+		if c != nil && c.Enabled && !ok {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func InboundIDsForUser(d *sql.DB, u *User) ([]int64, error) {
 	if u.Role == "admin" {
-		rows, err := d.Query(`SELECT id FROM inbounds`)
+		rows, err := d.Query(`SELECT id FROM inbounds ORDER BY id`)
 		if err != nil {
 			return nil, err
 		}
@@ -1188,14 +1267,7 @@ func PackageInboundIDs(d *sql.DB, p *Package) ([]int64, error) {
 		return ids, nil
 	}
 	if len(p.InboundIDs) == 0 {
-		ids, err := queryIDs(d, `SELECT id FROM inbounds ORDER BY id`)
-		if err != nil {
-			return nil, err
-		}
-		if ids == nil {
-			ids = []int64{}
-		}
-		return ids, nil
+		return []int64{}, nil
 	}
 	return append([]int64(nil), p.InboundIDs...), nil
 }

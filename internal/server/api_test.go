@@ -314,10 +314,18 @@ func TestInboundShareURI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.StatusCode != http.StatusBadRequest {
-		t.Fatalf("share without user %d", res.StatusCode)
+	var share map[string]any
+	decodeRes(t, res, &share)
+	if share["username"] != "admin" || share["profile"] != "vless-reality-vision" {
+		t.Fatalf("share meta %+v", share)
 	}
-	res.Body.Close()
+	if _, ok := share["sub_token"]; ok {
+		t.Fatalf("sub_token leaked %+v", share)
+	}
+	uri, _ := share["uri"].(string)
+	if !strings.HasPrefix(uri, "vless://") || !strings.Contains(uri, "10.0.0.1:8443") {
+		t.Fatalf("share uri %s", uri)
+	}
 
 	pkgBody, _ := json.Marshal(map[string]any{
 		"name": "std", "traffic_bytes": 0, "cycle_days": 30, "direction": "oneway",
@@ -347,18 +355,13 @@ func TestInboundShareURI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var share struct {
-		URI      string `json:"uri"`
-		Username string `json:"username"`
-		Profile  string `json:"profile"`
-		SubToken string `json:"sub_token"`
-	}
+	share = map[string]any{}
 	decodeRes(t, res, &share)
-	if share.Username != "alice" || share.Profile != "vless-reality-vision" || share.SubToken == "" {
-		t.Fatalf("share meta %+v", share)
+	if share["username"] != "admin" {
+		t.Fatalf("share stays current user %+v", share)
 	}
-	if !strings.HasPrefix(share.URI, "vless://") || !strings.Contains(share.URI, "10.0.0.1:8443") {
-		t.Fatalf("share uri %s", share.URI)
+	if _, ok := share["sub_token"]; ok {
+		t.Fatalf("sub_token leaked %+v", share)
 	}
 }
 
@@ -851,15 +854,6 @@ func TestInboundShareSS2022UsesConnectIP(t *testing.T) {
 		} `json:"inbound"`
 	}
 	decodeRes(t, res, &createdIn)
-
-	res, err = c.Get(ts.URL + "/api/inbounds/" + strconv.FormatInt(createdIn.Inbound.ID, 10) + "/share")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.StatusCode != http.StatusBadRequest {
-		t.Fatalf("share without user %d", res.StatusCode)
-	}
-	res.Body.Close()
 
 	pkgBody, _ := json.Marshal(map[string]any{
 		"name": "std", "traffic_bytes": 0, "cycle_days": 30, "direction": "oneway",
@@ -1824,6 +1818,16 @@ func TestHealthz(t *testing.T) {
 	if r.Code != 200 {
 		t.Fatalf("health %d", r.Code)
 	}
+	if r.Header().Get("X-Frame-Options") != "DENY" {
+		t.Fatalf("frame %q", r.Header().Get("X-Frame-Options"))
+	}
+	if r.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("nosniff %q", r.Header().Get("X-Content-Type-Options"))
+	}
+	csp := r.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "frame-ancestors 'none'") || !strings.Contains(csp, "default-src 'self'") {
+		t.Fatalf("csp %q", csp)
+	}
 }
 
 func TestServerCFDomains(t *testing.T) {
@@ -2025,6 +2029,21 @@ func TestBackupRestore(t *testing.T) {
 	}
 
 	res, err = c.Get(ts.URL + "/api/backup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode == 200 {
+		t.Fatalf("GET backup still works %d", res.StatusCode)
+	}
+
+	bakBody, _ := json.Marshal(map[string]string{"password": "secret12"})
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/backup", bytes.NewReader(bakBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2300,6 +2319,7 @@ func TestTrafficAPI(t *testing.T) {
 
 	pkgBody, _ := json.Marshal(map[string]any{
 		"name": "two", "traffic_bytes": 1024, "cycle_days": 0, "direction": "twoway",
+		"server_ids": []int64{created.Server.ID},
 	})
 	res, err = c.Post(ts.URL+"/api/packages", "application/json", bytes.NewReader(pkgBody))
 	if err != nil {
@@ -2653,7 +2673,7 @@ func TestEncryptedBackupAndSubUserinfo(t *testing.T) {
 	}
 	decodeRes(t, res, nil)
 
-	encBody, _ := json.Marshal(map[string]string{"password": "backup-pw"})
+	encBody, _ := json.Marshal(map[string]string{"password": "secret12", "encrypt_password": "backup-pw"})
 	req, err = http.NewRequest(http.MethodPost, ts.URL+"/api/backup", bytes.NewReader(encBody))
 	if err != nil {
 		t.Fatal(err)
@@ -2718,7 +2738,21 @@ func TestEncryptedBackupAndSubUserinfo(t *testing.T) {
 		t.Fatalf("preview %+v", sum)
 	}
 
-	pkgBody, _ := json.Marshal(map[string]any{"name": "p1", "traffic_bytes": 0, "cycle_days": 0, "direction": "oneway"})
+	srvBody, _ := json.Marshal(map[string]string{"name": "n1", "public_host": "10.0.0.1"})
+	res, err = c.Post(ts.URL+"/api/servers", "application/json", bytes.NewReader(srvBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var createdSrv struct {
+		Server struct {
+			ID int64 `json:"id"`
+		} `json:"server"`
+	}
+	decodeRes(t, res, &createdSrv)
+	pkgBody, _ := json.Marshal(map[string]any{
+		"name": "p1", "traffic_bytes": 0, "cycle_days": 0, "direction": "oneway",
+		"server_ids": []int64{createdSrv.Server.ID},
+	})
 	res, err = c.Post(ts.URL+"/api/packages", "application/json", bytes.NewReader(pkgBody))
 	if err != nil {
 		t.Fatal(err)

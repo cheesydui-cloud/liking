@@ -96,7 +96,11 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	if req.Role == "" {
 		req.Role = "user"
 	}
-	if req.Role != "admin" && req.Role != "user" {
+	if req.Role == "admin" {
+		jsonErr(w, http.StatusBadRequest, "不能再创建管理员")
+		return
+	}
+	if req.Role != "user" {
 		jsonErr(w, http.StatusBadRequest, "角色无效")
 		return
 	}
@@ -154,17 +158,17 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		oldPkgID = *u.PackageID
 	}
 	var req struct {
-		Username     *string         `json:"username"`
-		Remark       *string         `json:"remark"`
-		Enabled      *bool           `json:"enabled"`
-		ExpiresAt    *int64          `json:"expires_at"`
-		Days         *int            `json:"days"`
-		PackageID    *int64          `json:"package_id"`
-		Unbind       bool            `json:"unbind_package"`
-		TrafficLimit json.RawMessage `json:"traffic_limit"`
-		ExtendDays       *int            `json:"extend_days"`
-		Password         *string         `json:"password"`
-		TrafficResetDay  *int            `json:"traffic_reset_day"`
+		Username        *string         `json:"username"`
+		Remark          *string         `json:"remark"`
+		Enabled         *bool           `json:"enabled"`
+		ExpiresAt       *int64          `json:"expires_at"`
+		Days            *int            `json:"days"`
+		PackageID       *int64          `json:"package_id"`
+		Unbind          bool            `json:"unbind_package"`
+		TrafficLimit    json.RawMessage `json:"traffic_limit"`
+		ExtendDays      *int            `json:"extend_days"`
+		Password        *string         `json:"password"`
+		TrafficResetDay *int            `json:"traffic_reset_day"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -259,6 +263,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			rememberLoginPassword(s.DB, u.ID, pw)
+			_ = db.DeleteSessionsForUser(s.DB, u.ID)
 		}
 	}
 	if req.Unbind {
@@ -375,9 +380,32 @@ func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rememberLoginPassword(s.DB, id, req.Password)
+	_ = db.DeleteSessionsForUser(s.DB, id)
 	out := map[string]any{"ok": true, "password": req.Password}
 	if generated != "" {
 		out["password"] = generated
 	}
 	jsonOK(w, out)
+}
+
+func (s *Server) handleForgetPassword(w http.ResponseWriter, r *http.Request) {
+	id, err := chiID(r, "id")
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	u, err := db.GetUser(s.DB, id)
+	if err != nil {
+		jsonErr(w, http.StatusNotFound, "用户不存在")
+		return
+	}
+	if u.Role == "admin" {
+		jsonErr(w, http.StatusBadRequest, "管理员不保存明文密码")
+		return
+	}
+	if err := db.ClearUserPasswordPlain(s.DB, id); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	jsonOK(w, map[string]any{"ok": true})
 }

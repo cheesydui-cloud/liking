@@ -28,27 +28,44 @@ func (s *Server) handleBackupSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBackupDownload(w http.ResponseWriter, r *http.Request) {
-	password := strings.TrimSpace(r.URL.Query().Get("password"))
-	if r.Method == http.MethodPost {
-		var req struct {
-			Password string `json:"password"`
+	u := userFromCtx(r.Context())
+	if u == nil {
+		jsonErr(w, http.StatusUnauthorized, "未登录")
+		return
+	}
+	var req struct {
+		Password        string `json:"password"`
+		EncryptPassword string `json:"encrypt_password"`
+	}
+	_ = decodeJSON(r, &req)
+	confirm := strings.TrimSpace(req.Password)
+	if confirm == "" {
+		jsonErr(w, http.StatusBadRequest, "请填写当前密码或备份密码")
+		return
+	}
+	ok := checkPassword(u.PasswordHash, confirm)
+	bak, _ := db.GetSetting(s.DB, "backup_password")
+	bak = strings.TrimSpace(bak)
+	if !ok {
+		if bak == "" || confirm != bak {
+			jsonErr(w, http.StatusForbidden, "密码不对")
+			return
 		}
-		_ = decodeJSON(r, &req)
-		if strings.TrimSpace(req.Password) != "" {
-			password = strings.TrimSpace(req.Password)
-		}
+	}
+	encrypt := strings.TrimSpace(req.EncryptPassword)
+	if encrypt == "" && bak != "" && confirm == bak {
+		encrypt = bak
 	}
 	s.backupMu.Lock()
 	defer s.backupMu.Unlock()
-	raw, name, err := s.encodeBackup(password)
+	raw, name, err := s.encodeBackup(encrypt)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	u := userFromCtx(r.Context())
 	db.AddAudit(s.DB, &u.ID, "backup.download", fmt.Sprintf("v%s %d bytes", version.Version, len(raw)))
 	ct := "application/gzip"
-	if password != "" {
+	if encrypt != "" {
 		ct = "application/octet-stream"
 		if !strings.HasSuffix(name, ".lkbak") {
 			name += ".lkbak"

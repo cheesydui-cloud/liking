@@ -2,11 +2,14 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
 )
+
+const maxJSONBody = 1 << 20
 
 func jsonOK(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -29,7 +32,7 @@ func jsonErrExtra(w http.ResponseWriter, code int, msg string, extra map[string]
 
 func decodeJSON(r *http.Request, v any) error {
 	defer r.Body.Close()
-	return json.NewDecoder(r.Body).Decode(v)
+	return json.NewDecoder(io.LimitReader(r.Body, maxJSONBody)).Decode(v)
 }
 
 func chiID(r *http.Request, name string) (int64, error) {

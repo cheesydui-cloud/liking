@@ -87,6 +87,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, newSessionCookie(r, tok, int(ttl.Seconds())))
 	s.loginLimiter.Clear(ip)
+	if u.Role != "admin" {
+		_ = db.ClearUserPasswordPlain(s.DB, u.ID)
+	}
 	db.AddAudit(s.DB, &u.ID, "login", u.Username)
 	jsonOK(w, s.sessionPayload(u, r))
 }
@@ -127,7 +130,8 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "内部错误")
 		return
 	}
-	rememberLoginPassword(s.DB, u.ID, req.New)
+	_ = db.ClearUserPasswordPlain(s.DB, u.ID)
+	_ = db.DeleteSessionsForUserExcept(s.DB, u.ID, currentSessionToken(r))
 	jsonOK(w, map[string]any{"ok": true})
 }
 
@@ -198,7 +202,8 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, "内部错误")
 			return
 		}
-		rememberLoginPassword(s.DB, u.ID, req.NewPassword)
+		_ = db.ClearUserPasswordPlain(s.DB, u.ID)
+		_ = db.DeleteSessionsForUserExcept(s.DB, u.ID, currentSessionToken(r))
 		changed = true
 	}
 	if !changed {

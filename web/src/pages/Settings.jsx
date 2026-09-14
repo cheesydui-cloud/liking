@@ -51,11 +51,13 @@ function TotpBox() {
   }, [uri])
 
   const begin = async () => {
+    if (!pw.trim()) { toast('请填写当前密码', 'error'); return }
     setBusy(true)
     try {
-      const d = await api.post('/totp/begin')
+      const d = await api.post('/totp/begin', { password: pw })
       setSecret(d.secret || '')
       setUri(d.uri || '')
+      setPw('')
     } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
   }
@@ -109,7 +111,12 @@ function TotpBox() {
         <p className="text-[12.5px] text-ink-mut mt-1">用验证器扫码后填 6 位码。管理员建议开启。</p>
       </div>
       {!secret ? (
-        <button type="button" className="btn-primary" disabled={busy} onClick={begin}>{busy ? '生成中…' : '开始绑定'}</button>
+        <>
+          <Field label="当前密码">
+            <input className="input-field" type="password" value={pw} onChange={e => setPw(e.target.value)} autoComplete="current-password" />
+          </Field>
+          <button type="button" className="btn-primary" disabled={busy} onClick={begin}>{busy ? '生成中…' : '开始绑定'}</button>
+        </>
       ) : (
         <form onSubmit={enable} className="space-y-3">
           {qr ? <img src={qr} alt="" width={160} height={160} /> : null}
@@ -261,6 +268,7 @@ function BackupPanel() {
   const [password, setPassword] = useState('')
   const [filePass, setFilePass] = useState('')
   const [encPass, setEncPass] = useState('')
+  const [confirmPass, setConfirmPass] = useState('')
   const [ack, setAck] = useState(false)
   const [restoring, setRestoring] = useState(false)
   const [over, setOver] = useState(false)
@@ -277,11 +285,12 @@ function BackupPanel() {
   useEffect(() => { loadLive(); loadSched() }, [])
 
   const download = async () => {
+    const confirm = confirmPass.trim()
+    if (!confirm) { toast('请填写当前密码', 'error'); return }
     setBusy(true)
     try {
       const pw = encPass.trim()
-      if (pw) await api.downloadPost('/backup', { password: pw }, 'liking-backup.lkb1')
-      else await api.download('/backup', 'liking-backup.lkbak')
+      await api.downloadPost('/backup', { password: confirm, encrypt_password: pw }, pw ? 'liking-backup.lkb1' : 'liking-backup.lkbak')
       toast('已开始下载')
     } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
@@ -377,6 +386,9 @@ function BackupPanel() {
           <BackupStat n={live?.users} label="用户" />
           <BackupStat n={live?.certs} label="证书" />
         </div>
+        <Field label="当前密码" hint="下载备份需要确认身份">
+          <input className="input-field max-w-md" type="password" autoComplete="current-password" value={confirmPass} onChange={e => setConfirmPass(e.target.value)} />
+        </Field>
         <Field label="加密密码" hint="选填。填写后下载 .lkb1，恢复时要同一密码。">
           <input className="input-field max-w-md" type="password" autoComplete="new-password" value={encPass} onChange={e => setEncPass(e.target.value)} placeholder="留空则不加密" />
         </Field>

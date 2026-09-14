@@ -49,7 +49,7 @@ func buildMita(inbounds []*db.Inbound, clients map[int64][]*db.Client) (map[stri
 				"name":     name,
 				"protocol": "SOCKS5_PROXY_PROTOCOL",
 				"host":     "127.0.0.1",
-				"port":     socksPort(in.ID),
+				"port":     SocksPort(in.ID),
 			})
 			egressRules = append(egressRules, map[string]any{
 				"ipRanges":   []string{"*"},

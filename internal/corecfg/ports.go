@@ -4,12 +4,45 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+
+	"liking/internal/db"
 )
 
 const (
-	DefaultPortMin = 10000
-	DefaultPortMax = 59999
+	DefaultPortMin   = 10000
+	DefaultPortMax   = 59999
+	XrayAPIPort      = 60085
+	SingboxAPIPort   = 60190
+	SocksPortBase    = 61000
+	socksPortCeiling = 65535
 )
+
+// SocksPort is the local socks listen for a Mieru chain hop. It lives above
+// the default user port pool so inbound IDs cannot collide with random nodes.
+func SocksPort(id int64) int {
+	p := SocksPortBase + int(id)
+	if p > socksPortCeiling {
+		p = SocksPortBase + int(id%4535)
+		if p > socksPortCeiling {
+			p = SocksPortBase
+		}
+	}
+	return p
+}
+
+func MarkReservedPorts(used map[int]struct{}, ins []*db.Inbound) {
+	if used == nil {
+		return
+	}
+	used[XrayAPIPort] = struct{}{}
+	used[SingboxAPIPort] = struct{}{}
+	for _, in := range ins {
+		if in == nil {
+			continue
+		}
+		used[SocksPort(in.ID)] = struct{}{}
+	}
+}
 
 // NormalizePortRange returns a valid inclusive listen-port range.
 // 0,0 means the panel default (10000–59999).
