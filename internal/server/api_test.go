@@ -439,11 +439,15 @@ func TestAdminSubscriptionAllNodes(t *testing.T) {
 		Nodes []struct {
 			Name string `json:"name"`
 			Port int    `json:"port"`
+			URI  string `json:"uri"`
 		} `json:"nodes"`
 	}
 	decodeRes(t, res, &nodes)
 	if len(nodes.Nodes) != 1 || nodes.Nodes[0].Port != 8443 {
 		t.Fatalf("admin nodes %+v", nodes.Nodes)
+	}
+	if !strings.HasPrefix(nodes.Nodes[0].URI, "vless://") || !strings.Contains(nodes.Nodes[0].URI, "10.0.0.1:8443") {
+		t.Fatalf("admin node uri %s", nodes.Nodes[0].URI)
 	}
 
 	res, err = c.Get(ts.URL + "/api/sub/" + me.User.SubToken + "/uri")

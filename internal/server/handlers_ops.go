@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"liking/internal/corecfg"
 	"liking/internal/db"
 	"liking/internal/version"
 )
@@ -121,11 +122,13 @@ func (s *Server) handleMeNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	over := s.serverOverMap()
 	type node struct {
+		ID         int64  `json:"id"`
 		Name       string `json:"name"`
 		Host       string `json:"host"`
 		Port       int    `json:"port"`
 		Profile    string `json:"profile"`
 		ServerName string `json:"server_name"`
+		URI        string `json:"uri,omitempty"`
 	}
 	out := []node{}
 	for _, id := range ids {
@@ -136,13 +139,21 @@ func (s *Server) handleMeNodes(w http.ResponseWriter, r *http.Request) {
 		if !inboundLive(s.DB, in, over) {
 			continue
 		}
-		out = append(out, node{
+		host := corecfg.ShareHost(in)
+		n := node{
+			ID:         in.ID,
 			Name:       in.Name,
-			Host:       in.ServerHost,
+			Host:       host,
 			Port:       in.Port,
 			Profile:    in.Profile,
 			ServerName: in.ServerName,
-		})
+		}
+		if cl, err := db.GetClient(s.DB, in.ID, u.ID); err == nil && cl != nil && cl.Enabled {
+			if uri, err := corecfg.ShareURI(in, cl); err == nil {
+				n.URI = uri
+			}
+		}
+		out = append(out, n)
 	}
 	announce, _ := db.GetSetting(s.DB, "announce")
 	jsonOK(w, map[string]any{"nodes": out, "announce": announce})
