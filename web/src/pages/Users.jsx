@@ -85,27 +85,18 @@ function formatUserCard(u, pkgs = []) {
   return lines.join('\n')
 }
 
-function UserRowActs({ u, onEdit, onSub, onCard, onTraffic, onToggle, onRemove }) {
-  if (u.role === 'admin') return null
+function userTone(u) {
+  if (u.enabled === false) return 'is-off'
+  if (u.expires_at && u.expires_at * 1000 < Date.now()) return 'is-fault'
+  if (u.traffic_cap > 0 && billedBytes(u) >= u.traffic_cap) return 'is-fault'
+  return 'is-pkg'
+}
+
+function Metric({ label, value, danger, plain }) {
   return (
-    <div className="icon-row">
-      <button type="button" className="icon-btn" onClick={() => onEdit(u)} aria-label="编辑用户" title="编辑">
-        <Icon name="pencil" size={14} />
-      </button>
-      <button type="button" className="icon-btn" onClick={() => onSub(u)} aria-label="订阅" title="订阅">
-        <Icon name="link" size={14} />
-      </button>
-      <button type="button" className="icon-btn" onClick={() => onCard(u)} aria-label="复制名片" title="复制名片">
-        <Icon name="copy" size={14} />
-      </button>
-      <MoreMenu iconOnly items={[
-        { label: '复制名片', onSelect: () => onCard(u) },
-        { sep: true },
-        { label: '流量', onSelect: () => onTraffic(u) },
-        { label: u.enabled ? '停用' : '启用', onSelect: onToggle },
-        { sep: true },
-        { label: '删除', danger: true, onSelect: () => onRemove(u) },
-      ]} />
+    <div className="metric">
+      <span className="metric-k">{label}</span>
+      <span className={`metric-v${plain ? ' is-plain' : ''}${danger ? ' is-expired' : ''}`}>{value}</span>
     </div>
   )
 }
@@ -344,89 +335,70 @@ export default function Users() {
         />
       </div>
 
-      <div className="card overflow-hidden">
-        {!hasCustomers ? (
+      {!hasCustomers ? (
+        <div className="card overflow-hidden">
           <Empty title="暂无用户" hint="先建套餐并勾选节点，再开账号。" action={
             <button type="button" className="btn-primary" onClick={openCreate}><Icon name="plus" size={15} /> 新建用户</button>
           } />
-        ) : rows.length === 0 ? (
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="card overflow-hidden">
           <Empty title="没有匹配的用户" hint="换个关键词或套餐筛选。" />
-        ) : (
-          <>
-          <div className="hidden md:block table-wrap">
-            <table className="data">
-              <thead><tr><th>用户</th><th>套餐</th><th>流量</th><th>到期</th><th></th></tr></thead>
-              <tbody>
-                {rows.map(u => (
-                  <tr key={u.id}>
-                    <td>
-                      <div className="flex items-center gap-2 flex-wrap min-w-0">
-                        <span className="font-medium truncate">{u.username}</span>
-                        <UserFlags u={u} />
-                      </div>
-                      <div className="text-[11px] text-ink-mut mt-0.5">{u.remark || (u.role === 'admin' ? '管理员' : '')}</div>
-                    </td>
-                    <td className="text-[13px]">{u.role === 'admin' ? '—' : (u.package_name || <span className="text-ink-mut">未绑定</span>)}</td>
-                    <td className="min-w-[10rem]">
-                      {u.role === 'admin' ? '—' : (
-                        <div>
-                          <Meter value={billedBytes(u)} max={u.traffic_cap || trafficCap(u, pkgs)} />
-                          {u.direction === 'twoway' ? <div className="text-[11px] text-ink-mut mt-0.5">双向计费</div> : null}
-                        </div>
-                      )}
-                    </td>
-                    <td className="text-[12px] whitespace-nowrap font-mono tabular-nums">{u.expires_at ? fmtDateShort(u.expires_at) : '—'}</td>
-                    <td className="whitespace-nowrap">
-                      <UserRowActs
-                        u={u}
-                        onEdit={openEdit}
-                        onSub={setSubUser}
-                        onCard={copyCard}
-                        onTraffic={openTraffic}
-                        onToggle={() => act(() => api.put(`/users/${u.id}`, { enabled: !u.enabled }))}
-                        onRemove={remove}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="md:hidden divide-y" style={{ borderColor: 'var(--color-line-soft)' }}>
-            {rows.map(u => (
-              <div key={u.id} className="px-3.5 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap min-w-0">
-                      <span className="font-medium truncate">{u.username}</span>
+        </div>
+      ) : (
+        <div className="machine-grid">
+          {rows.map(u => {
+            const cap = u.traffic_cap || trafficCap(u, pkgs)
+            const used = billedBytes(u)
+            const expired = !!(u.expires_at && u.expires_at * 1000 < Date.now())
+            return (
+              <div key={u.id} className={`machine ${userTone(u)}`}>
+                <div className="machine-head">
+                  <div className="min-w-0 flex-1">
+                    <div className="machine-title">
+                      <span className="machine-name truncate">{u.username}</span>
                       <UserFlags u={u} />
                     </div>
-                    <div className="text-[12px] text-ink-mut mt-0.5">
-                      {u.role === 'admin' ? '管理员' : (u.package_name || '未绑定')}
-                      {u.expires_at ? ` / ${fmtDateShort(u.expires_at)}` : ''}
-                    </div>
+                    {u.remark ? (
+                      <div className="machine-host">
+                        <span className="machine-remark" title={u.remark}>{u.remark}</span>
+                      </div>
+                    ) : null}
                   </div>
-                  <UserRowActs
-                    u={u}
-                    onEdit={openEdit}
-                    onSub={setSubUser}
-                    onCard={copyCard}
-                    onTraffic={openTraffic}
-                    onToggle={() => act(() => api.put(`/users/${u.id}`, { enabled: !u.enabled }))}
-                    onRemove={remove}
-                  />
+                  <div className="machine-toolbar">
+                    <button type="button" className="icon-btn" onClick={() => openEdit(u)} aria-label="编辑用户" title="编辑">
+                      <Icon name="pencil" size={14} />
+                    </button>
+                    <MoreMenu iconOnly items={[
+                      { label: '编辑', onSelect: () => openEdit(u) },
+                      { label: '订阅', onSelect: () => setSubUser(u) },
+                      { label: '复制名片', onSelect: () => copyCard(u) },
+                      { sep: true },
+                      { label: '流量', onSelect: () => openTraffic(u) },
+                      { label: u.enabled ? '停用' : '启用', onSelect: () => act(() => api.put(`/users/${u.id}`, { enabled: !u.enabled })) },
+                      { sep: true },
+                      { label: '删除', danger: true, onSelect: () => remove(u) },
+                    ]} />
+                  </div>
                 </div>
-                {u.role !== 'admin' ? (
-                  <div className="mt-2">
-                    <Meter value={billedBytes(u)} max={u.traffic_cap || trafficCap(u, pkgs)} />
-                  </div>
-                ) : null}
+                <div className="machine-metrics">
+                  <Metric label="套餐" value={u.package_name || '未绑定'} plain />
+                  <Metric label="到期" value={u.expires_at ? fmtDateShort(u.expires_at) : '不限期'} danger={expired} />
+                  <Metric label="额度" value={cap > 0 ? fmtBytes(cap) : '不限'} />
+                  <Metric label="计费" value={u.direction === 'twoway' ? '双向' : '单向'} plain />
+                </div>
+                <div className="machine-meter">
+                  <Meter value={used} max={cap} />
+                </div>
+                <div className="machine-foot">
+                  <button type="button" className="machine-ports" onClick={() => setSubUser(u)}>订阅</button>
+                  <button type="button" className="row-act" onClick={() => copyCard(u)}>复制名片</button>
+                </div>
               </div>
-            ))}
-          </div>
-          </>
-        )}
-      </div>
+            )
+          })}
+        </div>
+      )}
       <Modal open={formOpen} title={editing ? `编辑 ${editUser.username}` : '新建用户'} onClose={closeForm} size="lg" footer={
         <>
           <button type="button" className="btn-ghost" onClick={closeForm}>取消</button>

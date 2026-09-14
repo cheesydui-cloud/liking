@@ -1226,6 +1226,19 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
 }
 .metric.is-up .metric-v { color: var(--color-ok); font-weight: 600; }
 .metric.is-down .metric-v { color: var(--color-accent); font-weight: 600; }
+.metric-v.is-expired { color: var(--color-danger); }
+.metric-v.is-plain {
+  font-family: var(--font-sans);
+  font-variant-numeric: normal;
+}
+.machine-remark {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--color-ink-mut);
+}
 .machine-dates {
   display: grid;
   grid-template-columns: 1fr 1fr;
