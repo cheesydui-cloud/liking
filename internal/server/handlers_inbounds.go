@@ -289,7 +289,11 @@ func (s *Server) prepareInbound(in *db.Inbound) error {
 		return err
 	}
 	if in.Port == 0 {
-		p, err := corecfg.PickFreePort(used)
+		srv, err := db.GetServer(s.DB, in.ServerID)
+		if err != nil {
+			return err
+		}
+		p, err := corecfg.PickFreePortRange(used, srv.PortMin, srv.PortMax)
 		if err != nil {
 			return err
 		}

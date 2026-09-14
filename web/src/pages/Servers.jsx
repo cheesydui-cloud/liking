@@ -5,6 +5,7 @@ import { copyText } from '../lib/copy'
 import { isDirectNode, serverStatus } from '../lib/status'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, FilterTabs, Icon, LineStatus, Meter, Modal, MoreMenu, PageHead, SearchInput, fmtAgo, fmtBps, fmtBytes, machineTone } from '../components/ui'
+import { DEFAULT_PORT_MAX, DEFAULT_PORT_MIN, formatPortRange, parsePort } from '../lib/ports'
 
 function gbFromLimit(n) {
   if (!n) return ''
@@ -75,6 +76,11 @@ export default function Servers() {
   const [cfFilter, setCfFilter] = useState('')
   const [q, setQ] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [newPortMin, setNewPortMin] = useState(String(DEFAULT_PORT_MIN))
+  const [newPortMax, setNewPortMax] = useState(String(DEFAULT_PORT_MAX))
+  const [rangeSrv, setRangeSrv] = useState(null)
+  const [rangeMin, setRangeMin] = useState(String(DEFAULT_PORT_MIN))
+  const [rangeMax, setRangeMax] = useState(String(DEFAULT_PORT_MAX))
 
   const load = async () => {
     try {
@@ -102,18 +108,56 @@ export default function Servers() {
   const openCreate = () => {
     setName('')
     setHost('')
+    setNewPortMin(String(DEFAULT_PORT_MIN))
+    setNewPortMax(String(DEFAULT_PORT_MAX))
     setFormOpen(true)
+  }
+
+  const readPortRange = (minVal, maxVal) => {
+    const min = parsePort(minVal)
+    const max = parsePort(maxVal)
+    if (min == null || max == null) {
+      toast('端口区间 1–65535', 'error')
+      return null
+    }
+    if (min > max) {
+      toast('起始端口不能大于结束端口', 'error')
+      return null
+    }
+    return { port_min: min, port_max: max }
   }
 
   const create = async (e) => {
     e.preventDefault()
+    const range = readPortRange(newPortMin, newPortMax)
+    if (!range) return
     setBusy(true)
     try {
-      const d = await api.post('/servers', { name, public_host: host })
+      const d = await api.post('/servers', { name, public_host: host, ...range })
       setName(''); setHost('')
       setFormOpen(false)
       setCmd(d.install || '')
       toast('已添加服务器')
+      load()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  const openPortRange = (s) => {
+    setRangeSrv(s)
+    setRangeMin(String(s.port_min || DEFAULT_PORT_MIN))
+    setRangeMax(String(s.port_max || DEFAULT_PORT_MAX))
+  }
+
+  const savePortRange = async (e) => {
+    e.preventDefault()
+    if (!rangeSrv) return
+    const range = readPortRange(rangeMin, rangeMax)
+    if (!range) return
+    setBusy(true)
+    try {
+      await api.put(`/servers/${rangeSrv.id}`, range)
+      setRangeSrv(null)
       load()
     } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
@@ -322,7 +366,7 @@ export default function Servers() {
           <Empty title="没有匹配的服务器" hint="换个关键词或筛选。" />
         </div>
       ) : (
-        <div>
+        <div className="machine-grid">
           {visible.map(s => {
             const n = nodesOf(s.id).length
             const used = (s.used_up || 0) + (s.used_down || 0)
@@ -349,16 +393,12 @@ export default function Servers() {
                     </div>
                   </div>
                   <div className="machine-toolbar">
-                    {fresh ? (
-                      <button type="button" className="btn-primary h-8" onClick={() => showInstall(s.id)}>
-                        <Icon name="copy" size={14} /> 复制安装命令
-                      </button>
-                    ) : null}
                     <MoreMenu iconOnly items={[
                       { label: '同步', hint: '把配置下发到这台机器', onSelect: () => sync(s.id) },
                       { label: '安装命令', onSelect: () => showInstall(s.id) },
                       { label: '从 CF 同步', onSelect: () => openCF(s) },
                       { label: '改公开地址', onSelect: () => saveHost(s) },
+                      { label: '端口区间', hint: `新节点随机 ${formatPortRange(s)}`, onSelect: () => openPortRange(s) },
                       { label: '流量上限', onSelect: () => saveLimit(s) },
                       { sep: true },
                       {
@@ -375,7 +415,12 @@ export default function Servers() {
                   </div>
                 </div>
                 {fresh ? (
-                  <div className="text-[13px] text-ink-mut">还没装 Agent。复制命令到机器上以 root 执行，上线后再挂节点。</div>
+                  <div className="machine-fresh">
+                    <div className="text-[12px] text-ink-mut mb-2">还没装 Agent。复制命令到机器上以 root 执行。</div>
+                    <button type="button" className="btn-primary h-8 w-full" onClick={() => showInstall(s.id)}>
+                      <Icon name="copy" size={14} /> 复制安装命令
+                    </button>
+                  </div>
                 ) : s.online ? (
                   <>
                     <div className="machine-metrics">
@@ -392,8 +437,11 @@ export default function Servers() {
                   s.last_error ? <div className="machine-fault">{s.last_error}</div> : null
                 )}
                 {s.online && s.last_error ? <div className="machine-fault">{s.last_error}</div> : null}
-                {!fresh ? <div className="machine-meta">{machineMeta(s)}</div> : null}
-                <div className="pt-1">
+                {!fresh ? <div className="machine-meta" title={machineMeta(s)}>{machineMeta(s)}</div> : null}
+                <div className="machine-foot">
+                  <button type="button" className="machine-ports" onClick={() => openPortRange(s)} title="改端口区间">
+                    端口 {formatPortRange(s)}
+                  </button>
                   <Link to={`/nodes?server=${s.id}`} className="row-act">{n} 个节点</Link>
                 </div>
               </div>
@@ -415,7 +463,34 @@ export default function Servers() {
           <Field label="公开地址" hint="客户端连接用的 IP 或域名。托管在 Cloudflare 的可直接拉取。">
             <input className="input-field" value={host} onChange={e => setHost(e.target.value)} placeholder="IP 或域名" />
           </Field>
+          <Field label="端口区间" hint="这台机器上新节点不填端口时，在此区间随机。已有节点不受影响。">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+              <input className="input-field font-mono" inputMode="numeric" value={newPortMin} onChange={e => setNewPortMin(e.target.value)} placeholder={String(DEFAULT_PORT_MIN)} />
+              <span className="text-[13px] text-ink-mut">–</span>
+              <input className="input-field font-mono" inputMode="numeric" value={newPortMax} onChange={e => setNewPortMax(e.target.value)} placeholder={String(DEFAULT_PORT_MAX)} />
+            </div>
+          </Field>
           <button type="button" className="row-act" onClick={() => openCF(null)}>从 CF 同步</button>
+        </form>
+      </Modal>
+
+      <Modal open={!!rangeSrv} title="端口区间" onClose={() => setRangeSrv(null)} footer={
+        <>
+          <button type="button" className="btn-ghost" onClick={() => setRangeSrv(null)}>取消</button>
+          <button type="submit" form="port-range-form" className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
+        </>
+      }>
+        <form id="port-range-form" onSubmit={savePortRange} className="space-y-3">
+          <p className="text-[13px] text-ink-mut">
+            {rangeSrv ? `${rangeSrv.name} 上新节点不填端口时，在此区间随机。手动填写的端口不受限。` : ''}
+          </p>
+          <Field label="起始 – 结束">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+              <input className="input-field font-mono" inputMode="numeric" value={rangeMin} onChange={e => setRangeMin(e.target.value)} autoFocus />
+              <span className="text-[13px] text-ink-mut">–</span>
+              <input className="input-field font-mono" inputMode="numeric" value={rangeMax} onChange={e => setRangeMax(e.target.value)} />
+            </div>
+          </Field>
         </form>
       </Modal>
 

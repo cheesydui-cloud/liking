@@ -27,6 +27,9 @@ func TestOpenMigrateAndCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if s.PortMin != 10000 || s.PortMax != 59999 {
+		t.Fatalf("port range %+v", s)
+	}
 	if s.LastError != "" || s.LastErrorAt != 0 {
 		t.Fatalf("last_error %+v", s)
 	}
@@ -459,6 +462,14 @@ func TestServerTrafficTotals(t *testing.T) {
 	s, _ = GetServer(d, s.ID)
 	if s.TrafficLimit != 1024 {
 		t.Fatalf("limit %d", s.TrafficLimit)
+	}
+	s.PortMin, s.PortMax = 20000, 30000
+	if err := UpdateServer(d, s); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = GetServer(d, s.ID)
+	if s.PortMin != 20000 || s.PortMax != 30000 {
+		t.Fatalf("port range %d %d", s.PortMin, s.PortMax)
 	}
 
 	inTot, err := InboundTrafficTotals(d)

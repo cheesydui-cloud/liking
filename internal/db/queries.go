@@ -324,8 +324,8 @@ func CreateServer(d *sql.DB, name, publicHost, token string) (*Server, error) {
 
 func GetServer(d *sql.DB, id int64) (*Server, error) {
 	s := &Server{}
-	err := d.QueryRow(`SELECT id,name,public_host,token,online,last_seen,agent_ver,os,arch,connect_ip,config_rev,last_error,last_error_at,cores,created_at,traffic_limit FROM servers WHERE id=?`, id).
-		Scan(&s.ID, &s.Name, &s.PublicHost, &s.Token, &s.Online, &s.LastSeen, &s.AgentVer, &s.OS, &s.Arch, &s.ConnectIP, &s.ConfigRev, &s.LastError, &s.LastErrorAt, &s.Cores, &s.CreatedAt, &s.TrafficLimit)
+	err := d.QueryRow(`SELECT id,name,public_host,token,online,last_seen,agent_ver,os,arch,connect_ip,config_rev,last_error,last_error_at,cores,created_at,traffic_limit,port_min,port_max FROM servers WHERE id=?`, id).
+		Scan(&s.ID, &s.Name, &s.PublicHost, &s.Token, &s.Online, &s.LastSeen, &s.AgentVer, &s.OS, &s.Arch, &s.ConnectIP, &s.ConfigRev, &s.LastError, &s.LastErrorAt, &s.Cores, &s.CreatedAt, &s.TrafficLimit, &s.PortMin, &s.PortMax)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +357,7 @@ func ListServers(d *sql.DB) ([]*Server, error) {
 }
 
 func UpdateServer(d *sql.DB, s *Server) error {
-	_, err := d.Exec(`UPDATE servers SET name=?, public_host=?, traffic_limit=? WHERE id=?`, s.Name, s.PublicHost, s.TrafficLimit, s.ID)
+	_, err := d.Exec(`UPDATE servers SET name=?, public_host=?, traffic_limit=?, port_min=?, port_max=? WHERE id=?`, s.Name, s.PublicHost, s.TrafficLimit, s.PortMin, s.PortMax, s.ID)
 	return err
 }
 

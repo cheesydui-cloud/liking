@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { useToast, useDialog } from '../components/Layout'
+import { formatPortRange, serverPortRange } from '../lib/ports'
 import { hopStatus, nodeStatus } from '../lib/status'
 import { Badge, Empty, Field, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput } from '../components/ui'
 
@@ -223,12 +224,14 @@ function pathSub(inb, byID) {
   return [protoShort(inb.profile), ...hops.map(h => hopProto(h, byID))].join(' → ')
 }
 
-function usedPortsText(serverId, list, excludeId = 0) {
+function usedPortsText(server, list, excludeId = 0) {
+  const serverId = server?.id
+  const { min, max } = serverPortRange(server)
   const ports = list
     .filter(x => Number(x.server_id) === Number(serverId) && Number(x.id) !== Number(excludeId))
     .map(x => x.port)
   const used = ports.length ? `已用 ${[...new Set(ports)].sort((a, b) => a - b).join('、')}` : '这台服务器还没有节点'
-  return `不填则随机。${used}`
+  return `不填则在 ${min}–${max} 随机。${used}`
 }
 
 function formFromInbound(inb) {
@@ -641,8 +644,8 @@ export default function Forwards() {
             <Field label="名称" hint="可留空">
               <input className="input-field" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder={entryProfile ? `${entryProfile}-端口` : ''} />
             </Field>
-            <Field label="监听端口" hint={usedPortsText(f.server_id, list, editId)}>
-              <input className="input-field font-mono tabular-nums" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} placeholder="随机" inputMode="numeric" />
+            <Field label="监听端口" hint={usedPortsText(serversByID.get(Number(f.server_id)), list, editId)}>
+              <input className="input-field font-mono tabular-nums" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} placeholder={f.server_id ? `随机 ${formatPortRange(serversByID.get(Number(f.server_id)))}` : '随机'} inputMode="numeric" />
             </Field>
           </div>
           {f.kind === 'chain' && (

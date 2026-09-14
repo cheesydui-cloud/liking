@@ -58,6 +58,8 @@ type Server struct {
 	OverQuota      bool   `json:"over_quota,omitempty"`
 	NeedsUpgrade   bool   `json:"needs_upgrade,omitempty"`
 	NeedsReinstall bool   `json:"needs_reinstall,omitempty"`
+	PortMin        int    `json:"port_min"`
+	PortMax        int    `json:"port_max"`
 }
 
 type Certificate struct {

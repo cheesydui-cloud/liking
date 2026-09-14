@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
+import { formatPortRange, serverPortRange } from '../lib/ports'
 import { isDirectNode, nodeStatus, serverHasCore } from '../lib/status'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, FilterTabs, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, StatusWord, fmtBytes, fmtDateShort } from '../components/ui'
@@ -38,12 +39,14 @@ function needsTLS(profile) {
   return profile === 'vless-xhttp-tls' || profile === 'trojan-tls' || profile === 'anytls'
 }
 
-function usedPortsText(serverId, list, excludeId = 0) {
+function usedPortsText(server, list, excludeId = 0) {
+  const serverId = server?.id
+  const { min, max } = serverPortRange(server)
   const ports = list
     .filter(x => Number(x.server_id) === Number(serverId) && Number(x.id) !== Number(excludeId))
     .map(x => x.port)
   const used = ports.length ? `已用 ${[...new Set(ports)].sort((a, b) => a - b).join('、')}` : '这台服务器还没有节点'
-  return `不填则随机，避开已用端口。${used}`
+  return `不填则在 ${min}–${max} 随机，避开已用端口。${used}`
 }
 
 function inboundSettings(inb) {
@@ -288,7 +291,7 @@ export default function Nodes() {
     if (raw !== '') {
       const port = Number(raw)
       if (!Number.isInteger(port) || port < 1 || port > 65535) {
-        toast('端口范围 1–65535，或不填则随机', 'error')
+        toast(selectedServer ? `端口 1–65535，或不填则在 ${formatPortRange(selectedServer)} 随机` : '端口范围 1–65535，或不填则随机', 'error')
         return
       }
     } else if (editId) {
@@ -571,8 +574,8 @@ export default function Nodes() {
           <Field label="名称" hint="可留空，保存时按协议和端口生成">
             <input className="input-field" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="" autoFocus />
           </Field>
-          <Field label="端口" hint={f.server_id ? usedPortsText(f.server_id, list, editId) : '不填则随机，避开已用端口'}>
-            <input className="input-field" type="number" min="1" max="65535" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} placeholder="" />
+          <Field label="端口" hint={selectedServer ? usedPortsText(selectedServer, list, editId) : '不填则随机，避开已用端口'}>
+            <input className="input-field" type="number" min="1" max="65535" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} placeholder={selectedServer ? `随机 ${formatPortRange(selectedServer)}` : '随机'} />
           </Field>
           {meta?.need_tls && (
             <Field label="TLS 证书" hint="在设置里签发或上传">

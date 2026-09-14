@@ -90,13 +90,39 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{"servers": list})
 }
 
+func applyServerPortRange(srv *db.Server, minPtr, maxPtr *int) error {
+	if minPtr == nil && maxPtr == nil {
+		return nil
+	}
+	min, max := srv.PortMin, srv.PortMax
+	if minPtr != nil {
+		min = *minPtr
+	}
+	if maxPtr != nil {
+		max = *maxPtr
+	}
+	nmin, nmax, err := corecfg.NormalizePortRange(min, max)
+	if err != nil {
+		return err
+	}
+	srv.PortMin, srv.PortMax = nmin, nmax
+	return nil
+}
+
 func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name       string `json:"name"`
 		PublicHost string `json:"public_host"`
+		PortMin    *int   `json:"port_min"`
+		PortMax    *int   `json:"port_max"`
 	}
 	if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
 		jsonErr(w, http.StatusBadRequest, "需要名称")
+		return
+	}
+	dummy := &db.Server{PortMin: corecfg.DefaultPortMin, PortMax: corecfg.DefaultPortMax}
+	if err := applyServerPortRange(dummy, req.PortMin, req.PortMax); err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	tok, err := db.RandomHex(20)
@@ -108,6 +134,13 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if srv.PortMin != dummy.PortMin || srv.PortMax != dummy.PortMax {
+		srv.PortMin, srv.PortMax = dummy.PortMin, dummy.PortMax
+		if err := db.UpdateServer(s.DB, srv); err != nil {
+			jsonErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	u := userFromCtx(r.Context())
 	db.AddAudit(s.DB, &u.ID, "server.create", srv.Name)
@@ -129,6 +162,8 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		Name         *string `json:"name"`
 		PublicHost   *string `json:"public_host"`
 		TrafficLimit *int64  `json:"traffic_limit"`
+		PortMin      *int    `json:"port_min"`
+		PortMax      *int    `json:"port_max"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -146,6 +181,10 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		srv.TrafficLimit = *req.TrafficLimit
+	}
+	if err := applyServerPortRange(srv, req.PortMin, req.PortMax); err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	if err := db.UpdateServer(s.DB, srv); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
