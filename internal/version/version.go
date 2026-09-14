@@ -1,4 +1,4 @@
 package version
 
 // Version is the panel/agent release string. Install and hello frames report it.
-const Version = "0.1.50"
+const Version = "0.1.51"

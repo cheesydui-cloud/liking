@@ -284,15 +284,16 @@ export function Modal({ open, title, onClose, children, footer, wide, size }) {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`relative card w-full ${max} p-5 m-0 sm:m-auto max-h-[92dvh] overflow-y-auto`}
-        style={{ overscrollBehavior: 'contain' }}
+        className={`modal-panel card w-full ${max}`}
       >
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <h2 id={titleId} className="text-[16px] font-semibold leading-tight">{title}</h2>
-          <button type="button" className="btn-ghost h-8 w-8 px-0" onClick={onClose} aria-label="关闭"><Icon name="close" size={15} /></button>
+        <div className="modal-head">
+          <h2 id={titleId} className="modal-title">{title}</h2>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭">
+            <Icon name="close" size={15} />
+          </button>
         </div>
-        <div>{children}</div>
-        {footer && <div className="mt-5 flex justify-end gap-2">{footer}</div>}
+        <div className="modal-body">{children}</div>
+        {footer ? <div className="modal-foot">{footer}</div> : null}
       </div>
     </div>
   )
