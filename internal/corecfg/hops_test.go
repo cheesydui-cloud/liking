@@ -89,6 +89,9 @@ func TestChainPathTags(t *testing.T) {
 	if err != nil || len(p2) != 1 || p2[0].Socks == nil || p2[0].Socks.Host != "203.0.113.9" {
 		t.Fatalf("sk5 %+v %v", p2, err)
 	}
+	if p2[0].Share == nil || p2[0].Share.Scheme != "socks5" {
+		t.Fatalf("share %+v", p2[0].Share)
+	}
 }
 
 func TestCountHopsTo(t *testing.T) {

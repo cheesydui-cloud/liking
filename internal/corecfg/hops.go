@@ -96,13 +96,13 @@ func (h Hop) validate() error {
 			return fmt.Errorf("请选择这一跳的节点")
 		}
 		if strings.TrimSpace(h.URI) != "" {
-			return fmt.Errorf("每一跳只能是本面板节点或 SK5")
+			return fmt.Errorf("每一跳只能是本面板节点或出口链接")
 		}
-	case "socks":
+	case "socks", "uri":
 		if h.InboundID != 0 {
-			return fmt.Errorf("每一跳只能是本面板节点或 SK5")
+			return fmt.Errorf("每一跳只能是本面板节点或出口链接")
 		}
-		if _, err := ParseSocksURI(h.URI); err != nil {
+		if _, err := ParseShareURI(h.URI); err != nil {
 			return err
 		}
 	default:
@@ -130,6 +130,9 @@ func parseHop(v any) (Hop, error) {
 		} else {
 			h.Kind = "panel"
 		}
+	}
+	if h.Kind == "uri" {
+		h.Kind = "socks"
 	}
 	return h, nil
 }
@@ -287,6 +290,7 @@ type PathHop struct {
 	Tag   string
 	Land  *db.Inbound
 	Socks *SocksTarget
+	Share *ShareTarget
 	Cred  Settings
 }
 
@@ -314,10 +318,11 @@ func ChainPath(entry *db.Inbound, byID map[int64]*db.Inbound) ([]PathHop, error)
 		"relay_username": st.String("relay_username"),
 		"relay_password": st.String("relay_password"),
 	}}
-	if t, err := socksExit(entry); err != nil {
+	if t, err := shareExit(entry); err != nil {
 		return nil, err
 	} else if t != nil {
-		last.Socks = t
+		last.Share = t
+		last.Socks = t.SocksTarget()
 	} else if entry.ExitInboundID == nil {
 		return nil, fmt.Errorf("链式线路 %s 没有落地", entry.Name)
 	} else {
@@ -332,12 +337,12 @@ func ChainPath(entry *db.Inbound, byID map[int64]*db.Inbound) ([]PathHop, error)
 }
 
 func hopToPath(h Hop, byID map[int64]*db.Inbound) (PathHop, error) {
-	if h.Kind == "socks" || h.URI != "" {
-		t, err := ParseSocksURI(h.URI)
+	if h.Kind == "socks" || h.Kind == "uri" || h.URI != "" {
+		t, err := ParseShareURI(h.URI)
 		if err != nil {
 			return PathHop{}, err
 		}
-		return PathHop{Socks: t}, nil
+		return PathHop{Share: t, Socks: t.SocksTarget()}, nil
 	}
 	if h.InboundID == 0 {
 		return PathHop{}, fmt.Errorf("没有节点")

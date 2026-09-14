@@ -10,6 +10,7 @@ import Forwards from './pages/Forwards'
 import Traffic from './pages/Traffic'
 import Settings from './pages/Settings'
 import My from './pages/My'
+import MyForwards from './pages/MyForwards'
 import { BrandMark } from './components/ui'
 
 function Loading() {
@@ -39,6 +40,14 @@ function UserRoute({ children }) {
   return <Layout>{children}</Layout>
 }
 
+function AdminUserRoute({ children }) {
+  const { user } = useUser()
+  if (user === undefined) return <Loading />
+  if (user === null) return <Navigate to="/login" replace />
+  if (user.role !== 'admin') return <Navigate to="/my" replace />
+  return <Layout>{children}</Layout>
+}
+
 function Root() {
   const { user } = useUser()
   if (user === undefined) return <Loading />
@@ -65,6 +74,7 @@ export default function App() {
           <Route path="/settings" element={<AdminRoute><Settings /></AdminRoute>} />
           <Route path="/password" element={<Navigate to="/settings?tab=account" replace />} />
           <Route path="/my" element={<UserRoute><My /></UserRoute>} />
+          <Route path="/my/forwards" element={<AdminUserRoute><MyForwards /></AdminUserRoute>} />
           <Route path="/my/settings" element={<UserRoute><Settings accountOnly /></UserRoute>} />
           <Route path="/my/password" element={<Navigate to="/my/settings" replace />} />
           <Route path="*" element={

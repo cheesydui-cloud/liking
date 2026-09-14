@@ -20,8 +20,11 @@ const (
 	TypeEnsureCoreAck = "ensure_core_ack"
 	TypeRemoveCore    = "remove_core"
 	TypeRemoveCoreAck = "remove_core_ack"
+	TypeProbe         = "probe"
+	TypeProbeAck      = "probe_ack"
 
 	CapCores = "cores"
+	CapProbe = "probe"
 )
 
 type Envelope struct {
@@ -109,6 +112,17 @@ type Sample struct {
 	Email string `json:"email"`
 	Up    int64  `json:"up"`
 	Down  int64  `json:"down"`
+}
+
+type Probe struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+}
+
+type ProbeAck struct {
+	OK        bool   `json:"ok"`
+	Error     string `json:"error,omitempty"`
+	LatencyMS int64  `json:"latency_ms,omitempty"`
 }
 
 type Ping struct {

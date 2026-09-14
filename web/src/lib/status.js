@@ -41,7 +41,7 @@ export function nodeStatus(inb, server, opts = {}) {
 
 export function hopStatus(h, byID, serversByID) {
   if (!h) return '故障'
-  if (h.kind === 'socks' || h.uri) return ''
+  if (h.kind === 'socks' || h.kind === 'uri' || h.uri) return ''
   const land = byID?.get(Number(h.inbound_id))
   if (!land) return '故障'
   const srv = serversByID?.get(Number(land.server_id))

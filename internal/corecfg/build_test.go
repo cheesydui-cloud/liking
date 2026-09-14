@@ -483,6 +483,69 @@ func TestBuildSK5AndPortForward(t *testing.T) {
 	}
 }
 
+func TestBuildVLESSExitURI(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	srv, err := db.CreateServer(d, "n1", "10.0.0.1", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := &db.Inbound{
+		ServerID: srv.ID, Name: "vless-in", Profile: ProfileVLESSRealityVision,
+		Port: 8443, Enabled: true, LineKind: "chain",
+		ExitURI:  "vless://11111111-1111-4111-8111-111111111111@203.0.113.10:443?encryption=none&security=reality&sni=www.microsoft.com&fp=chrome&pbk=abc&sid=abcd&type=tcp&flow=xtls-rprx-vision#ext",
+		Settings: "{}",
+	}
+	if err := Normalize(entry, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateInbound(d, entry); err != nil {
+		t.Fatal(err)
+	}
+	b, err := Build(d, srv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.Apply.Xray) == 0 {
+		t.Fatal("xray")
+	}
+	var xray map[string]any
+	if err := json.Unmarshal(b.Apply.Xray, &xray); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, raw := range xray["outbounds"].([]any) {
+		obj, _ := raw.(map[string]any)
+		if obj["protocol"] != "vless" {
+			continue
+		}
+		st, _ := obj["settings"].(map[string]any)
+		vnext, _ := st["vnext"].([]any)
+		if len(vnext) == 0 {
+			continue
+		}
+		n0, _ := vnext[0].(map[string]any)
+		if n0["address"] != "203.0.113.10" || n0["port"] != float64(443) {
+			continue
+		}
+		found = true
+		stream, _ := obj["streamSettings"].(map[string]any)
+		if stream["security"] != "reality" {
+			t.Fatalf("stream %+v", stream)
+		}
+		rs, _ := stream["realitySettings"].(map[string]any)
+		if rs["publicKey"] != "abc" {
+			t.Fatalf("reality %+v", rs)
+		}
+	}
+	if !found {
+		t.Fatal("missing vless outbound")
+	}
+}
+
 func TestBuildSOCKS5InboundAndLanding(t *testing.T) {
 	d, err := db.Open(":memory:")
 	if err != nil {

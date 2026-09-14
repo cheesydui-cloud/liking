@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"runtime"
 	"strings"
 	"sync"
@@ -118,7 +120,7 @@ func (a *Agent) session(ctx context.Context) error {
 		Arch:         runtime.GOARCH,
 		LastRev:      lastRev,
 		Cores:        detectedCores(),
-		Caps:         []string{wsproto.CapCores},
+		Caps:         []string{wsproto.CapCores, wsproto.CapProbe},
 	})
 	if err := a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeHello, ID: "hello", Payload: hello}); err != nil {
 		return err
@@ -166,7 +168,7 @@ func (a *Agent) session(ctx context.Context) error {
 		case err := <-errCh:
 			return err
 		case env := <-envCh:
-			if env.Type == wsproto.TypeApply || env.Type == wsproto.TypeEnsureCore || env.Type == wsproto.TypeRemoveCore {
+			if env.Type == wsproto.TypeApply || env.Type == wsproto.TypeEnsureCore || env.Type == wsproto.TypeRemoveCore || env.Type == wsproto.TypeProbe {
 				go func(env wsproto.Envelope) {
 					var err error
 					switch env.Type {
@@ -176,6 +178,8 @@ func (a *Agent) session(ctx context.Context) error {
 						err = a.handleEnsureCore(ctx, ws, env)
 					case wsproto.TypeRemoveCore:
 						err = a.handleRemoveCore(ctx, ws, env)
+					case wsproto.TypeProbe:
+						err = a.handleProbe(ctx, ws, env)
 					}
 					if err != nil {
 						log.Printf("agent %s: %v", env.Type, err)
@@ -320,6 +324,45 @@ func (a *Agent) ackCoreOp(ctx context.Context, ws *websocket.Conn, typ, id, core
 	}
 	p, _ := json.Marshal(ack)
 	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: typ, ID: id, Payload: p})
+}
+
+func (a *Agent) handleProbe(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {
+	var req wsproto.Probe
+	if err := json.Unmarshal(env.Payload, &req); err != nil {
+		return a.ackProbe(ctx, ws, env.ID, false, "malformed probe", 0)
+	}
+	host := strings.TrimSpace(req.Host)
+	if host == "" || req.Port < 1 || req.Port > 65535 {
+		return a.ackProbe(ctx, ws, env.ID, false, "主机或端口无效", 0)
+	}
+	addr := net.JoinHostPort(host, strconv.Itoa(req.Port))
+	dialCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	start := time.Now()
+	var d net.Dialer
+	conn, err := d.DialContext(dialCtx, "tcp", addr)
+	if err != nil {
+		msg := "超时"
+		if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			msg = "超时"
+		} else if errors.Is(err, context.DeadlineExceeded) {
+			msg = "超时"
+		} else {
+			msg = err.Error()
+		}
+		return a.ackProbe(ctx, ws, env.ID, false, msg, 0)
+	}
+	_ = conn.Close()
+	ms := time.Since(start).Milliseconds()
+	if ms < 1 {
+		ms = 1
+	}
+	return a.ackProbe(ctx, ws, env.ID, true, "", ms)
+}
+
+func (a *Agent) ackProbe(ctx context.Context, ws *websocket.Conn, id string, ok bool, errMsg string, ms int64) error {
+	p, _ := json.Marshal(wsproto.ProbeAck{OK: ok, Error: errMsg, LatencyMS: ms})
+	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeProbeAck, ID: id, Payload: p})
 }
 
 func (a *Agent) handleApply(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {

@@ -144,6 +144,7 @@ const PAGE_TITLES = {
   '/traffic': '流量',
   '/settings': '设置',
   '/my': '订阅',
+  '/my/forwards': '中转',
   '/my/settings': '设置',
 }
 
@@ -209,7 +210,10 @@ export function Layout({ children }) {
       ],
     },
   ] : [
-    { items: [{ to: '/my', icon: 'spark', label: '我的订阅' }] },
+    { items: [
+      { to: '/my', end: true, icon: 'spark', label: '我的订阅' },
+      ...(isAdmin ? [{ to: '/my/forwards', icon: 'forward', label: '中转' }] : []),
+    ] },
     { label: '账号', items: [{ to: '/my/settings', icon: 'gear', label: '设置' }] },
   ]
 

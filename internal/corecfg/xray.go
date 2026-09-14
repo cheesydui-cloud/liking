@@ -366,6 +366,9 @@ func xrayChainOutbounds(entry *db.Inbound, byID map[int64]*db.Inbound) ([]any, s
 }
 
 func xrayPathOutbound(p PathHop) (map[string]any, error) {
+	if p.Share != nil {
+		return xrayShareOutbound(p.Tag, p.Share)
+	}
 	if p.Socks != nil {
 		ob, _, err := xraySocksOutbound(p.Tag, p.Socks)
 		return ob, err
@@ -374,6 +377,162 @@ func xrayPathOutbound(p PathHop) (map[string]any, error) {
 		return nil, fmt.Errorf("没有落地")
 	}
 	return xrayLandOutbound(p.Tag, p.Land, p.Cred)
+}
+
+func xrayShareOutbound(tag string, t *ShareTarget) (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("出口链接无效")
+	}
+	if t.Host == "" || t.Port < 1 {
+		return nil, fmt.Errorf("出口链接缺少主机或端口")
+	}
+	switch t.Scheme {
+	case "socks", "socks5", "socks5h":
+		ob, _, err := xraySocksOutbound(tag, t.SocksTarget())
+		return ob, err
+	case "ss":
+		if t.Method == "" || t.Password == "" {
+			return nil, fmt.Errorf("SS 链接缺少加密或密码")
+		}
+		return map[string]any{
+			"tag":      tag,
+			"protocol": "shadowsocks",
+			"settings": map[string]any{
+				"servers": []any{map[string]any{
+					"address":  t.Host,
+					"port":     t.Port,
+					"method":   t.Method,
+					"password": t.Password,
+				}},
+			},
+		}, nil
+	case "trojan":
+		if t.Password == "" {
+			return nil, fmt.Errorf("Trojan 链接缺少密码")
+		}
+		ob := map[string]any{
+			"tag":      tag,
+			"protocol": "trojan",
+			"settings": map[string]any{
+				"servers": []any{map[string]any{
+					"address":  t.Host,
+					"port":     t.Port,
+					"password": t.Password,
+				}},
+			},
+		}
+		if stream := xrayShareStream(t); stream != nil {
+			ob["streamSettings"] = stream
+		}
+		return ob, nil
+	case "vless":
+		if t.UUID == "" {
+			return nil, fmt.Errorf("VLESS 链接缺少 UUID")
+		}
+		user := map[string]any{"id": t.UUID, "encryption": nz(t.Encryption, "none")}
+		if t.Flow != "" {
+			user["flow"] = t.Flow
+		}
+		ob := map[string]any{
+			"tag":      tag,
+			"protocol": "vless",
+			"settings": map[string]any{
+				"vnext": []any{map[string]any{
+					"address": t.Host,
+					"port":    t.Port,
+					"users":   []any{user},
+				}},
+			},
+		}
+		if stream := xrayShareStream(t); stream != nil {
+			ob["streamSettings"] = stream
+		}
+		return ob, nil
+	default:
+		return nil, fmt.Errorf("暂不支持 %s 出口", t.Scheme)
+	}
+}
+
+func xrayShareStream(t *ShareTarget) map[string]any {
+	if t == nil {
+		return nil
+	}
+	netw := t.Network
+	if netw == "" {
+		netw = "tcp"
+	}
+	sec := t.Security
+	if sec == "" && t.Scheme == "trojan" {
+		sec = "tls"
+	}
+	if sec == "none" && netw == "tcp" && t.Scheme != "trojan" {
+		return nil
+	}
+	stream := map[string]any{"network": netw}
+	sni := t.SNI
+	if sni == "" {
+		sni = t.Host
+	}
+	st := Settings{}
+	if t.Fingerprint != "" {
+		st["fingerprint"] = t.Fingerprint
+	}
+	if len(t.ALPN) > 0 {
+		st["alpn"] = t.ALPN
+	}
+	switch sec {
+	case "tls":
+		tls := xrayClientTLS(st, sni)
+		if t.AllowInsecure {
+			tls["allowInsecure"] = true
+		}
+		stream["security"] = "tls"
+		stream["tlsSettings"] = tls
+	case "reality":
+		rs := map[string]any{
+			"serverName":  sni,
+			"fingerprint": nz(t.Fingerprint, "chrome"),
+			"publicKey":   t.PublicKey,
+			"shortId":     t.ShortID,
+		}
+		if t.SpiderX != "" {
+			rs["spiderX"] = t.SpiderX
+		}
+		stream["security"] = "reality"
+		stream["realitySettings"] = rs
+	}
+	switch netw {
+	case "ws":
+		ws := map[string]any{"path": nz(t.Path, "/")}
+		if t.HostHeader != "" {
+			ws["headers"] = map[string]any{"Host": t.HostHeader}
+		}
+		stream["wsSettings"] = ws
+	case "grpc":
+		stream["grpcSettings"] = map[string]any{"serviceName": t.ServiceName}
+	case "xhttp":
+		xh := map[string]any{"path": nz(t.Path, "/"), "mode": nz(t.Mode, "auto")}
+		if t.HostHeader != "" {
+			xh["host"] = t.HostHeader
+		}
+		stream["xhttpSettings"] = xh
+	case "httpupgrade":
+		hu := map[string]any{"path": nz(t.Path, "/")}
+		if t.HostHeader != "" {
+			hu["host"] = t.HostHeader
+		}
+		stream["httpupgradeSettings"] = hu
+	case "http":
+		hs := map[string]any{}
+		if t.Path != "" {
+			hs["path"] = t.Path
+		}
+		if t.HostHeader != "" {
+			hs["host"] = []any{t.HostHeader}
+		}
+		stream["httpSettings"] = hs
+	}
+	return stream
 }
 
 func xrayLandOutbound(tag string, land *db.Inbound, st Settings) (map[string]any, error) {

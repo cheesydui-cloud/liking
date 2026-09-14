@@ -3,13 +3,14 @@ import { api } from '../lib/api'
 import { useToast, useDialog } from '../components/Layout'
 import { formatPortRange, serverPortRange } from '../lib/ports'
 import { hopStatus, nodeStatus } from '../lib/status'
+import { parseShareURI, shareLabel, shareProto, isSocksURI } from '../lib/share'
 import { Badge, Empty, Field, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput } from '../components/ui'
 
 const LAND_PROFILES = ['vless-reality', 'vless-reality-vision', 'vless-xhttp-tls', 'trojan-tls', 'ss2022', 'socks5']
 const MAX_HOPS = 5
 
 function emptyHop() {
-  return { kind: 'panel', inbound_id: '', sk5_host: '', sk5_port: '1080', sk5_user: '', sk5_pass: '' }
+  return { kind: 'panel', inbound_id: '', sk5_host: '', sk5_port: '1080', sk5_user: '', sk5_pass: '', uri: '' }
 }
 
 const emptyForm = {
@@ -108,9 +109,15 @@ function hopFromSaved(h) {
   const hop = emptyHop()
   if (!h) return hop
   const uri = h.uri || ''
+  if (h.kind === 'uri' || (uri && !isSocksURI(uri))) {
+    hop.kind = 'uri'
+    hop.uri = uri
+    return hop
+  }
   if (h.kind === 'socks' || uri) {
     const sk = parseSocks(uri)
     hop.kind = 'socks'
+    hop.uri = uri
     hop.sk5_host = sk.host
     hop.sk5_port = sk.port
     hop.sk5_user = sk.user
@@ -133,17 +140,33 @@ function hopsFromInbound(inb) {
 }
 
 function serializeHop(h) {
+  if (h.kind === 'uri') {
+    return { kind: 'socks', uri: String(h.uri || '').trim() }
+  }
   if (h.kind === 'socks') {
     return { kind: 'socks', uri: formatSocks(h.sk5_host, h.sk5_port, h.sk5_user, h.sk5_pass) }
   }
   return { kind: 'panel', inbound_id: Number(h.inbound_id) || 0 }
 }
 
+function hopURI(h) {
+  if (!h) return ''
+  if (h.uri) return h.uri
+  if (h.kind === 'socks') return formatSocks(h.sk5_host, h.sk5_port, h.sk5_user, h.sk5_pass)
+  return ''
+}
+
 function hopText(h, byID) {
   if (!h) return '—'
-  if (h.kind === 'socks' || h.uri) {
-    const uri = h.uri || formatSocks(h.sk5_host, h.sk5_port, h.sk5_user, h.sk5_pass)
-    return socksHostPort(uri)
+  const uri = hopURI(h)
+  if (h.kind === 'uri' || h.kind === 'socks' || uri) {
+    const t = parseShareURI(uri)
+    if (t.ok) {
+      if (t.proto === 'SK5') return `${t.host}:${t.port}`
+      return t.label
+    }
+    if (h.kind === 'socks') return socksHostPort(uri)
+    return shareLabel(uri)
   }
   const land = byID.get(Number(h.inbound_id))
   return land ? land.name : '落地已删除'
@@ -151,7 +174,8 @@ function hopText(h, byID) {
 
 function hopProto(h, byID) {
   if (!h) return '—'
-  if (h.kind === 'socks' || h.uri) return 'SK5'
+  const uri = hopURI(h)
+  if (h.kind === 'uri' || h.kind === 'socks' || uri) return shareProto(uri)
   const land = byID.get(Number(h.inbound_id))
   return land ? protoShort(land.profile) : '—'
 }
@@ -382,7 +406,8 @@ export default function Forwards() {
         exit_uri: '',
       }
     }
-    const settings = {}
+    const existing = editId ? inboundSettings(byID.get(Number(editId))) : {}
+    const settings = { ...existing }
     const profile = f.profile
     if (isReality(profile) && String(f.dest || '').trim()) settings.dest = f.dest.trim()
     if (profile === 'ss2022') settings.method = f.method
@@ -391,6 +416,7 @@ export default function Forwards() {
     const last = hops[hops.length - 1]
     const mids = hops.slice(0, -1).map(serializeHop)
     if (mids.length) settings.hops = mids
+    else delete settings.hops
     const body = {
       server_id: Number(f.server_id),
       name: f.name,
@@ -405,6 +431,7 @@ export default function Forwards() {
     }
     if (f.cert_id) body.cert_id = Number(f.cert_id)
     if (last.kind === 'panel') body.exit_inbound_id = Number(last.inbound_id) || 0
+    else if (last.kind === 'uri') body.exit_uri = String(last.uri || '').trim()
     else body.exit_uri = formatSocks(last.sk5_host, last.sk5_port, last.sk5_user, last.sk5_pass)
     return body
   }
@@ -436,6 +463,9 @@ export default function Forwards() {
           if (!id) { toast(`请选择${label}节点`, 'error'); return }
           if (seen.has(id)) { toast('路径里不能重复同一节点', 'error'); return }
           seen.add(id)
+        } else if (h.kind === 'uri') {
+          const t = parseShareURI(h.uri)
+          if (!t.ok) { toast(t.error || `${label}链接无效`, 'error'); return }
         } else {
           if (!String(h.sk5_host || '').trim()) { toast(`请填写${label} SK5 主机`, 'error'); return }
           const p = Number(h.sk5_port)
@@ -671,6 +701,7 @@ export default function Forwards() {
                       <select className="input-field" value={h.kind} onChange={e => setHop(i, { kind: e.target.value })}>
                         <option value="panel">本面板节点</option>
                         <option value="socks">SK5</option>
+                        <option value="uri">粘贴链接</option>
                       </select>
                     </Field>
                     {h.kind === 'panel' ? (
@@ -681,6 +712,25 @@ export default function Forwards() {
                             <option key={x.id} value={x.id}>{x.server_name} / {x.name} · {protoShort(x.profile)} :{x.port}</option>
                           ))}
                         </select>
+                      </Field>
+                    ) : h.kind === 'uri' ? (
+                      <Field label={last ? '出口链接' : '节点链接'} hint="vless://、ss://、trojan://，也可以 socks5://。">
+                        <textarea
+                          className="input-field font-mono"
+                          rows={3}
+                          value={h.uri || ''}
+                          onChange={e => setHop(i, { uri: e.target.value })}
+                          placeholder="vless://uuid@host:443?security=reality&…"
+                          spellCheck={false}
+                        />
+                        {String(h.uri || '').trim() ? (() => {
+                          const t = parseShareURI(h.uri)
+                          return (
+                            <div className="text-[12px] mt-1.5" style={!t.ok ? { color: 'var(--color-danger)' } : undefined}>
+                              {t.ok ? t.label : (t.error || '无法识别')}
+                            </div>
+                          )
+                        })() : null}
                       </Field>
                     ) : (
                       <>

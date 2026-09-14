@@ -462,16 +462,20 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 		}
 		uri := strings.TrimSpace(in.ExitURI)
 		if exit != nil && uri != "" {
-			return fmt.Errorf("落地节点和 SK5 不能同时填")
+			return fmt.Errorf("落地节点和出口链接不能同时填")
 		}
 		if exit == nil && uri == "" {
-			return fmt.Errorf("链式线路需要落地入站或 SK5")
+			return fmt.Errorf("链式线路需要落地入站或出口链接")
 		}
 		if uri != "" {
-			if _, err := ParseSocksURI(uri); err != nil {
+			t, err := ParseShareURI(uri)
+			if err != nil {
 				return err
 			}
-			in.ExitURI = uri
+			in.ExitURI = strings.TrimSpace(t.Raw)
+			if in.ExitURI == "" {
+				in.ExitURI = uri
+			}
 			in.ExitInboundID = nil
 		}
 		if len(ParseHops(st))+1 > MaxHops {

@@ -124,8 +124,11 @@ func (s *Server) Router() http.Handler {
 			r.Get("/api/inbounds", s.handleListInbounds)
 			r.Post("/api/inbounds", s.handleCreateInbound)
 			r.Get("/api/inbounds/{id}/share", s.handleInboundShare)
+			r.Post("/api/inbounds/{id}/probe", s.handleInboundProbe)
 			r.Put("/api/inbounds/{id}", s.handleUpdateInbound)
 			r.Delete("/api/inbounds/{id}", s.handleDeleteInbound)
+			r.Post("/api/parse-uri", s.handleParseURI)
+			r.Post("/api/probe", s.handleProbe)
 
 			r.Get("/api/users", s.handleListUsers)
 			r.Post("/api/users", s.handleCreateUser)

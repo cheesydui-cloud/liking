@@ -185,6 +185,9 @@ func singChainOutbounds(entry *db.Inbound, byID map[int64]*db.Inbound) ([]any, e
 }
 
 func singPathOutbound(p PathHop) (map[string]any, error) {
+	if p.Share != nil {
+		return singShareOutbound(p.Tag, p.Share)
+	}
 	if p.Socks != nil {
 		ob := map[string]any{
 			"type":        "socks",
@@ -203,6 +206,156 @@ func singPathOutbound(p PathHop) (map[string]any, error) {
 		return nil, fmt.Errorf("没有落地")
 	}
 	return singLandOutbound(p.Tag, p.Land, p.Cred)
+}
+
+func singShareOutbound(tag string, t *ShareTarget) (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("出口链接无效")
+	}
+	if t.Host == "" || t.Port < 1 {
+		return nil, fmt.Errorf("出口链接缺少主机或端口")
+	}
+	switch t.Scheme {
+	case "socks", "socks5", "socks5h":
+		ob := map[string]any{
+			"type":        "socks",
+			"tag":         tag,
+			"server":      t.Host,
+			"server_port": t.Port,
+			"version":     "5",
+		}
+		if t.User != "" || t.Password != "" {
+			ob["username"] = t.User
+			ob["password"] = t.Password
+		}
+		return ob, nil
+	case "ss":
+		if t.Method == "" || t.Password == "" {
+			return nil, fmt.Errorf("SS 链接缺少加密或密码")
+		}
+		return map[string]any{
+			"type":        "shadowsocks",
+			"tag":         tag,
+			"server":      t.Host,
+			"server_port": t.Port,
+			"method":      t.Method,
+			"password":    t.Password,
+		}, nil
+	case "trojan":
+		if t.Password == "" {
+			return nil, fmt.Errorf("Trojan 链接缺少密码")
+		}
+		ob := map[string]any{
+			"type":        "trojan",
+			"tag":         tag,
+			"server":      t.Host,
+			"server_port": t.Port,
+			"password":    t.Password,
+		}
+		if tls := singShareTLS(t); tls != nil {
+			ob["tls"] = tls
+		}
+		if tr := singShareTransport(t); tr != nil {
+			ob["transport"] = tr
+		}
+		return ob, nil
+	case "vless":
+		if t.UUID == "" {
+			return nil, fmt.Errorf("VLESS 链接缺少 UUID")
+		}
+		ob := map[string]any{
+			"type":        "vless",
+			"tag":         tag,
+			"server":      t.Host,
+			"server_port": t.Port,
+			"uuid":        t.UUID,
+		}
+		if t.Flow != "" {
+			ob["flow"] = t.Flow
+		}
+		if tls := singShareTLS(t); tls != nil {
+			ob["tls"] = tls
+		}
+		if tr := singShareTransport(t); tr != nil {
+			ob["transport"] = tr
+		}
+		return ob, nil
+	default:
+		return nil, fmt.Errorf("暂不支持 %s 出口", t.Scheme)
+	}
+}
+
+func singShareTLS(t *ShareTarget) map[string]any {
+	if t == nil {
+		return nil
+	}
+	sec := t.Security
+	if sec == "" && t.Scheme == "trojan" {
+		sec = "tls"
+	}
+	if sec != "tls" && sec != "reality" {
+		return nil
+	}
+	sni := t.SNI
+	if sni == "" {
+		sni = t.Host
+	}
+	st := Settings{}
+	if t.Fingerprint != "" {
+		st["fingerprint"] = t.Fingerprint
+	}
+	if len(t.ALPN) > 0 {
+		st["alpn"] = t.ALPN
+	}
+	tls := singClientTLS(st, sni)
+	if t.AllowInsecure {
+		tls["insecure"] = true
+	}
+	if sec == "reality" {
+		tls["reality"] = map[string]any{
+			"enabled":    true,
+			"public_key": t.PublicKey,
+			"short_id":   t.ShortID,
+		}
+	}
+	return tls
+}
+
+func singShareTransport(t *ShareTarget) map[string]any {
+	if t == nil {
+		return nil
+	}
+	netw := t.Network
+	if netw == "" || netw == "tcp" {
+		return nil
+	}
+	switch netw {
+	case "ws":
+		tr := map[string]any{"type": "ws", "path": nz(t.Path, "/")}
+		if t.HostHeader != "" {
+			tr["headers"] = map[string]any{"Host": t.HostHeader}
+		}
+		return tr
+	case "grpc":
+		return map[string]any{"type": "grpc", "service_name": t.ServiceName}
+	case "httpupgrade", "xhttp":
+		tr := map[string]any{"type": "httpupgrade", "path": nz(t.Path, "/")}
+		if t.HostHeader != "" {
+			tr["host"] = t.HostHeader
+		}
+		return tr
+	case "http":
+		tr := map[string]any{"type": "http"}
+		if t.Path != "" {
+			tr["path"] = t.Path
+		}
+		if t.HostHeader != "" {
+			tr["host"] = []any{t.HostHeader}
+		}
+		return tr
+	default:
+		return nil
+	}
 }
 
 func singLandOutbound(tag string, land *db.Inbound, st Settings) (map[string]any, error) {
