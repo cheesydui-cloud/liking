@@ -2351,6 +2351,83 @@ func TestTOTPLoginAndAdminCIDR(t *testing.T) {
 	decodeRes(t, res, nil)
 }
 
+func sessionCookieMaxAge(res *http.Response) int {
+	for _, c := range res.Cookies() {
+		if c.Name == sessionCookie {
+			return c.MaxAge
+		}
+	}
+	return -2
+}
+
+func TestLoginRememberCookie(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	c := &http.Client{}
+
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantShort := int(sessionTTL.Seconds())
+	if got := sessionCookieMaxAge(res); got != wantShort {
+		t.Fatalf("default max-age %d want %d", got, wantShort)
+	}
+	decodeRes(t, res, nil)
+
+	remember, _ := json.Marshal(map[string]any{"username": "admin", "password": "secret12", "remember": true})
+	res, err = c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(remember))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantLong := int(sessionRememberTTL.Seconds())
+	if got := sessionCookieMaxAge(res); got != wantLong {
+		t.Fatalf("remember max-age %d want %d", got, wantLong)
+	}
+	tok := ""
+	for _, ck := range res.Cookies() {
+		if ck.Name == sessionCookie {
+			tok = ck.Value
+		}
+	}
+	decodeRes(t, res, nil)
+	if tok == "" {
+		t.Fatal("remember cookie")
+	}
+	u, err := db.GetSessionUser(d, tok)
+	if err != nil || u == nil || u.Username != "admin" {
+		t.Fatalf("session user %v %v", u, err)
+	}
+
+	off, _ := json.Marshal(map[string]any{"username": "admin", "password": "secret12", "remember": false})
+	res, err = c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(off))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sessionCookieMaxAge(res); got != wantShort {
+		t.Fatalf("remember=false max-age %d want %d", got, wantShort)
+	}
+	decodeRes(t, res, nil)
+}
+
 func TestEncryptedBackupAndSubUserinfo(t *testing.T) {
 	d, err := db.Open(":memory:")
 	if err != nil {

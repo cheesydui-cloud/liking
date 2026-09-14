@@ -38,6 +38,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 		TOTP     string `json:"totp"`
+		Remember bool   `json:"remember"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -75,12 +76,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "内部错误")
 		return
 	}
-	exp := time.Now().Add(sessionTTL).Unix()
+	ttl := sessionTTL
+	if req.Remember {
+		ttl = sessionRememberTTL
+	}
+	exp := time.Now().Add(ttl).Unix()
 	if err := db.PutSession(s.DB, tok, u.ID, exp); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "内部错误")
 		return
 	}
-	http.SetCookie(w, newSessionCookie(r, tok, int(sessionTTL.Seconds())))
+	http.SetCookie(w, newSessionCookie(r, tok, int(ttl.Seconds())))
 	s.loginLimiter.Clear(ip)
 	db.AddAudit(s.DB, &u.ID, "login", u.Username)
 	jsonOK(w, s.sessionPayload(u, r))

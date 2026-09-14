@@ -10,6 +10,9 @@ export default function Login() {
   const [totp, setTotp] = useState('')
   const [needTotp, setNeedTotp] = useState(false)
   const [show, setShow] = useState(false)
+  const [remember, setRemember] = useState(() => {
+    try { return localStorage.getItem('lk-remember') === '1' } catch { return false }
+  })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [panelName, setPanelName] = useState('liking')
@@ -34,9 +37,10 @@ export default function Login() {
     setError('')
     setLoading(true)
     try {
-      const body = { username, password }
+      const body = { username, password, remember }
       if (needTotp) body.totp = totp
       const data = await api.post('/login', body)
+      try { localStorage.setItem('lk-remember', remember ? '1' : '0') } catch {}
       applySession(data)
       navigate('/', { replace: true })
     } catch (err) {
@@ -54,12 +58,9 @@ export default function Login() {
   return (
     <div className="min-h-dvh bg-app flex items-start sm:items-center justify-center p-6">
       <div className="login-box w-full max-w-[360px]">
-        <div className="flex items-end gap-3 mb-8">
+        <div className="flex items-center gap-3 mb-8">
           <BrandMark size={28} />
-          <div>
-            <div className="text-[18px] font-semibold leading-none">{panelName}</div>
-            <div className="text-[12px] text-ink-mut mt-1.5">登录面板</div>
-          </div>
+          <div className="text-[18px] font-semibold leading-none">{panelName}</div>
         </div>
         {error && (
           <div role="alert" className="alert-row is-fault mb-4">{error}</div>
@@ -84,7 +85,11 @@ export default function Login() {
               <input className="input-field h-10 font-mono tracking-widest" name="one-time-code" value={totp} onChange={e => setTotp(e.target.value)} required autoFocus inputMode="numeric" autoComplete="one-time-code" spellCheck={false} placeholder="123456" />
             </label>
           )}
-          <button className="btn-primary w-full h-10 mt-2" disabled={loading}>{loading ? '登录中…' : '登录'}</button>
+          <label className="flex items-center gap-2 text-[13px] text-ink select-none">
+            <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />
+            记住我
+          </label>
+          <button className="btn-primary w-full h-10" disabled={loading}>{loading ? '登录中…' : '登录'}</button>
         </form>
       </div>
     </div>

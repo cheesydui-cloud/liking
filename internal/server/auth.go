@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	sessionCookie = "liking_session"
-	sessionTTL    = 12 * time.Hour
+	sessionCookie      = "liking_session"
+	sessionTTL         = 12 * time.Hour
+	sessionRememberTTL = 30 * 24 * time.Hour
 )
 
 type ctxKey int
