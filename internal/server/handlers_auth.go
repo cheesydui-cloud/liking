@@ -224,7 +224,7 @@ func (s *Server) sessionPayload(u *db.User, r *http.Request) map[string]any {
 	announce, _ := db.GetSetting(s.DB, "announce")
 	out["announce"] = announce
 	out["timezone"] = db.Timezone(s.DB)
-	if view != nil && view.Role != "admin" {
+	if view != nil && view.SubToken != "" {
 		base := panelURL(s.DB, r)
 		out["sub"] = map[string]string{
 			"auto":    base + "/api/sub/" + view.SubToken,
@@ -232,11 +232,13 @@ func (s *Server) sessionPayload(u *db.User, r *http.Request) map[string]any {
 			"singbox": base + "/api/sub/" + view.SubToken + "/singbox",
 			"uri":     base + "/api/sub/" + view.SubToken + "/uri",
 		}
-		if view.TrafficLimit != nil {
-			view.TrafficCap = *view.TrafficLimit
-		} else if view.PackageID != nil {
-			if p, err := db.GetPackage(s.DB, *view.PackageID); err == nil {
-				view.TrafficCap = p.TrafficBytes
+		if view.Role != "admin" {
+			if view.TrafficLimit != nil {
+				view.TrafficCap = *view.TrafficLimit
+			} else if view.PackageID != nil {
+				if p, err := db.GetPackage(s.DB, *view.PackageID); err == nil {
+					view.TrafficCap = p.TrafficBytes
+				}
 			}
 		}
 	}

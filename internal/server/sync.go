@@ -131,6 +131,7 @@ func (s *Server) enforceOnce() {
 	now := nowT.Unix()
 	for _, u := range users {
 		if u.Role == "admin" {
+			// Admin clients are provisioned on inbound changes and 用户页, not every 30s.
 			continue
 		}
 		var pkg *db.Package

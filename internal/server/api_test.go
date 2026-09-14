@@ -362,6 +362,164 @@ func TestInboundShareURI(t *testing.T) {
 	}
 }
 
+func TestAdminSubscriptionAllNodes(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	body, _ := json.Marshal(map[string]string{"name": "n1", "public_host": "10.0.0.1"})
+	res, err = c.Post(ts.URL+"/api/servers", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		Server struct {
+			ID int64 `json:"id"`
+		} `json:"server"`
+	}
+	decodeRes(t, res, &created)
+
+	inBody, _ := json.Marshal(map[string]any{
+		"server_id": created.Server.ID,
+		"name":      "vless-1",
+		"profile":   "vless-reality-vision",
+		"port":      8443,
+	})
+	res, err = c.Post(ts.URL+"/api/inbounds", "application/json", bytes.NewReader(inBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	res, err = c.Get(ts.URL + "/api/me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var me struct {
+		User struct {
+			Role     string `json:"role"`
+			SubToken string `json:"sub_token"`
+		} `json:"user"`
+		Sub map[string]string `json:"sub"`
+	}
+	decodeRes(t, res, &me)
+	if me.User.Role != "admin" || me.User.SubToken == "" || me.Sub["auto"] == "" || me.Sub["uri"] == "" {
+		t.Fatalf("admin me %+v", me)
+	}
+
+	res, err = c.Get(ts.URL + "/api/me/nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nodes struct {
+		Nodes []struct {
+			Name string `json:"name"`
+			Port int    `json:"port"`
+		} `json:"nodes"`
+	}
+	decodeRes(t, res, &nodes)
+	if len(nodes.Nodes) != 1 || nodes.Nodes[0].Port != 8443 {
+		t.Fatalf("admin nodes %+v", nodes.Nodes)
+	}
+
+	res, err = c.Get(ts.URL + "/api/sub/" + me.User.SubToken + "/uri")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		t.Fatalf("admin sub %d %s", res.StatusCode, b)
+	}
+	adminBody, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	adminDecoded, err := base64.StdEncoding.DecodeString(string(adminBody))
+	if err != nil {
+		t.Fatalf("admin sub b64 %v %s", err, adminBody)
+	}
+	adminURI := strings.TrimSpace(string(adminDecoded))
+	if !strings.HasPrefix(adminURI, "vless://") || !strings.Contains(adminURI, "10.0.0.1:8443") {
+		t.Fatalf("admin uri %s", adminURI)
+	}
+
+	pkgBody, _ := json.Marshal(map[string]any{
+		"name": "std", "traffic_bytes": 0, "cycle_days": 30, "direction": "oneway",
+		"server_ids": []int64{created.Server.ID},
+	})
+	res, err = c.Post(ts.URL+"/api/packages", "application/json", bytes.NewReader(pkgBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkg struct {
+		Package struct {
+			ID int64 `json:"id"`
+		} `json:"package"`
+	}
+	decodeRes(t, res, &pkg)
+
+	uBody, _ := json.Marshal(map[string]any{
+		"username": "alice", "password": "alice12", "package_id": pkg.Package.ID, "days": 30,
+	})
+	res, err = c.Post(ts.URL+"/api/users", "application/json", bytes.NewReader(uBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var createdUser struct {
+		User struct {
+			SubToken string `json:"sub_token"`
+		} `json:"user"`
+	}
+	decodeRes(t, res, &createdUser)
+
+	res, err = c.Get(ts.URL + "/api/sub/" + createdUser.User.SubToken + "/uri")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliceBody, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	aliceDecoded, err := base64.StdEncoding.DecodeString(string(aliceBody))
+	if err != nil {
+		t.Fatalf("alice sub b64 %v %s", err, aliceBody)
+	}
+	aliceURI := strings.TrimSpace(string(aliceDecoded))
+	if vlessUUID(adminURI) == "" || vlessUUID(adminURI) == vlessUUID(aliceURI) {
+		t.Fatalf("admin and alice share uuid admin=%s alice=%s", adminURI, aliceURI)
+	}
+}
+
+func vlessUUID(uri string) string {
+	rest := strings.TrimPrefix(uri, "vless://")
+	at := strings.Index(rest, "@")
+	if at <= 0 {
+		return ""
+	}
+	return rest[:at]
+}
+
 func TestCreateInboundRandomPort(t *testing.T) {
 	d, err := db.Open(":memory:")
 	if err != nil {

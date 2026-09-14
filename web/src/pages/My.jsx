@@ -9,6 +9,7 @@ export default function My() {
   const toast = useToast()
   const [traffic, setTraffic] = useState(null)
   const [nodes, setNodes] = useState(null)
+  const isAdmin = user?.role === 'admin'
   useEffect(() => { refreshUser() }, [refreshUser])
   useEffect(() => {
     api.get('/me/traffic?days=14').then(setTraffic).catch(() => {})
@@ -20,12 +21,14 @@ export default function My() {
 
   return (
     <div>
-      <PageHead title="我的订阅" desc="把链接导入 Clash Meta、sing-box 或通用客户端，也可以扫码。流量按 GiB（1024³ 字节）计。" />
+      <PageHead title="我的订阅" desc={isAdmin
+        ? '包含全部节点。用管理员自己的身份，不占用用户额度。'
+        : '把链接导入 Clash Meta、sing-box 或通用客户端，也可以扫码。流量按 GiB（1024³ 字节）计。'} />
       <div className="stat-row">
         <div>
           <div className="kicker">账号</div>
           <span className="stat-val">{user?.username}</span>
-          <div className="text-[12px] text-ink-mut mt-1">{user?.package_name || '未分配套餐'}</div>
+          <div className="text-[12px] text-ink-mut mt-1">{user?.package_name || (isAdmin ? '全部节点' : '未分配套餐')}</div>
         </div>
         <div>
           <div className="kicker">流量{user?.direction === 'twoway' ? ' / 双向' : ''}</div>
@@ -44,7 +47,7 @@ export default function My() {
           ) : null}
         </div>
       </div>
-      {!user?.package_id && (
+      {!isAdmin && !user?.package_id && (
         <div className="alert-row is-warn mb-4">还没有套餐，订阅里不会有节点。请联系管理员绑定。</div>
       )}
       {(nodes?.nodes || []).length > 0 && (

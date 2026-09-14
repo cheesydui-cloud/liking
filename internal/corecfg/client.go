@@ -9,10 +9,6 @@ import (
 )
 
 func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
-	if u.Role == "admin" {
-		_ = db.DeleteClientsForUser(d, u.ID)
-		return nil, nil
-	}
 	var pkg *db.Package
 	if u.PackageID != nil {
 		p, err := db.GetPackage(d, *u.PackageID)

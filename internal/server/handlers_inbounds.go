@@ -225,7 +225,7 @@ func (s *Server) handleInboundShare(w http.ResponseWriter, r *http.Request) {
 		break
 	}
 	if picked == nil {
-		jsonErr(w, http.StatusBadRequest, "这条线路还没有可用用户。先给用户绑定包含此节点的套餐，再到用户页复制订阅。")
+		jsonErr(w, http.StatusBadRequest, "还没有绑定此节点的用户。管理员点右上角「用户页」复制自己的订阅。")
 		return
 	}
 	uri, err := corecfg.ShareURI(in, picked)

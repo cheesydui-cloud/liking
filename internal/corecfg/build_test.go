@@ -182,6 +182,40 @@ func TestProvisionKeepsMieruPasswordWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestProvisionAdminGetsClients(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	admin, err := db.CreateUser(d, "admin", "h", "admin", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := db.CreateServer(d, "n1", "10.0.0.1", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &db.Inbound{
+		ServerID: srv.ID, Name: "v1", Profile: ProfileVLESSRealityVision,
+		Port: 443, Enabled: true, LineKind: "direct", Settings: "{}",
+	}
+	if err := Normalize(in, nil); err != nil {
+		t.Fatal(err)
+	}
+	created, err := db.CreateInbound(d, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ProvisionUser(d, admin); err != nil {
+		t.Fatal(err)
+	}
+	c, err := db.GetClient(d, created.ID, admin.ID)
+	if err != nil || c.UUID == "" || !c.Enabled {
+		t.Fatalf("admin client %+v %v", c, err)
+	}
+}
+
 func TestBuildIncludesMitaWhenCoreNotReported(t *testing.T) {
 	d, err := db.Open(":memory:")
 	if err != nil {

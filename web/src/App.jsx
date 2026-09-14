@@ -36,7 +36,6 @@ function UserRoute({ children }) {
   const { user } = useUser()
   if (user === undefined) return <Loading />
   if (user === null) return <Navigate to="/login" replace />
-  if (user.role === 'admin') return <Navigate to="/" replace />
   return <Layout>{children}</Layout>
 }
 

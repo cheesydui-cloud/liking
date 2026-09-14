@@ -111,6 +111,9 @@ func (s *Server) handleMeNodes(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnauthorized, "未登录")
 		return
 	}
+	if u.Role == "admin" {
+		s.provisionAndSyncUser(u)
+	}
 	ids, err := db.InboundIDsForUser(s.DB, u)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())

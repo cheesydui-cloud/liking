@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { BrandMark, Icon, Modal } from './ui'
 
@@ -159,6 +159,7 @@ export function Layout({ children }) {
   const loc = useLocation()
   const [open, setOpen] = useState(false)
   const isAdmin = user?.role === 'admin'
+  const userView = loc.pathname === '/my' || loc.pathname.startsWith('/my/')
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
   const mainRef = useRef(null)
   const pageTitle = pageTitleOf(loc.pathname)
@@ -183,7 +184,7 @@ export function Layout({ children }) {
     if (meta) meta.setAttribute('content', next ? '#161618' : '#F3F2EE')
   }
 
-  const groups = isAdmin ? [
+  const groups = isAdmin && !userView ? [
     { items: [{ to: '/', end: true, icon: 'layout', label: '总览' }] },
     {
       label: '服务器',
@@ -227,7 +228,7 @@ export function Layout({ children }) {
           <BrandMark size={28} />
           <div className="min-w-0">
             <div className="sidebar-brand truncate">{panelName || 'liking'}</div>
-            <div className="sidebar-ver mt-0.5">{isAdmin ? '管理' : '用户'}{version ? ` v${version}` : ''}</div>
+            <div className="sidebar-ver mt-0.5">{isAdmin && userView ? '用户页' : isAdmin ? '管理' : '用户'}{version ? ` v${version}` : ''}</div>
           </div>
         </div>
         <nav className="flex-1 px-2.5 overflow-y-auto" onClick={() => setOpen(false)}>
@@ -266,6 +267,11 @@ export function Layout({ children }) {
           {announceText ? (
             <div className="flex-1 min-w-0 text-[13px] text-ink-soft truncate" title={announceText}>{announceText}</div>
           ) : <div className="flex-1" />}
+          {isAdmin ? (
+            <Link to={userView ? '/' : '/my'} className="btn-ghost h-9 shrink-0">
+              {userView ? '返回管理' : '用户页'}
+            </Link>
+          ) : null}
           <button type="button" className="btn-ghost h-9 w-9 px-0" onClick={toggleTheme} aria-label={dark ? '切换浅色' : '切换深色'}>
             <Icon name={dark ? 'sun' : 'moon'} size={15} />
           </button>
