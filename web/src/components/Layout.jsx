@@ -128,7 +128,7 @@ function SideLink({ to, end, icon, children }) {
   return (
     <NavLink to={to} end={end}
       className={({ isActive }) => `sidebar-link${isActive ? ' is-active' : ''}`}>
-      <Icon name={icon} size={18} />
+      <Icon name={icon} size={20} />
       <span>{children}</span>
     </NavLink>
   )
@@ -137,7 +137,7 @@ function SideLink({ to, end, icon, children }) {
 const PAGE_TITLES = {
   '/': '总览',
   '/nodes': '节点',
-  '/servers': '服务器',
+  '/servers': '实例',
   '/users': '用户',
   '/packages': '套餐',
   '/forwards': '转发',
@@ -189,7 +189,7 @@ export function Layout({ children }) {
       label: '服务器',
       items: [
         { to: '/nodes', icon: 'plugs', label: '节点' },
-        { to: '/servers', icon: 'servers', label: '服务器' },
+        { to: '/servers', icon: 'servers', label: '实例' },
       ],
     },
     {
@@ -226,14 +226,14 @@ export function Layout({ children }) {
         <div className="px-4 pt-4 pb-3 flex items-end gap-2.5">
           <BrandMark size={28} />
           <div className="min-w-0">
-            <div className="text-[15px] font-semibold truncate leading-tight">{panelName || 'liking'}</div>
-            <div className="text-[11px] text-ink-mut mt-0.5">{isAdmin ? '管理' : '用户'}{version ? ` v${version}` : ''}</div>
+            <div className="sidebar-brand truncate">{panelName || 'liking'}</div>
+            <div className="sidebar-ver mt-0.5">{isAdmin ? '管理' : '用户'}{version ? ` v${version}` : ''}</div>
           </div>
         </div>
         <nav className="flex-1 px-2.5 overflow-y-auto" onClick={() => setOpen(false)}>
           {groups.map((g, i) => (
             <div key={i} className={i ? 'mt-3.5' : ''}>
-              {g.label && <div className="px-2.5 mb-1 text-[12px] font-semibold text-ink-mut">{g.label}</div>}
+              {g.label && <div className="sidebar-group px-2.5 mb-1">{g.label}</div>}
               <div className="space-y-0.5">
                 {g.items.map(n => (
                   <SideLink key={n.to} to={n.to} end={n.end} icon={n.icon}>{n.label}</SideLink>
@@ -248,12 +248,12 @@ export function Layout({ children }) {
               {(user?.username || '?').slice(0, 1).toUpperCase()}
             </span>
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium truncate">{user?.username}</div>
-              <div className="text-[11px] text-ink-mut">{isAdmin ? '管理员' : '用户'}</div>
+              <div className="sidebar-user truncate">{user?.username}</div>
+              <div className="sidebar-role">{isAdmin ? '管理员' : '用户'}</div>
             </div>
           </div>
-          <button type="button" onClick={logout} className="btn-ghost w-full h-8 mt-2.5 text-[12px]" aria-label="退出">
-            <Icon name="logout" size={14} /> 退出
+          <button type="button" onClick={logout} className="btn-ghost w-full h-9 mt-2.5 text-[14px]" aria-label="退出">
+            <Icon name="logout" size={16} /> 退出
           </button>
         </div>
       </aside>

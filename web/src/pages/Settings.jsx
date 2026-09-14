@@ -238,7 +238,7 @@ function AuditPanel() {
 
 function backupLine(s) {
   if (!s) return '正在统计…'
-  return `${s.servers} 台服务器 · ${s.inbounds} 个节点 · ${s.users} 个用户 · ${s.packages} 个套餐 · ${s.certs} 张证书`
+  return `${s.servers} 台实例 · ${s.inbounds} 个节点 · ${s.users} 个用户 · ${s.packages} 个套餐 · ${s.certs} 张证书`
 }
 
 function BackupStat({ n, label }) {
@@ -372,7 +372,7 @@ function BackupPanel() {
           </p>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <BackupStat n={live?.servers} label="服务器" />
+          <BackupStat n={live?.servers} label="实例" />
           <BackupStat n={live?.inbounds} label="节点" />
           <BackupStat n={live?.users} label="用户" />
           <BackupStat n={live?.certs} label="证书" />
@@ -604,7 +604,7 @@ const TZ_OPTIONS = ['Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Tokyo', 'Asia/Singa
 export default function Settings({ accountOnly = false }) {
   const toast = useToast()
   const dialog = useDialog()
-  const { refreshUser, version } = useUser()
+  const { refreshUser } = useUser()
   const [searchParams, setSearchParams] = useSearchParams()
   const requested = searchParams.get('tab')
   const tab = accountOnly ? 'account' : (settingTabs.some(t => t.id === requested) ? requested : 'panel')
@@ -736,13 +736,9 @@ export default function Settings({ accountOnly = false }) {
     ? (issueBusy ? '正在向 Let\'s Encrypt 申请，大约 1–2 分钟…' : '申请')
     : (issueBusy ? '保存中…' : '保存')
 
-  const desc = accountOnly
-    ? '改用户名、登录密码或两步验证。改完后当前会话仍然有效。'
-    : `当前版本 ${version || '—'}。VLESS+XHTTP、Trojan、AnyTLS 需要证书；REALITY 不需要。`
-
   return (
     <div>
-      <PageHead title="设置" desc={desc} />
+      <PageHead title="设置" />
       {!accountOnly && <Tabs value={tab} onChange={goTab} items={settingTabs} />}
 
       {tab === 'subscribe' && <SubRulesPanel />}
@@ -783,7 +779,7 @@ export default function Settings({ accountOnly = false }) {
       <form onSubmit={saveCF} className="card p-5 max-w-3xl space-y-4">
         <div className="text-[15px] font-medium">Cloudflare / Let&apos;s Encrypt</div>
         <p className="text-[12.5px] text-ink-mut leading-relaxed">
-          Token 权限：Zone · Zone · Read，Zone · DNS · Edit。同一 Token 也用来在服务器页拉取已托管域名。域名不必指向本面板，也不用开放 80 端口。
+          Token 权限：Zone · Zone · Read，Zone · DNS · Edit。同一 Token 也用来在实例页拉取已托管域名。域名不必指向本面板，也不用开放 80 端口。
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="ACME 邮箱">

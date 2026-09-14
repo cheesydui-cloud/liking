@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, SearchInput } from '../components/ui'
-import { nameTone } from '../lib/display'
+import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, SearchInput, StatusWord } from '../components/ui'
 
 const emptyForm = { name: '', gb: '', direction: 'oneway', inbound_ids: [], multipliers: {} }
 
@@ -226,7 +225,6 @@ export default function Packages() {
     <div>
       <PageHead
         title="套餐"
-        desc="勾选这个套餐能用的节点。不选表示全部节点。到期时间在用户上设置。"
         actions={
           <button type="button" className="btn-primary" onClick={openCreate}>
             <Icon name="plus" size={15} /> 新建套餐
@@ -251,7 +249,7 @@ export default function Packages() {
                 <div className="machine-head">
                   <div className="min-w-0 flex-1">
                     <div className="machine-title">
-                      <span className={`machine-name truncate is-${nameTone(p.id)}`}>{p.name}</span>
+                      <span className="machine-name truncate">{p.name}</span>
                     </div>
                     {meta.servers.length ? (
                       <div className="machine-host">
@@ -291,34 +289,35 @@ export default function Packages() {
         </>
       }>
         <form id="pkg-form" onSubmit={save} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Field label="名称">
               <input className="input-field" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} required autoFocus />
             </Field>
             <Field label="流量 GB" hint="留空 = 不限">
-              <input className="input-field" type="number" min="0" step="0.1" placeholder="" value={f.gb} onChange={e => setF({ ...f, gb: e.target.value })} />
+              <input className="input-field font-mono" type="number" min="0" step="0.1" value={f.gb} onChange={e => setF({ ...f, gb: e.target.value })} />
             </Field>
-            <Field label="计费">
-              <select className="input-field" value={f.direction} onChange={e => setF({ ...f, direction: e.target.value })}>
-                <option value="oneway">单向</option>
-                <option value="twoway">双向</option>
-              </select>
-            </Field>
+            <div>
+              <div className="text-[12px] font-medium text-ink-soft mb-1.5">计费</div>
+              <div className="seg" role="group" aria-label="计费">
+                <button type="button" className={`seg-item${f.direction === 'oneway' ? ' is-on' : ''}`} onClick={() => setF({ ...f, direction: 'oneway' })}>单向</button>
+                <button type="button" className={`seg-item${f.direction === 'twoway' ? ' is-on' : ''}`} onClick={() => setF({ ...f, direction: 'twoway' })}>双向</button>
+              </div>
+            </div>
           </div>
           <div>
-            <div className="flex items-end justify-between gap-3 mb-2">
+            <div className="pkg-section-head">
               <div>
-                <div className="text-[12px] font-medium text-ink-soft">包含节点</div>
-                <div className="text-[11.5px] text-ink-mut mt-0.5">
+                <div className="text-[12px] font-medium text-ink-soft">节点</div>
+                <div className="text-[12px] text-ink-mut mt-0.5">
                   {f.inbound_ids.length ? `已选 ${f.inbound_ids.length} / ${pickableIns.length}` : '未勾选 = 全部节点'}
                 </div>
               </div>
-              <div className="flex gap-3 shrink-0">
+              <div className="flex gap-2 shrink-0">
                 {filtered.length > 0 && (
-                  <button type="button" className="row-act" onClick={() => setF({ ...f, inbound_ids: filtered.map(x => Number(x.id)) })}>全选当前</button>
+                  <button type="button" className="row-act" onClick={() => setF({ ...f, inbound_ids: filtered.map(x => Number(x.id)) })}>全选</button>
                 )}
                 {f.inbound_ids.length > 0 && (
-                  <button type="button" className="row-act" onClick={() => setF({ ...f, inbound_ids: [] })}>清空为全部</button>
+                  <button type="button" className="row-act" onClick={() => setF({ ...f, inbound_ids: [] })}>清空</button>
                 )}
               </div>
             </div>
@@ -332,60 +331,64 @@ export default function Packages() {
             ) : groups.length === 0 ? (
               <div className="text-[13px] text-ink-mut py-3">没有匹配的节点。</div>
             ) : (
-              <div className="space-y-2 max-h-[min(52vh,28rem)] overflow-y-auto">
+              <div className="pkg-pick-list">
                 {groups.map(g => {
                   const ids = g.nodes.map(x => Number(x.id))
                   const picked = ids.filter(id => f.inbound_ids.includes(id)).length
                   const allOn = picked === ids.length && ids.length > 0
                   return (
                     <div key={g.server.id} className="pkg-group">
-                      <div className="pkg-group-head">
+                      <button
+                        type="button"
+                        className="pkg-group-head"
+                        onClick={() => toggleServerNodes(ids)}
+                        aria-pressed={allOn}
+                      >
                         <div className="min-w-0 flex items-center gap-2">
-                          <span className="text-[13px] font-medium truncate">{g.server.name}</span>
-                          <span className={`dot ${g.server.online ? 'dot-on' : 'dot-off'}`} />
-                          <span className="text-[12px] text-ink-mut truncate">{g.server.public_host || '未填公开地址'}</span>
-                          {picked ? <span className="text-[11.5px] text-ink-mut tabular-nums shrink-0">{picked}/{ids.length}</span> : null}
+                          <span className="pkg-server truncate">{g.server.name}</span>
+                          <StatusWord online={!!g.server.online} />
+                          <span className="text-[12px] text-ink-mut font-mono truncate">{g.server.public_host || ''}</span>
                         </div>
-                        <button type="button" className="row-act shrink-0" onClick={() => toggleServerNodes(ids)}>
-                          {allOn ? '取消本机' : '全选本机'}
-                        </button>
-                      </div>
+                        <span className="text-[12px] text-ink-mut tabular-nums shrink-0">
+                          {picked}/{ids.length}
+                        </span>
+                      </button>
                       {g.nodes.map(n => {
                         const on = f.inbound_ids.includes(Number(n.id))
                         return (
-                          <button
-                            type="button"
-                            key={n.id}
-                            className={`pkg-node ${on ? 'is-on' : ''}`}
-                            onClick={() => toggleNode(n.id)}
-                            aria-pressed={on}
-                          >
-                            <span className={`node-check ${on ? 'is-on' : ''}`} aria-hidden>{on ? '✓' : ''}</span>
-                            <span className="min-w-0 flex-1 text-left">
-                              <span className="flex items-center gap-2 min-w-0">
-                                <span className={`font-medium truncate ${n.enabled === false ? 'text-ink-mut' : ''}`}>{n.name}</span>
+                          <div key={n.id} className={`pkg-node${on ? ' is-on' : ''}`}>
+                            <button
+                              type="button"
+                              className="pkg-node-hit"
+                              onClick={() => toggleNode(n.id)}
+                              aria-pressed={on}
+                            >
+                              <span className={`node-check${on ? ' is-on' : ''}`} aria-hidden>{on ? '✓' : ''}</span>
+                              <span className="min-w-0 flex items-center gap-2">
+                                <span className={`pkg-node-name truncate${n.enabled === false ? ' text-ink-mut' : ''}`}>{n.name}</span>
                                 {n.line_kind === 'chain' ? <Badge tone="muted">链式</Badge> : null}
                                 {n.enabled === false ? <Badge tone="muted">停用</Badge> : null}
                               </span>
-                            </span>
-                            <span className="shrink-0 text-right">
-                              <span className="block text-[12px] text-ink-soft">{protoShort(n.profile)}</span>
-                              <span className="block text-[12px] text-ink-mut font-mono tabular-nums">:{n.port}</span>
-                            </span>
+                              <span className="pkg-node-meta">
+                                <span>{protoShort(n.profile)}</span>
+                                <span className="pkg-node-port">:{n.port}</span>
+                              </span>
+                            </button>
                             {on ? (
-                              <label className="shrink-0 text-[11px] text-ink-mut ml-2" onClick={e => e.stopPropagation()}>
+                              <label className="pkg-mult-wrap">
                                 倍率
                                 <input
-                                  className="input-field h-7 w-14 ml-1 text-[12px] tabular-nums"
+                                  className="input-field pkg-mult tabular-nums"
                                   type="number"
                                   min="0.1"
                                   step="0.1"
+                                  aria-label={`${n.name} 倍率`}
                                   value={f.multipliers?.[n.id] ?? 1}
                                   onChange={e => setF(prev => ({ ...prev, multipliers: { ...prev.multipliers, [n.id]: e.target.value } }))}
                                 />
                               </label>
-                            ) : null}
-                          </button>
+                            ) : <span />}
+                          </div>
                         )
                       })}
                     </div>

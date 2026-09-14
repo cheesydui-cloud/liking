@@ -30,7 +30,6 @@ export default function Traffic() {
     <div>
       <PageHead
         title="流量"
-        desc="日统计和排行是节点原始流量。用户已用按套餐单向 / 双向和节点倍率计，超量会从内核摘掉。1 GiB = 1024³ 字节。"
         actions={
           <div className="flex flex-wrap items-center gap-4">
             <FilterTabs

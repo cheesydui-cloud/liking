@@ -45,7 +45,7 @@ function usedPortsText(server, list, excludeId = 0) {
   const ports = list
     .filter(x => Number(x.server_id) === Number(serverId) && Number(x.id) !== Number(excludeId))
     .map(x => x.port)
-  const used = ports.length ? `已用 ${[...new Set(ports)].sort((a, b) => a - b).join('、')}` : '这台服务器还没有节点'
+  const used = ports.length ? `已用 ${[...new Set(ports)].sort((a, b) => a - b).join('、')}` : '这台实例还没有节点'
   return `不填则在 ${min}–${max} 随机，避开已用端口。${used}`
 }
 
@@ -284,7 +284,7 @@ export default function Nodes() {
   const submitLine = async (e) => {
     e.preventDefault()
     if (!Number(f.server_id)) {
-      toast('请选择服务器', 'error')
+      toast('请选择实例', 'error')
       return
     }
     const raw = String(f.port ?? '').trim()
@@ -377,7 +377,7 @@ export default function Nodes() {
     <div>
       <PageHead
         title="节点"
-        desc="按服务器分组。链式和端口中转在转发里。"
+        desc="按实例分组。链式和端口中转在转发里。"
         actions={
           servers.length > 0 ? (
             <button type="button" className="btn-primary" onClick={() => openCreateLine()}>
@@ -396,7 +396,7 @@ export default function Nodes() {
           />
           {filteredServer ? (
             <button type="button" className="row-act sm:ml-auto" onClick={() => setParams({})}>
-              {filteredServer.name} · 全部服务器
+              {filteredServer.name} · 全部实例
             </button>
           ) : (
             <div className="text-[12px] text-ink-mut font-mono sm:ml-auto whitespace-nowrap">
@@ -407,13 +407,13 @@ export default function Nodes() {
       )}
       {servers.length === 0 ? (
         <div className="card overflow-hidden">
-          <Empty title="还没有服务器" hint="先添加一台服务器并装上 Agent，再来挂节点。" action={
-            <Link to="/servers" className="btn-primary">去添加服务器</Link>
+          <Empty title="还没有实例" hint="先添加一台实例并装上 Agent，再来挂节点。" action={
+            <Link to="/servers" className="btn-primary">去添加实例</Link>
           } />
         </div>
       ) : serverQ && !filteredServer ? (
         <div className="card overflow-hidden">
-          <Empty title="没有这台服务器" hint="回到全部节点，或去服务器页。" action={
+          <Empty title="没有这台实例" hint="回到全部节点，或去实例页。" action={
             <button type="button" className="btn-ghost" onClick={() => setParams({})}>全部节点</button>
           } />
         </div>
@@ -427,14 +427,14 @@ export default function Nodes() {
             <div key={s.id} className="card overflow-hidden">
               <div className="panel-head">
                 <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold truncate">{s.name}</span>
+                  <span className="machine-name truncate">{s.name}</span>
                   <StatusWord online={s.online} fault={!!s.last_error} />
                   <span className="text-[12px] text-ink-mut">{nodes.length} 个</span>
                 </div>
               </div>
               {nodes.length === 0 ? (
                 <Empty
-                  title={statusFilter || q ? '没有匹配的节点' : '这台服务器还没有节点'}
+                  title={statusFilter || q ? '没有匹配的节点' : '这台实例还没有节点'}
                   hint={statusFilter || q ? '换个关键词或筛选。' : '选协议即可，名称和端口都可以留空。'}
                   action={!statusFilter && !q ? (
                     <button type="button" className="btn-primary" onClick={() => openCreateLine(s.id)}>
@@ -526,7 +526,7 @@ export default function Nodes() {
         </>
       }>
         <form id="line-form" onSubmit={submitLine} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="服务器" hint={waitOnline ? '服务器离线，下发会等上线。' : ''}>
+          <Field label="实例" hint={waitOnline ? '实例离线，下发会等上线。' : ''}>
             <select
               className="input-field"
               value={f.server_id || ''}
@@ -534,7 +534,7 @@ export default function Nodes() {
               required
               disabled={!!editId}
             >
-              <option value="">选择服务器</option>
+              <option value="">选择实例</option>
               {servers.map(s => (
                 <option key={s.id} value={s.id}>
                   {s.name}{s.online ? '' : ' · 离线'}{s.cores ? ` / ${s.cores}` : ''}
@@ -608,7 +608,7 @@ export default function Nodes() {
             </>
           )}
           {needsTLS(f.profile) && (
-            <Field label="SNI" hint="客户端校验的域名。留空则用服务器公开地址。">
+            <Field label="SNI" hint="客户端校验的域名。留空则用实例公开地址。">
               <input className="input-field" value={f.sni} onChange={e => setF({ ...f, sni: e.target.value })} placeholder={selectedServer?.public_host || ''} />
             </Field>
           )}
@@ -736,7 +736,7 @@ export default function Nodes() {
             <div className="notice sm:col-span-2">443 很容易被 Nginx / 其它面板占用。建议改成 8443 或其它空闲端口。</div>
           )}
           {missingCore && (
-            <div className="notice sm:col-span-2">这台服务器还没有 {meta.core}。创建后会自动从 GitHub 下载并拉起，第一次可能要等一会儿。服务器需要能访问 GitHub。</div>
+            <div className="notice sm:col-span-2">这台实例还没有 {meta.core}。创建后会自动从 GitHub 下载并拉起，第一次可能要等一会儿。实例需要能访问 GitHub。</div>
           )}
         </form>
       </Modal>

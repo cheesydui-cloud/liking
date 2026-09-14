@@ -5,7 +5,7 @@ import { copyText } from '../lib/copy'
 import { isDirectNode, serverStatus } from '../lib/status'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, FilterTabs, Icon, LineStatus, Meter, Modal, MoreMenu, PageHead, SearchInput, fmtAgo, fmtBps, fmtBytes, machineTone } from '../components/ui'
-import { CORE_OPTIONS, coreLabel, fmtExpires, fmtResetDay, isExpired, nameTone, parseCores, ymd, ymdToUnix } from '../lib/display'
+import { CORE_OPTIONS, coreLabel, fmtExpires, fmtResetDay, isExpired, parseCores, ymd, ymdToUnix } from '../lib/display'
 import { DEFAULT_PORT_MAX, DEFAULT_PORT_MIN, formatPortRange, parsePort } from '../lib/ports'
 
 function gbFromLimit(n) {
@@ -173,7 +173,7 @@ export default function Servers() {
       setName(''); setHost('')
       setFormOpen(false)
       setCmd(d.install || '')
-      toast('已添加服务器')
+      toast('已添加实例')
       load()
     } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
@@ -276,7 +276,7 @@ export default function Servers() {
   }
 
   const del = async (id) => {
-    if (!(await dialog.confirm({ title: '删除服务器', message: '这台机器上的节点也会一并删除，且无法恢复。', danger: true, okText: '删除' }))) return
+    if (!(await dialog.confirm({ title: '删除实例', message: '这台机器上的节点也会一并删除，且无法恢复。', danger: true, okText: '删除' }))) return
     try { await api.del(`/servers/${id}`); load(); toast('已删除') }
     catch (e) { toast(e.message, 'error') }
   }
@@ -434,17 +434,16 @@ export default function Servers() {
   return (
     <div>
       <PageHead
-        title="服务器"
-        desc="一台机器一个 Agent。装好之后到节点页挂协议。"
+        title="实例"
         actions={
           <button type="button" className="btn-primary" onClick={openCreate}>
-            <Icon name="plus" size={15} /> 添加服务器
+            <Icon name="plus" size={15} /> 添加实例
           </button>
         }
       />
       {list.length > 0 && (
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
-          <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索服务器 / 地址" />
+          <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索实例 / 地址" />
           <FilterTabs
             value={statusFilter}
             onChange={setStatusFilter}
@@ -457,13 +456,13 @@ export default function Servers() {
       )}
       {list.length === 0 ? (
         <div className="card overflow-hidden">
-          <Empty title="还没有服务器" hint="先起一个名字，添加后把安装命令拿到机器上以 root 执行，再到节点页挂协议。" action={
-            <button type="button" className="btn-primary" onClick={openCreate}><Icon name="plus" size={15} /> 添加服务器</button>
+          <Empty title="还没有实例" hint="先起一个名字，添加后把安装命令拿到机器上以 root 执行，再到节点页挂协议。" action={
+            <button type="button" className="btn-primary" onClick={openCreate}><Icon name="plus" size={15} /> 添加实例</button>
           } />
         </div>
       ) : visible.length === 0 ? (
         <div className="card overflow-hidden">
-          <Empty title="没有匹配的服务器" hint="换个关键词或筛选。" />
+          <Empty title="没有匹配的实例" hint="换个关键词或筛选。" />
         </div>
       ) : (
         <div className="machine-grid">
@@ -479,7 +478,7 @@ export default function Servers() {
                 <div className="machine-head">
                   <div className="min-w-0 flex-1">
                     <div className="machine-title">
-                      <span className={`machine-name truncate is-${nameTone(s.id)}`}>{s.name}</span>
+                      <span className="machine-name truncate">{s.name}</span>
                       <LineStatus status={st} />
                       {expired ? <Badge tone="danger">已到期</Badge> : null}
                       {s.needs_reinstall ? <Badge tone="warn">需重装</Badge>
@@ -512,7 +511,7 @@ export default function Servers() {
                       { label: '轮换令牌', onSelect: () => rotateToken(s) },
                       { sep: true },
                       { label: '一键卸载', danger: true, disabled: !s.online || busy, hint: s.needs_reinstall ? '版本太旧，无法远程卸载' : '同机不删面板', onSelect: () => uninstallAgent(s) },
-                      { label: '删除服务器', danger: true, onSelect: () => del(s.id) },
+                      { label: '删除实例', danger: true, onSelect: () => del(s.id) },
                     ]} />
                   </div>
                 </div>
@@ -542,7 +541,7 @@ export default function Servers() {
                 {s.online && s.last_error ? <div className="machine-fault">{s.last_error}</div> : null}
                 {!fresh ? <ServerMeta s={s} /> : null}
                 <div className="machine-foot">
-                  <button type="button" className="machine-ports" onClick={() => openEdit(s)} title="编辑服务器">
+                  <button type="button" className="machine-ports" onClick={() => openEdit(s)} title="编辑实例">
                     端口 {formatPortRange(s)}
                   </button>
                   <Link to={`/nodes?server=${s.id}`} className="row-act">{n} 个节点</Link>
@@ -553,7 +552,7 @@ export default function Servers() {
         </div>
       )}
 
-      <Modal open={formOpen} title="添加服务器" onClose={() => setFormOpen(false)} footer={
+      <Modal open={formOpen} title="添加实例" onClose={() => setFormOpen(false)} footer={
         <>
           <button type="button" className="btn-ghost" onClick={() => setFormOpen(false)}>取消</button>
           <button type="submit" form="srv-form" className="btn-primary" disabled={busy}>{busy ? '添加中…' : '添加'}</button>
@@ -585,7 +584,7 @@ export default function Servers() {
         </form>
       </Modal>
 
-      <Modal open={!!editSrv} title="编辑服务器" onClose={() => setEditSrv(null)} footer={
+      <Modal open={!!editSrv} title="编辑实例" onClose={() => setEditSrv(null)} footer={
         <>
           <button type="button" className="btn-ghost" onClick={() => setEditSrv(null)}>取消</button>
           <button type="submit" form="srv-edit-form" className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
@@ -673,7 +672,7 @@ export default function Servers() {
           </button>
         </>
       }>
-        <p className="text-[13px] text-ink-mut mb-3">在服务器上以 root 执行。明文 http 会自动带 --insecure。</p>
+        <p className="text-[13px] text-ink-mut mb-3">在实例上以 root 执行。明文 http 会自动带 --insecure。</p>
         <pre className="text-[12px] font-mono bg-raised p-3 overflow-x-auto whitespace-pre-wrap">{installCmd}</pre>
         <label className="flex items-start gap-2 mt-3 text-[13px] text-ink-soft">
           <input type="checkbox" className="mt-0.5" checked={cnInstall} onChange={e => setCnInstall(e.target.checked)} />

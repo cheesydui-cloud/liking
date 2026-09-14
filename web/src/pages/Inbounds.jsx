@@ -263,8 +263,8 @@ export default function Inbounds() {
       />
       {list.length > 0 && (
         <div className="flex flex-col sm:flex-row gap-2 mb-3">
-          <select className="input-field sm:w-64" value={serverFilter} onChange={e => setServerFilter(e.target.value)}>
-            <option value="">全部服务器 · {list.length} 条</option>
+          <select className="input-field toolbar-select" value={serverFilter} onChange={e => setServerFilter(e.target.value)}>
+            <option value="">全部实例 · {list.length} 条</option>
             {servers.map(s => {
               const n = list.filter(x => x.server_id === s.id).length
               return <option key={s.id} value={s.id}>{s.name} · {n} 条</option>
@@ -274,15 +274,15 @@ export default function Inbounds() {
       )}
       <div className="card overflow-hidden">
         {list.length === 0 ? (
-          <Empty title="暂无入站" hint="选一台在线服务器，填自定义端口，挑一种协议。" action={
+          <Empty title="暂无入站" hint="选一台在线实例，填自定义端口，挑一种协议。" action={
             <button type="button" className="btn-primary" onClick={openCreate}><Icon name="plus" size={15} /> 新建入站</button>
           } />
         ) : shown.length === 0 ? (
-          <Empty title="这台服务器还没有入站" hint="换一台，或新建入站。" />
+          <Empty title="这台实例还没有入站" hint="换一台，或新建入站。" />
         ) : (
           <div className="table-wrap">
             <table className="data">
-              <thead><tr><th>名称</th><th>服务器</th><th>协议</th><th>端口</th><th>线路</th><th>内核</th><th></th></tr></thead>
+              <thead><tr><th>名称</th><th>实例</th><th>协议</th><th>端口</th><th>线路</th><th>内核</th><th></th></tr></thead>
               <tbody>
                 {shown.map(inb => {
                   const srv = servers.find(s => s.id === inb.server_id)
@@ -319,7 +319,7 @@ export default function Inbounds() {
         </>
       }>
         <form id="inb-form" onSubmit={submit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="服务器">
+          <Field label="实例">
             <select className="input-field" value={f.server_id} onChange={e => pickServer(e.target.value)} required disabled={!!editId}>
               <option value="">选择</option>
               {servers.map(s => <option key={s.id} value={s.id}>{s.name}{s.cores ? ` · ${s.cores}` : ''}</option>)}

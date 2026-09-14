@@ -298,21 +298,22 @@ export default function Users() {
     const needle = q.trim().toLowerCase()
     const now = Date.now()
     return list.filter(u => {
+      if (u.role === 'admin') return false
       if (pkgFilter === 'none' && u.package_id) return false
       if (pkgFilter && pkgFilter !== 'none' && String(u.package_id) !== pkgFilter) return false
       if (statusFilter === 'warn') {
-        if (u.role === 'admin') return false
         if (!(u.quota_ratio >= 80 && u.quota_ratio < 100)) return false
       }
       if (statusFilter === 'expired') {
         if (!(u.expires_at && u.expires_at * 1000 < now)) return false
       }
       if (!needle) return true
-      const hay = [u.username, u.remark, u.package_name, u.role === 'admin' ? '管理员' : '']
+      const hay = [u.username, u.remark, u.package_name]
       return hay.some(x => String(x || '').toLowerCase().includes(needle))
     })
   }, [list, q, pkgFilter, statusFilter])
 
+  const hasCustomers = list.some(u => u.role !== 'admin')
   const editing = !!editUser
   const selectedPkg = pkgs.find(p => Number(p.id) === Number(f.package_id))
 
@@ -320,7 +321,6 @@ export default function Users() {
     <div>
       <PageHead
         title="用户"
-        desc="一人一套餐。点复制出名片发给客户，点链接看订阅。到期或超量会从内核配置里摘掉客户端。"
         actions={
           <div className="flex gap-2">
             <button type="button" className="btn-ghost" onClick={() => setBulkOpen(true)}>批量开户</button>
@@ -332,7 +332,7 @@ export default function Users() {
       />
       <div className="flex flex-col sm:flex-row gap-2 mb-3">
         <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索用户名 / 备注 / 套餐" />
-        <select className="input-field sm:w-48" value={pkgFilter} onChange={e => setPkgFilter(e.target.value)}>
+        <select className="input-field toolbar-select" value={pkgFilter} onChange={e => setPkgFilter(e.target.value)}>
           <option value="">全部套餐</option>
           <option value="none">未绑定</option>
           {pkgs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -345,7 +345,7 @@ export default function Users() {
       </div>
 
       <div className="card overflow-hidden">
-        {list.length === 0 ? (
+        {!hasCustomers ? (
           <Empty title="暂无用户" hint="先建套餐并勾选节点，再开账号。" action={
             <button type="button" className="btn-primary" onClick={openCreate}><Icon name="plus" size={15} /> 新建用户</button>
           } />
@@ -449,7 +449,7 @@ export default function Users() {
               <option value="">不绑定</option>
               {pkgs.map(p => {
                 const n = (p.inbound_ids || []).length
-                const tag = n ? `${n} 个节点` : ((p.server_ids || []).length ? `${p.server_ids.length} 台服务器` : '全部节点')
+                const tag = n ? `${n} 个节点` : ((p.server_ids || []).length ? `${p.server_ids.length} 台实例` : '全部节点')
                 return <option key={p.id} value={p.id}>{p.name} / {tag}</option>
               })}
             </select>

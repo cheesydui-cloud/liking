@@ -230,7 +230,7 @@ function usedPortsText(server, list, excludeId = 0) {
   const ports = list
     .filter(x => Number(x.server_id) === Number(serverId) && Number(x.id) !== Number(excludeId))
     .map(x => x.port)
-  const used = ports.length ? `已用 ${[...new Set(ports)].sort((a, b) => a - b).join('、')}` : '这台服务器还没有节点'
+  const used = ports.length ? `已用 ${[...new Set(ports)].sort((a, b) => a - b).join('、')}` : '这台实例还没有节点'
   return `不填则在 ${min}–${max} 随机。${used}`
 }
 
@@ -411,7 +411,7 @@ export default function Forwards() {
 
   const save = async (e) => {
     e.preventDefault()
-    if (!Number(f.server_id)) { toast('请选择入口服务器', 'error'); return }
+    if (!Number(f.server_id)) { toast('请选择入口实例', 'error'); return }
     const raw = String(f.port ?? '').trim()
     if (raw !== '') {
       const port = Number(raw)
@@ -500,7 +500,6 @@ export default function Forwards() {
     <div>
       <PageHead
         title="转发"
-        desc="入口连出去的路径。链式可自己加跳；端口中转没有用户，只把本机端口转到目标。"
         actions={
           <button type="button" className="btn-primary" onClick={openCreate}>
             <Icon name="plus" size={15} /> 新建转发
@@ -509,8 +508,8 @@ export default function Forwards() {
       />
       {forwards.length > 0 ? (
         <div className="flex flex-col sm:flex-row gap-2 mb-3">
-          <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索入口 / 落地 / 服务器" />
-          <select className="input-field sm:w-48" value={kindFilter} onChange={e => setKindFilter(e.target.value)}>
+          <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索入口 / 落地 / 实例" />
+          <select className="input-field toolbar-select" value={kindFilter} onChange={e => setKindFilter(e.target.value)}>
             <option value="">全部类型</option>
             <option value="chain">链式</option>
             <option value="port">端口中转</option>
@@ -627,9 +626,9 @@ export default function Forwards() {
               <option value="port">端口中转</option>
             </select>
           </Field>
-          <Field label="入口服务器">
+          <Field label="入口实例">
             <select className="input-field" value={f.server_id} onChange={e => setF({ ...f, server_id: e.target.value })} required>
-              <option value="">选择服务器</option>
+              <option value="">选择实例</option>
               {servers.map(s => <option key={s.id} value={s.id}>{s.name}{s.public_host ? ` · ${s.public_host}` : ''}</option>)}
             </select>
           </Field>

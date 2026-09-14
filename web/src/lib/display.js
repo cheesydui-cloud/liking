@@ -4,13 +4,6 @@ export const CORE_OPTIONS = [
   { id: 'mita', label: 'Mita' },
 ]
 
-const NAME_TONES = ['navy', 'teal', 'rust', 'plum', 'olive']
-
-export function nameTone(id) {
-  const n = Math.abs(Number(id) || 0)
-  return NAME_TONES[n % NAME_TONES.length]
-}
-
 export function parseCores(s) {
   return String(s || '')
     .split(',')

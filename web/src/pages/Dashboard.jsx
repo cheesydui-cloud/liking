@@ -23,7 +23,7 @@ export default function Dashboard() {
 
   const alerts = alertItemsOf(d)
   const steps = [
-    { n: 1, t: '添加服务器', to: '/servers', done: (d.servers || 0) > 0 },
+    { n: 1, t: '添加实例', to: '/servers', done: (d.servers || 0) > 0 },
     { n: 2, t: '安装 Agent', hint: '复制命令，在机器上以 root 执行', done: (d.online || 0) > 0 },
     { n: 3, t: '等 Agent 在线', done: (d.online || 0) > 0 },
     { n: 4, t: '增加节点', to: '/nodes', done: (d.inbounds || 0) > 0 },
@@ -37,7 +37,7 @@ export default function Dashboard() {
 
   return (
     <div>
-      <PageHead title="总览" desc="先加服务器，在机器上挂节点，再把套餐绑给用户。已用流量按套餐方向和节点倍率计。" />
+      <PageHead title="总览" />
       <div className={`run-hero ${heroTone}`}>
         <div className="run-hero-count">{d.online ?? 0}</div>
         <div className="run-hero-label">
@@ -67,11 +67,11 @@ export default function Dashboard() {
       {(d.servers || 0) > 0 || !showSetup ? (
       <div className="card overflow-hidden">
         <div className="panel-head">
-          <div>服务器</div>
+          <div>实例</div>
           <Link to="/servers" className="btn-ghost h-8">管理</Link>
         </div>
         {(d.server_list || []).length === 0 ? (
-          <Empty title="还没有服务器" hint="添加一台服务器，复制一键安装命令，在机器上以 root 执行。" action={<Link to="/servers" className="btn-primary">去添加</Link>} />
+          <Empty title="还没有实例" hint="添加一台实例，复制一键安装命令，在机器上以 root 执行。" action={<Link to="/servers" className="btn-primary">去添加</Link>} />
         ) : (
           <div className="table-wrap">
             <table className="data">
@@ -132,7 +132,7 @@ export default function Dashboard() {
       ) : null}
       {d.online === 0 && (d.servers || 0) > 0 && (
         <div className="alert-row is-warn mt-4">
-          服务器离线时，请确认 Agent 已安装，且能访问面板的 8899 端口。
+          实例离线时，请确认 Agent 已安装，且能访问面板的 8899 端口。
         </div>
       )}
     </div>
