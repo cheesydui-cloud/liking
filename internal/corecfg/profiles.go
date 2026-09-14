@@ -79,6 +79,33 @@ func CoreFor(profile string) string {
 	}
 }
 
+func NormalizeCore(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "sing-box", "singbox":
+		return CoreSingbox
+	case "mieru", "mita":
+		return CoreMita
+	case "xray":
+		return CoreXray
+	default:
+		return s
+	}
+}
+
+func KnownCore(s string) bool {
+	switch NormalizeCore(s) {
+	case CoreXray, CoreSingbox, CoreMita:
+		return true
+	default:
+		return false
+	}
+}
+
+func CoreNames() []string {
+	return []string{CoreXray, CoreSingbox, CoreMita}
+}
+
 func Spec(profile string) (protocol, network, security string) {
 	switch profile {
 	case ProfileVLESSReality, ProfileVLESSRealityVision:

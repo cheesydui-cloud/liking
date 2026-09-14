@@ -70,6 +70,64 @@ func defaultEnsureCore(name string) (string, error) {
 	}
 }
 
+func removeCoreBin(name string) error {
+	name = normalizeAgentCore(name)
+	switch name {
+	case "xray":
+		return removeOwnedBins("xray")
+	case "singbox":
+		return removeOwnedBins("sing-box", "singbox")
+	case "mita":
+		return removeMitaBin()
+	default:
+		return fmt.Errorf("未知内核 %s", name)
+	}
+}
+
+func removeOwnedBins(names ...string) error {
+	var last string
+	for _, n := range names {
+		for _, dir := range []string{"/usr/local/bin"} {
+			p := filepath.Join(dir, n)
+			if st, err := os.Stat(p); err == nil && !st.IsDir() {
+				last = p
+				if err := os.Remove(p); err != nil {
+					return fmt.Errorf("删除 %s: %w", p, err)
+				}
+			}
+		}
+	}
+	if lookBin(names...) != "" {
+		if last == "" {
+			return fmt.Errorf("%s 不在 /usr/local/bin，请手动卸载", names[0])
+		}
+		return fmt.Errorf("已删除 %s，但仍在 PATH", last)
+	}
+	return nil
+}
+
+func removeMitaBin() error {
+	if bin := lookBin("mita"); bin != "" {
+		_ = exec.Command(bin, "stop").Run()
+	}
+	_ = exec.Command("systemctl", "disable", "--now", "mita.service").Run()
+	if hasCmd("dpkg") {
+		cmd := exec.Command("dpkg", "-r", "mita")
+		cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
+		_ = cmd.Run()
+	}
+	if hasCmd("rpm") {
+		_ = exec.Command("rpm", "-e", "mita").Run()
+	}
+	_ = os.Remove("/usr/local/bin/mita")
+	_ = os.Remove("/etc/systemd/system/mita.service")
+	_ = exec.Command("systemctl", "daemon-reload").Run()
+	if lookBin("mita") != "" {
+		return fmt.Errorf("mita 仍在 PATH，请手动卸载")
+	}
+	return nil
+}
+
 func linuxArch() string {
 	switch runtime.GOARCH {
 	case "arm64", "aarch64":

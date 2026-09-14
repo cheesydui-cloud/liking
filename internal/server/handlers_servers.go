@@ -18,6 +18,7 @@ import (
 	"liking/internal/corecfg"
 	"liking/internal/db"
 	"liking/internal/version"
+	"liking/internal/wsproto"
 )
 
 func corecfgCatalog() []corecfg.Meta { return corecfg.Catalog() }
@@ -45,6 +46,7 @@ func (s *Server) decorateServers(list []*db.Server) {
 		x.OverQuota = db.ServerOverQuota(x, x.UsedUp+x.UsedDown)
 		x.NeedsUpgrade = x.Online == 1 && x.AgentVer != "" && x.AgentVer != version.Version
 		x.NeedsReinstall = x.Online == 1 && !version.CanRemoteUpgrade(x.AgentVer)
+		x.CanPushCores = s.Hub.HasCap(x.ID, wsproto.CapCores)
 		if up, down, ok := s.Hub.Live(x.ID); ok {
 			x.NetUpBps = up
 			x.NetDownBps = down
@@ -109,12 +111,30 @@ func applyServerPortRange(srv *db.Server, minPtr, maxPtr *int) error {
 	return nil
 }
 
+func applyServerExpiry(srv *db.Server, expPtr *int64, resetPtr *int) error {
+	if expPtr != nil {
+		if *expPtr < 0 {
+			return fmt.Errorf("到期时间无效")
+		}
+		srv.ExpiresAt = *expPtr
+	}
+	if resetPtr != nil {
+		if *resetPtr < 0 || *resetPtr > 31 {
+			return fmt.Errorf("流量重置日 0–31")
+		}
+		srv.TrafficResetDay = *resetPtr
+	}
+	return nil
+}
+
 func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name       string `json:"name"`
-		PublicHost string `json:"public_host"`
-		PortMin    *int   `json:"port_min"`
-		PortMax    *int   `json:"port_max"`
+		Name            string `json:"name"`
+		PublicHost      string `json:"public_host"`
+		PortMin         *int   `json:"port_min"`
+		PortMax         *int   `json:"port_max"`
+		ExpiresAt       *int64 `json:"expires_at"`
+		TrafficResetDay *int   `json:"traffic_reset_day"`
 	}
 	if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
 		jsonErr(w, http.StatusBadRequest, "需要名称")
@@ -122,6 +142,10 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	dummy := &db.Server{PortMin: corecfg.DefaultPortMin, PortMax: corecfg.DefaultPortMax}
 	if err := applyServerPortRange(dummy, req.PortMin, req.PortMax); err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := applyServerExpiry(dummy, req.ExpiresAt, req.TrafficResetDay); err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -135,8 +159,10 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if srv.PortMin != dummy.PortMin || srv.PortMax != dummy.PortMax {
+	need := srv.PortMin != dummy.PortMin || srv.PortMax != dummy.PortMax || srv.ExpiresAt != dummy.ExpiresAt || srv.TrafficResetDay != dummy.TrafficResetDay
+	if need {
 		srv.PortMin, srv.PortMax = dummy.PortMin, dummy.PortMax
+		srv.ExpiresAt, srv.TrafficResetDay = dummy.ExpiresAt, dummy.TrafficResetDay
 		if err := db.UpdateServer(s.DB, srv); err != nil {
 			jsonErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -159,11 +185,13 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name         *string `json:"name"`
-		PublicHost   *string `json:"public_host"`
-		TrafficLimit *int64  `json:"traffic_limit"`
-		PortMin      *int    `json:"port_min"`
-		PortMax      *int    `json:"port_max"`
+		Name            *string `json:"name"`
+		PublicHost      *string `json:"public_host"`
+		TrafficLimit    *int64  `json:"traffic_limit"`
+		PortMin         *int    `json:"port_min"`
+		PortMax         *int    `json:"port_max"`
+		ExpiresAt       *int64  `json:"expires_at"`
+		TrafficResetDay *int    `json:"traffic_reset_day"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -183,6 +211,10 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		srv.TrafficLimit = *req.TrafficLimit
 	}
 	if err := applyServerPortRange(srv, req.PortMin, req.PortMax); err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := applyServerExpiry(srv, req.ExpiresAt, req.TrafficResetDay); err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
 	}

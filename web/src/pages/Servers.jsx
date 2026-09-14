@@ -5,6 +5,7 @@ import { copyText } from '../lib/copy'
 import { isDirectNode, serverStatus } from '../lib/status'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, FilterTabs, Icon, LineStatus, Meter, Modal, MoreMenu, PageHead, SearchInput, fmtAgo, fmtBps, fmtBytes, machineTone } from '../components/ui'
+import { CORE_OPTIONS, coreLabel, fmtExpires, fmtResetDay, isExpired, nameTone, parseCores, ymd, ymdToUnix } from '../lib/display'
 import { DEFAULT_PORT_MAX, DEFAULT_PORT_MIN, formatPortRange, parsePort } from '../lib/ports'
 
 function gbFromLimit(n) {
@@ -14,11 +15,40 @@ function gbFromLimit(n) {
   return String(Math.round(gb * 1000) / 1000)
 }
 
-function Metric({ label, value }) {
+function Metric({ label, value, tone }) {
   return (
-    <div className="metric">
+    <div className={`metric${tone ? ` is-${tone}` : ''}`}>
       <span className="metric-k">{label}</span>
       <span className="metric-v">{value}</span>
+    </div>
+  )
+}
+
+function ServerDates({ s }) {
+  const expired = isExpired(s.expires_at)
+  return (
+    <div className="machine-dates">
+      <div>
+        <span className="machine-date-k">到期</span>
+        <span className={`machine-date-v${expired ? ' is-expired' : ''}`}>{fmtExpires(s.expires_at)}</span>
+      </div>
+      <div>
+        <span className="machine-date-k">流量重置</span>
+        <span className="machine-date-v">{fmtResetDay(s.traffic_reset_day)}</span>
+      </div>
+    </div>
+  )
+}
+
+function ServerMeta({ s }) {
+  const cores = parseCores(s.cores)
+  return (
+    <div className="machine-meta">
+      {s.agent_ver ? <span className="machine-meta-item">Agent {s.agent_ver}</span> : null}
+      <span className="machine-meta-item">心跳 {fmtAgo(s.last_seen)}</span>
+      {cores.map(c => (
+        <span key={c} className={`core-tag is-${c}`}>{coreLabel(c)}</span>
+      ))}
     </div>
   )
 }
@@ -40,19 +70,6 @@ function withGhProxyFlag(cmd, on, url) {
   if (!/^https?:\/\/[^ \t;|&`$<>\\]+$/i.test(p)) return cmd
   const norm = p.replace(/\/+$/, '') + '/'
   return `${cmd.replace(/\s+$/, '')} --gh-proxy ${norm}`
-}
-
-function machineMeta(s) {
-  const cores = String(s.cores || '').split(',').map(x => x.trim()).filter(Boolean)
-  const bits = [
-    s.agent_ver ? `Agent ${s.agent_ver}` : null,
-    `心跳 ${fmtAgo(s.last_seen)}`,
-    [s.os, s.arch].filter(Boolean).join('/') || null,
-    s.disk_total ? `磁盘 ${fmtBytes(s.disk_free)}` : null,
-    s.conns != null && s.conns !== '' ? `连接 ${s.conns}` : null,
-    cores.length ? cores.join(', ') : null,
-  ].filter(Boolean)
-  return bits.join(' / ')
 }
 
 export default function Servers() {
@@ -78,9 +95,12 @@ export default function Servers() {
   const [statusFilter, setStatusFilter] = useState('')
   const [newPortMin, setNewPortMin] = useState(String(DEFAULT_PORT_MIN))
   const [newPortMax, setNewPortMax] = useState(String(DEFAULT_PORT_MAX))
-  const [rangeSrv, setRangeSrv] = useState(null)
-  const [rangeMin, setRangeMin] = useState(String(DEFAULT_PORT_MIN))
-  const [rangeMax, setRangeMax] = useState(String(DEFAULT_PORT_MAX))
+  const [newExpires, setNewExpires] = useState('')
+  const [newResetDay, setNewResetDay] = useState('0')
+  const [editSrv, setEditSrv] = useState(null)
+  const [edit, setEdit] = useState({ name: '', host: '', min: '', max: '', gb: '', expires: '', resetDay: '0' })
+  const [coreSrv, setCoreSrv] = useState(null)
+  const [corePick, setCorePick] = useState('xray')
 
   const load = async () => {
     try {
@@ -97,6 +117,14 @@ export default function Servers() {
     return () => clearInterval(t)
   }, [])
 
+  const coreSrvId = coreSrv?.id
+  useEffect(() => {
+    if (!coreSrvId) return
+    const next = list.find(x => Number(x.id) === Number(coreSrvId))
+    if (!next) setCoreSrv(null)
+    else setCoreSrv(next)
+  }, [list, coreSrvId])
+
   useEffect(() => {
     try {
       localStorage.setItem('lk-agent-gh-proxy', JSON.stringify({ on: cnInstall, url: ghProxy }))
@@ -110,6 +138,8 @@ export default function Servers() {
     setHost('')
     setNewPortMin(String(DEFAULT_PORT_MIN))
     setNewPortMax(String(DEFAULT_PORT_MAX))
+    setNewExpires('')
+    setNewResetDay('0')
     setFormOpen(true)
   }
 
@@ -133,7 +163,13 @@ export default function Servers() {
     if (!range) return
     setBusy(true)
     try {
-      const d = await api.post('/servers', { name, public_host: host, ...range })
+      const d = await api.post('/servers', {
+        name,
+        public_host: host,
+        ...range,
+        expires_at: ymdToUnix(newExpires),
+        traffic_reset_day: Number(newResetDay) || 0,
+      })
       setName(''); setHost('')
       setFormOpen(false)
       setCmd(d.install || '')
@@ -143,21 +179,85 @@ export default function Servers() {
     finally { setBusy(false) }
   }
 
-  const openPortRange = (s) => {
-    setRangeSrv(s)
-    setRangeMin(String(s.port_min || DEFAULT_PORT_MIN))
-    setRangeMax(String(s.port_max || DEFAULT_PORT_MAX))
+  const openEdit = (s) => {
+    setEditSrv(s)
+    setEdit({
+      name: s.name || '',
+      host: s.public_host || '',
+      min: String(s.port_min || DEFAULT_PORT_MIN),
+      max: String(s.port_max || DEFAULT_PORT_MAX),
+      gb: gbFromLimit(s.traffic_limit),
+      expires: ymd(s.expires_at),
+      resetDay: String(s.traffic_reset_day || 0),
+    })
   }
 
-  const savePortRange = async (e) => {
+  const saveEdit = async (e) => {
     e.preventDefault()
-    if (!rangeSrv) return
-    const range = readPortRange(rangeMin, rangeMax)
+    if (!editSrv) return
+    const range = readPortRange(edit.min, edit.max)
     if (!range) return
+    const nm = edit.name.trim()
+    if (!nm) { toast('请填写名称', 'error'); return }
+    let bytes = 0
+    const gbRaw = String(edit.gb || '').trim()
+    if (gbRaw !== '') {
+      const gb = Number(gbRaw)
+      if (!Number.isFinite(gb) || gb < 0) { toast('流量上限无效', 'error'); return }
+      bytes = Math.round(gb * 1024 * 1024 * 1024)
+    }
+    const reset = Number(edit.resetDay)
+    if (!Number.isFinite(reset) || reset < 0 || reset > 31) { toast('重置日 0–31', 'error'); return }
     setBusy(true)
     try {
-      await api.put(`/servers/${rangeSrv.id}`, range)
-      setRangeSrv(null)
+      await api.put(`/servers/${editSrv.id}`, {
+        name: nm,
+        public_host: edit.host,
+        traffic_limit: bytes,
+        expires_at: ymdToUnix(edit.expires),
+        traffic_reset_day: reset,
+        ...range,
+      })
+      setEditSrv(null)
+      load()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  const openCores = (s) => {
+    const have = new Set(parseCores(s.cores))
+    const next = CORE_OPTIONS.find(c => !have.has(c.id)) || CORE_OPTIONS[0]
+    setCorePick(next.id)
+    setCoreSrv(s)
+  }
+
+  const pushCore = async () => {
+    if (!coreSrv) return
+    setBusy(true)
+    try {
+      const d = await api.post(`/servers/${coreSrv.id}/push-core`, { core: corePick })
+      toast(`已推送 ${coreLabel(corePick)}`)
+      const cores = Array.isArray(d.cores) ? d.cores.join(',') : ''
+      setCoreSrv(prev => prev ? { ...prev, cores: cores || prev.cores, can_push_cores: true } : prev)
+      load()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  const removeCore = async (core) => {
+    if (!coreSrv) return
+    if (!(await dialog.confirm({
+      title: `卸载 ${coreLabel(core)}`,
+      message: `从 ${coreSrv.name} 卸掉这个核心。正在用它的节点会连不上。`,
+      danger: true,
+      okText: '卸载',
+    }))) return
+    setBusy(true)
+    try {
+      const d = await api.post(`/servers/${coreSrv.id}/remove-core`, { core })
+      toast(`已卸载 ${coreLabel(core)}`)
+      const cores = Array.isArray(d.cores) ? d.cores.join(',') : ''
+      setCoreSrv(prev => prev ? { ...prev, cores } : prev)
       load()
     } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
@@ -371,16 +471,17 @@ export default function Servers() {
             const n = nodesOf(s.id).length
             const used = (s.used_up || 0) + (s.used_down || 0)
             const loadAvg = s.online && s.load_milli ? (Number(s.load_milli) / 1000).toFixed(2) : '—'
-            const mem = s.mem_avail ? fmtBytes(s.mem_avail) : '—'
             const st = serverStatus(s)
             const fresh = st === '未安装'
+            const expired = isExpired(s.expires_at)
             return (
               <div key={s.id} className={`machine ${machineTone(s)}`}>
                 <div className="machine-head">
                   <div className="min-w-0 flex-1">
                     <div className="machine-title">
-                      <span className="machine-name truncate">{s.name}</span>
+                      <span className={`machine-name truncate is-${nameTone(s.id)}`}>{s.name}</span>
                       <LineStatus status={st} />
+                      {expired ? <Badge tone="danger">已到期</Badge> : null}
                       {s.needs_reinstall ? <Badge tone="warn">需重装</Badge>
                         : s.needs_upgrade ? <Badge tone="warn">可升级</Badge> : null}
                       {s.over_quota ? <Badge tone="danger">流量已满</Badge> : null}
@@ -398,7 +499,8 @@ export default function Servers() {
                       { label: '安装命令', onSelect: () => showInstall(s.id) },
                       { label: '从 CF 同步', onSelect: () => openCF(s) },
                       { label: '改公开地址', onSelect: () => saveHost(s) },
-                      { label: '端口区间', hint: `新节点随机 ${formatPortRange(s)}`, onSelect: () => openPortRange(s) },
+                      { label: '编辑', hint: '名称、端口区间、到期、流量', onSelect: () => openEdit(s) },
+                      { label: '推送核心', hint: s.can_push_cores ? '安装或卸载 Xray / sing-box / Mita' : (s.online ? '需先升级 Agent' : '需在线'), onSelect: () => openCores(s) },
                       { label: '流量上限', onSelect: () => saveLimit(s) },
                       { sep: true },
                       {
@@ -414,6 +516,7 @@ export default function Servers() {
                     ]} />
                   </div>
                 </div>
+                <ServerDates s={s} />
                 {fresh ? (
                   <div className="machine-fresh">
                     <div className="text-[12px] text-ink-mut mb-2">还没装 Agent。复制命令到机器上以 root 执行。</div>
@@ -424,10 +527,10 @@ export default function Servers() {
                 ) : s.online ? (
                   <>
                     <div className="machine-metrics">
-                      <Metric label="上行" value={fmtBps(s.net_up_bps)} />
-                      <Metric label="下行" value={fmtBps(s.net_down_bps)} />
+                      <Metric label="上行" value={fmtBps(s.net_up_bps)} tone="up" />
+                      <Metric label="下行" value={fmtBps(s.net_down_bps)} tone="down" />
                       <Metric label="负载" value={loadAvg} />
-                      <Metric label="内存" value={mem} />
+                      <Metric label="已用流量" value={fmtBytes(used)} />
                     </div>
                     <div className="machine-meter">
                       <Meter value={used} max={Number(s.traffic_limit) || 0} />
@@ -437,9 +540,9 @@ export default function Servers() {
                   s.last_error ? <div className="machine-fault">{s.last_error}</div> : null
                 )}
                 {s.online && s.last_error ? <div className="machine-fault">{s.last_error}</div> : null}
-                {!fresh ? <div className="machine-meta" title={machineMeta(s)}>{machineMeta(s)}</div> : null}
+                {!fresh ? <ServerMeta s={s} /> : null}
                 <div className="machine-foot">
-                  <button type="button" className="machine-ports" onClick={() => openPortRange(s)} title="改端口区间">
+                  <button type="button" className="machine-ports" onClick={() => openEdit(s)} title="编辑服务器">
                     端口 {formatPortRange(s)}
                   </button>
                   <Link to={`/nodes?server=${s.id}`} className="row-act">{n} 个节点</Link>
@@ -470,28 +573,93 @@ export default function Servers() {
               <input className="input-field font-mono" inputMode="numeric" value={newPortMax} onChange={e => setNewPortMax(e.target.value)} placeholder={String(DEFAULT_PORT_MAX)} />
             </div>
           </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="到期时间" hint="这台机器的租期。留空不限。">
+              <input className="input-field font-mono" type="date" value={newExpires} onChange={e => setNewExpires(e.target.value)} />
+            </Field>
+            <Field label="流量每月重置" hint="0 = 不提醒。">
+              <input className="input-field font-mono" type="number" min="0" max="31" value={newResetDay} onChange={e => setNewResetDay(e.target.value)} />
+            </Field>
+          </div>
           <button type="button" className="row-act" onClick={() => openCF(null)}>从 CF 同步</button>
         </form>
       </Modal>
 
-      <Modal open={!!rangeSrv} title="端口区间" onClose={() => setRangeSrv(null)} footer={
+      <Modal open={!!editSrv} title="编辑服务器" onClose={() => setEditSrv(null)} footer={
         <>
-          <button type="button" className="btn-ghost" onClick={() => setRangeSrv(null)}>取消</button>
-          <button type="submit" form="port-range-form" className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
+          <button type="button" className="btn-ghost" onClick={() => setEditSrv(null)}>取消</button>
+          <button type="submit" form="srv-edit-form" className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
         </>
       }>
-        <form id="port-range-form" onSubmit={savePortRange} className="space-y-3">
-          <p className="text-[13px] text-ink-mut">
-            {rangeSrv ? `${rangeSrv.name} 上新节点不填端口时，在此区间随机。手动填写的端口不受限。` : ''}
-          </p>
-          <Field label="起始 – 结束">
+        <form id="srv-edit-form" onSubmit={saveEdit} className="space-y-3">
+          <Field label="名称">
+            <input className="input-field" value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} required autoFocus />
+          </Field>
+          <Field label="公开地址">
+            <input className="input-field" value={edit.host} onChange={e => setEdit({ ...edit, host: e.target.value })} placeholder="IP 或域名" />
+          </Field>
+          <Field label="端口区间" hint="新节点不填端口时在此区间随机。手动填的端口不受限。">
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-              <input className="input-field font-mono" inputMode="numeric" value={rangeMin} onChange={e => setRangeMin(e.target.value)} autoFocus />
+              <input className="input-field font-mono" inputMode="numeric" value={edit.min} onChange={e => setEdit({ ...edit, min: e.target.value })} />
               <span className="text-[13px] text-ink-mut">–</span>
-              <input className="input-field font-mono" inputMode="numeric" value={rangeMax} onChange={e => setRangeMax(e.target.value)} />
+              <input className="input-field font-mono" inputMode="numeric" value={edit.max} onChange={e => setEdit({ ...edit, max: e.target.value })} />
             </div>
           </Field>
+          <Field label="流量上限 GB" hint="留空 = 不限。已用流量按这台机器上的线路累计。">
+            <input className="input-field font-mono" type="number" min="0" step="0.1" value={edit.gb} onChange={e => setEdit({ ...edit, gb: e.target.value })} />
+          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="到期时间">
+              <input className="input-field font-mono" type="date" value={edit.expires} onChange={e => setEdit({ ...edit, expires: e.target.value })} />
+            </Field>
+            <Field label="流量每月重置日" hint="0 = 未设置">
+              <input className="input-field font-mono" type="number" min="0" max="31" value={edit.resetDay} onChange={e => setEdit({ ...edit, resetDay: e.target.value })} />
+            </Field>
+          </div>
         </form>
+      </Modal>
+
+      <Modal open={!!coreSrv} title="推送核心" onClose={() => setCoreSrv(null)} footer={
+        <button type="button" className="btn-ghost" onClick={() => setCoreSrv(null)}>关闭</button>
+      }>
+        {coreSrv ? (
+          <div className="space-y-4">
+            <p className="text-[13px] text-ink-mut">
+              把内核装到 {coreSrv.name}。不用的可以卸掉。国内机器需先在安装命令里勾选 GitHub 镜像。
+            </p>
+            {!coreSrv.online ? (
+              <div className="notice">Agent 不在线，无法推送或卸载。</div>
+            ) : !coreSrv.can_push_cores ? (
+              <div className="notice">该 Agent 还不支持推送核心。请先用菜单里的「一键升级」升到当前面板版本。</div>
+            ) : (
+              <>
+                <Field label="选择核心">
+                  <div className="flex gap-2">
+                    <select className="input-field" value={corePick} onChange={e => setCorePick(e.target.value)}>
+                      {CORE_OPTIONS.map(c => (
+                        <option key={c.id} value={c.id}>{c.label}</option>
+                      ))}
+                    </select>
+                    <button type="button" className="btn-primary shrink-0" disabled={busy} onClick={pushCore}>
+                      {busy ? '推送中…' : '推送'}
+                    </button>
+                  </div>
+                </Field>
+                <div>
+                  <div className="text-[12px] font-medium text-ink-soft mb-1">已安装</div>
+                  {parseCores(coreSrv.cores).length === 0 ? (
+                    <div className="text-[13px] text-ink-mut py-2">还没有探测到内核。</div>
+                  ) : parseCores(coreSrv.cores).map(c => (
+                    <div key={c} className="core-installed">
+                      <span className={`core-tag is-${c}`}>{coreLabel(c)}</span>
+                      <button type="button" className="row-act" style={{ color: 'var(--color-danger)' }} disabled={busy} onClick={() => removeCore(c)}>卸载</button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        ) : null}
       </Modal>
 
       <Modal open={!!cmd} title="一键安装 Agent" onClose={() => setCmd('')} wide footer={

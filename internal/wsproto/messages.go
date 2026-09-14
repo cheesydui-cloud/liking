@@ -16,6 +16,12 @@ const (
 	TypeUpgradeAck    = "upgrade_ack"
 	TypeUninstall     = "uninstall"
 	TypeUninstallAck  = "uninstall_ack"
+	TypeEnsureCore    = "ensure_core"
+	TypeEnsureCoreAck = "ensure_core_ack"
+	TypeRemoveCore    = "remove_core"
+	TypeRemoveCoreAck = "remove_core_ack"
+
+	CapCores = "cores"
 )
 
 type Envelope struct {
@@ -31,6 +37,7 @@ type Hello struct {
 	Arch         string   `json:"arch"`
 	LastRev      string   `json:"last_rev,omitempty"`
 	Cores        []string `json:"cores,omitempty"`
+	Caps         []string `json:"caps,omitempty"`
 }
 
 type HelloAck struct {
@@ -56,18 +63,18 @@ type ApplyAck struct {
 }
 
 type Stats struct {
-	Samples       []Sample `json:"samples"`
-	NetUp         int64    `json:"net_up_bps,omitempty"`
-	NetDown       int64    `json:"net_down_bps,omitempty"`
-	HasNet        bool     `json:"has_net,omitempty"`
-	Cores         []string `json:"cores,omitempty"`
-	CoresRunning  []string `json:"cores_running,omitempty"`
-	DiskFree      int64    `json:"disk_free,omitempty"`
-	DiskTotal     int64    `json:"disk_total,omitempty"`
-	MemAvail      int64    `json:"mem_avail,omitempty"`
-	MemTotal      int64    `json:"mem_total,omitempty"`
-	LoadMilli     int64    `json:"load_milli,omitempty"`
-	Conns         int      `json:"conns,omitempty"`
+	Samples      []Sample `json:"samples"`
+	NetUp        int64    `json:"net_up_bps,omitempty"`
+	NetDown      int64    `json:"net_down_bps,omitempty"`
+	HasNet       bool     `json:"has_net,omitempty"`
+	Cores        []string `json:"cores,omitempty"`
+	CoresRunning []string `json:"cores_running,omitempty"`
+	DiskFree     int64    `json:"disk_free,omitempty"`
+	DiskTotal    int64    `json:"disk_total,omitempty"`
+	MemAvail     int64    `json:"mem_avail,omitempty"`
+	MemTotal     int64    `json:"mem_total,omitempty"`
+	LoadMilli    int64    `json:"load_milli,omitempty"`
+	Conns        int      `json:"conns,omitempty"`
 }
 
 type Upgrade struct {
@@ -85,6 +92,17 @@ type UpgradeAck struct {
 type UninstallAck struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+}
+
+type CoreOp struct {
+	Core string `json:"core"`
+}
+
+type CoreOpAck struct {
+	OK    bool     `json:"ok"`
+	Error string   `json:"error,omitempty"`
+	Core  string   `json:"core,omitempty"`
+	Cores []string `json:"cores,omitempty"`
 }
 
 type Sample struct {

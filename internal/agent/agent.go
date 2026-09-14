@@ -118,6 +118,7 @@ func (a *Agent) session(ctx context.Context) error {
 		Arch:         runtime.GOARCH,
 		LastRev:      lastRev,
 		Cores:        detectedCores(),
+		Caps:         []string{wsproto.CapCores},
 	})
 	if err := a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeHello, ID: "hello", Payload: hello}); err != nil {
 		return err
@@ -165,10 +166,19 @@ func (a *Agent) session(ctx context.Context) error {
 		case err := <-errCh:
 			return err
 		case env := <-envCh:
-			if env.Type == wsproto.TypeApply {
+			if env.Type == wsproto.TypeApply || env.Type == wsproto.TypeEnsureCore || env.Type == wsproto.TypeRemoveCore {
 				go func(env wsproto.Envelope) {
-					if err := a.handleApply(ctx, ws, env); err != nil {
-						log.Printf("agent apply: %v", err)
+					var err error
+					switch env.Type {
+					case wsproto.TypeApply:
+						err = a.handleApply(ctx, ws, env)
+					case wsproto.TypeEnsureCore:
+						err = a.handleEnsureCore(ctx, ws, env)
+					case wsproto.TypeRemoveCore:
+						err = a.handleRemoveCore(ctx, ws, env)
+					}
+					if err != nil {
+						log.Printf("agent %s: %v", env.Type, err)
 					}
 				}(env)
 				continue
@@ -266,6 +276,50 @@ func (a *Agent) ackUpgrade(ctx context.Context, ws *websocket.Conn, id string, o
 func (a *Agent) ackUninstall(ctx context.Context, ws *websocket.Conn, id string, ok bool, errMsg string) error {
 	p, _ := json.Marshal(wsproto.UninstallAck{OK: ok, Error: errMsg})
 	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeUninstallAck, ID: id, Payload: p})
+}
+
+func (a *Agent) handleEnsureCore(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {
+	var req wsproto.CoreOp
+	if err := json.Unmarshal(env.Payload, &req); err != nil {
+		return a.ackCoreOp(ctx, ws, wsproto.TypeEnsureCoreAck, env.ID, "", false, "malformed ensure_core")
+	}
+	name := normalizeAgentCore(req.Core)
+	if !knownAgentCore(name) {
+		return a.ackCoreOp(ctx, ws, wsproto.TypeEnsureCoreAck, env.ID, name, false, "未知内核")
+	}
+	_, err := ensureCore(name)
+	cores := detectedCores()
+	if err != nil {
+		return a.ackCoreOp(ctx, ws, wsproto.TypeEnsureCoreAck, env.ID, name, false, err.Error(), cores)
+	}
+	return a.ackCoreOp(ctx, ws, wsproto.TypeEnsureCoreAck, env.ID, name, true, "", cores)
+}
+
+func (a *Agent) handleRemoveCore(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {
+	var req wsproto.CoreOp
+	if err := json.Unmarshal(env.Payload, &req); err != nil {
+		return a.ackCoreOp(ctx, ws, wsproto.TypeRemoveCoreAck, env.ID, "", false, "malformed remove_core")
+	}
+	name := normalizeAgentCore(req.Core)
+	if !knownAgentCore(name) {
+		return a.ackCoreOp(ctx, ws, wsproto.TypeRemoveCoreAck, env.ID, name, false, "未知内核")
+	}
+	a.cores.Remove(name)
+	err := removeCoreBin(name)
+	cores := detectedCores()
+	if err != nil {
+		return a.ackCoreOp(ctx, ws, wsproto.TypeRemoveCoreAck, env.ID, name, false, err.Error(), cores)
+	}
+	return a.ackCoreOp(ctx, ws, wsproto.TypeRemoveCoreAck, env.ID, name, true, "", cores)
+}
+
+func (a *Agent) ackCoreOp(ctx context.Context, ws *websocket.Conn, typ, id, core string, ok bool, errMsg string, cores ...[]string) error {
+	ack := wsproto.CoreOpAck{OK: ok, Error: errMsg, Core: core}
+	if len(cores) > 0 {
+		ack.Cores = cores[0]
+	}
+	p, _ := json.Marshal(ack)
+	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: typ, ID: id, Payload: p})
 }
 
 func (a *Agent) handleApply(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {

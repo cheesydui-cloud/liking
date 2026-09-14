@@ -15,6 +15,18 @@ import (
 	"liking/internal/wsproto"
 )
 
+func TestKnownAgentCoreAndRemoveUnknown(t *testing.T) {
+	if !knownAgentCore("sing-box") || !knownAgentCore("Mita") || knownAgentCore("clash") {
+		t.Fatal("known")
+	}
+	if normalizeAgentCore("sing-box") != "singbox" {
+		t.Fatal("normalize")
+	}
+	if err := removeCoreBin("clash"); err == nil {
+		t.Fatal("unknown remove")
+	}
+}
+
 func TestPublicListenSpecsSkipsLoopback(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{
 		"inbounds": []any{

@@ -30,6 +30,18 @@ func TestOpenMigrateAndCRUD(t *testing.T) {
 	if s.PortMin != 10000 || s.PortMax != 59999 {
 		t.Fatalf("port range %+v", s)
 	}
+	if s.ExpiresAt != 0 || s.TrafficResetDay != 0 {
+		t.Fatalf("expiry %+v", s)
+	}
+	s.ExpiresAt = 1700000000
+	s.TrafficResetDay = 1
+	if err := UpdateServer(d, s); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = GetServer(d, s.ID)
+	if s.ExpiresAt != 1700000000 || s.TrafficResetDay != 1 {
+		t.Fatalf("expiry saved %+v", s)
+	}
 	if s.LastError != "" || s.LastErrorAt != 0 {
 		t.Fatalf("last_error %+v", s)
 	}

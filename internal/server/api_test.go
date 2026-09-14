@@ -1075,14 +1075,47 @@ func TestServerPortRange(t *testing.T) {
 	}
 	var updated struct {
 		Server struct {
-			PortMin int `json:"port_min"`
-			PortMax int `json:"port_max"`
+			PortMin         int   `json:"port_min"`
+			PortMax         int   `json:"port_max"`
+			ExpiresAt       int64 `json:"expires_at"`
+			TrafficResetDay int   `json:"traffic_reset_day"`
 		} `json:"server"`
 	}
 	decodeRes(t, res, &updated)
 	if updated.Server.PortMin != 20000 || updated.Server.PortMax != 20000 {
 		t.Fatalf("update %+v", updated.Server)
 	}
+
+	meta, _ := json.Marshal(map[string]any{"expires_at": int64(1800000000), "traffic_reset_day": 15})
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/servers/"+strconv.FormatInt(created.Server.ID, 10), bytes.NewReader(meta))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, &updated)
+	if updated.Server.ExpiresAt != 1800000000 || updated.Server.TrafficResetDay != 15 {
+		t.Fatalf("expiry %+v", updated.Server)
+	}
+
+	badDay, _ := json.Marshal(map[string]any{"traffic_reset_day": 32})
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/servers/"+strconv.FormatInt(created.Server.ID, 10), bytes.NewReader(badDay))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode == 200 {
+		t.Fatal("reset day 32 should fail")
+	}
+	io.ReadAll(res.Body)
+	res.Body.Close()
 }
 
 func TestCertsAndSettings(t *testing.T) {

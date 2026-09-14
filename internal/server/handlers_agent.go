@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"liking/internal/corecfg"
 	"liking/internal/db"
 	"liking/internal/version"
 	"liking/internal/wsproto"
@@ -124,6 +125,89 @@ func (s *Server) handleUninstallAgent(w http.ResponseWriter, r *http.Request) {
 	u := userFromCtx(r.Context())
 	db.AddAudit(s.DB, &u.ID, "agent.uninstall", srv.Name)
 	jsonOK(w, map[string]any{"ok": true})
+}
+
+func (s *Server) handlePushCore(w http.ResponseWriter, r *http.Request) {
+	s.handleCoreOp(w, r, wsproto.TypeEnsureCore, "推送")
+}
+
+func (s *Server) handleRemoveCore(w http.ResponseWriter, r *http.Request) {
+	s.handleCoreOp(w, r, wsproto.TypeRemoveCore, "卸载")
+}
+
+func (s *Server) handleCoreOp(w http.ResponseWriter, r *http.Request, typ, verb string) {
+	id, err := chiID(r, "id")
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	var req struct {
+		Core string `json:"core"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效请求")
+		return
+	}
+	core := corecfg.NormalizeCore(req.Core)
+	if !corecfg.KnownCore(core) {
+		jsonErr(w, http.StatusBadRequest, "未知内核")
+		return
+	}
+	srv, err := db.GetServer(s.DB, id)
+	if err != nil {
+		jsonErr(w, http.StatusNotFound, "服务器不存在")
+		return
+	}
+	if !s.Hub.IsOnline(id) {
+		jsonErr(w, http.StatusBadRequest, "Agent 不在线，无法"+verb+"核心")
+		return
+	}
+	if !s.Hub.HasCap(id, wsproto.CapCores) {
+		jsonErrExtra(w, http.StatusBadRequest, "该 Agent 还不支持推送/卸载核心。请先一键升级 Agent。", map[string]any{"code": "agent_too_old"})
+		return
+	}
+	if typ == wsproto.TypeRemoveCore {
+		ins, err := db.ListInboundsByServer(s.DB, id)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		n := 0
+		for _, in := range ins {
+			if corecfg.NormalizeCore(in.Core) == core {
+				n++
+			}
+		}
+		if n > 0 {
+			jsonErr(w, http.StatusBadRequest, fmt.Sprintf("还有 %d 个节点在用这个核心，先删节点或改协议再卸载", n))
+			return
+		}
+	}
+	timeout := 3 * time.Minute
+	if typ == wsproto.TypeRemoveCore {
+		timeout = 30 * time.Second
+	}
+	raw, err := s.Hub.SendRPC(id, typ, wsproto.CoreOp{Core: core}, timeout)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var ack wsproto.CoreOpAck
+	_ = json.Unmarshal(raw, &ack)
+	if len(ack.Cores) > 0 {
+		_ = db.SetServerCores(s.DB, id, ack.Cores)
+	}
+	if !ack.OK {
+		msg := strings.TrimSpace(ack.Error)
+		if msg == "" {
+			msg = verb + "被拒绝"
+		}
+		jsonErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	u := userFromCtx(r.Context())
+	db.AddAudit(s.DB, &u.ID, "agent."+typ, srv.Name+" "+core)
+	jsonOK(w, map[string]any{"ok": true, "core": core, "cores": ack.Cores})
 }
 
 func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {

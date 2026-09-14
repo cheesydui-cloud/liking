@@ -67,6 +67,49 @@ func detectedCores() []string {
 	return out
 }
 
+func normalizeAgentCore(name string) string {
+	n := strings.ToLower(strings.TrimSpace(name))
+	switch n {
+	case "sing-box", "singbox":
+		return "singbox"
+	case "mieru", "mita":
+		return "mita"
+	default:
+		return n
+	}
+}
+
+func knownAgentCore(name string) bool {
+	switch normalizeAgentCore(name) {
+	case "xray", "singbox", "mita":
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *Cores) Remove(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	name = normalizeAgentCore(name)
+	c.stopLocked(name)
+	if name == "mita" {
+		if bin := lookBin("mita"); bin != "" {
+			_ = exec.Command(bin, "stop").Run()
+		}
+	}
+	delete(c.last, name)
+	delete(c.lastReq, name)
+	delete(c.crashes, name)
+	if name == "xray" {
+		c.xrayBin = ""
+	}
+	_ = os.Remove(filepath.Join(c.dir, name+".json"))
+	if name == "mita" {
+		_ = os.Remove(filepath.Join(c.dir, "mita.json"))
+	}
+}
+
 func (c *Cores) Apply(cfg wsproto.ApplyConfig) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

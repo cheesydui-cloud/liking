@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, SearchInput } from '../components/ui'
+import { nameTone } from '../lib/display'
 
 const emptyForm = { name: '', gb: '', direction: 'oneway', inbound_ids: [], multipliers: {} }
 
@@ -55,25 +56,20 @@ function packageNodes(p, ins, servers) {
   }
 }
 
-function PackageNodesCell({ p, ins, servers }) {
-  const meta = packageNodes(p, ins, servers)
-  if (meta.all) return <span className="text-ink-mut">全部</span>
-  const tip = meta.names.length ? meta.names.join('、') : undefined
-  return (
-    <div title={tip}>
-      <span className="tabular-nums font-mono text-[12px]">{meta.count}</span>
-      {meta.servers.length ? (
-        <div className="text-[11px] text-ink-mut truncate mt-0.5">{meta.servers.join(' · ')}</div>
-      ) : null}
-    </div>
-  )
-}
-
 function trafficLabel(bytes) {
   if (!bytes) return '不限'
   const gb = bytes / 1024 / 1024 / 1024
   const n = Math.round(gb * 1000) / 1000
   return `${n} GB`
+}
+
+function Metric({ label, value }) {
+  return (
+    <div className="metric">
+      <span className="metric-k">{label}</span>
+      <span className="metric-v">{value}</span>
+    </div>
+  )
 }
 
 export default function Packages() {
@@ -244,64 +240,48 @@ export default function Packages() {
           } />
         </div>
       ) : (
-        <div className="card overflow-hidden">
-          <div className="hidden md:block table-wrap">
-            <table className="data">
-              <thead><tr><th>名称</th><th>流量</th><th>计费</th><th>节点</th><th>用户</th><th></th></tr></thead>
-              <tbody>
-                {list.map(p => {
-                  const n = users.filter(u => u.role !== 'admin' && u.package_id === p.id).length
-                  return (
-                    <tr key={p.id}>
-                      <td className="font-medium">{p.name}</td>
-                      <td className="tabular-nums font-mono text-[12px]">{trafficLabel(p.traffic_bytes)}</td>
-                      <td>{p.direction === 'twoway' ? '双向' : '单向'}</td>
-                      <td className="max-w-[14rem]"><PackageNodesCell p={p} ins={ins} servers={servers} /></td>
-                      <td className="tabular-nums font-mono text-[12px]">{n}</td>
-                      <td className="whitespace-nowrap">
-                        <div className="icon-row">
-                          <button type="button" className="icon-btn" onClick={() => startEdit(p)} aria-label="编辑套餐" title="编辑">
-                            <Icon name="pencil" size={14} />
-                          </button>
-                          <MoreMenu iconOnly items={[
-                            { label: '删除', danger: true, onSelect: () => del(p.id) },
-                          ]} />
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="md:hidden divide-y" style={{ borderColor: 'var(--color-line-soft)' }}>
-            {list.map(p => {
-              const n = users.filter(u => u.role !== 'admin' && u.package_id === p.id).length
-              const meta = packageNodes(p, ins, servers)
-              const nodeLine = meta.all ? '全部节点' : `${meta.count} 节点${meta.servers.length ? ` · ${meta.servers.join(' · ')}` : ''}`
-              return (
-                <div key={p.id} className="px-3.5 py-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">{p.name}</div>
-                      <div className="text-[12px] text-ink-mut mt-0.5">
-                        {trafficLabel(p.traffic_bytes)} / {p.direction === 'twoway' ? '双向' : '单向'} / {n} 用户
+        <div className="machine-grid">
+          {list.map(p => {
+            const n = users.filter(u => u.role !== 'admin' && u.package_id === p.id).length
+            const meta = packageNodes(p, ins, servers)
+            const nodeLine = meta.all ? '全部节点' : `${meta.count} 个节点`
+            const nodeTip = meta.names.length ? meta.names.join('、') : (meta.servers.join(' · ') || undefined)
+            return (
+              <div key={p.id} className="machine is-pkg">
+                <div className="machine-head">
+                  <div className="min-w-0 flex-1">
+                    <div className="machine-title">
+                      <span className={`machine-name truncate is-${nameTone(p.id)}`}>{p.name}</span>
+                    </div>
+                    {meta.servers.length ? (
+                      <div className="machine-host">
+                        <span className="machine-host-addr" title={nodeTip}>{meta.servers.join(' · ')}</span>
                       </div>
-                      <div className="text-[12px] text-ink-mut mt-0.5 truncate" title={meta.names.join('、')}>{nodeLine}</div>
-                    </div>
-                    <div className="icon-row shrink-0">
-                      <button type="button" className="icon-btn" onClick={() => startEdit(p)} aria-label="编辑套餐" title="编辑">
-                        <Icon name="pencil" size={14} />
-                      </button>
-                      <MoreMenu iconOnly items={[
-                        { label: '删除', danger: true, onSelect: () => del(p.id) },
-                      ]} />
-                    </div>
+                    ) : null}
+                  </div>
+                  <div className="machine-toolbar">
+                    <button type="button" className="icon-btn" onClick={() => startEdit(p)} aria-label="编辑套餐" title="编辑">
+                      <Icon name="pencil" size={14} />
+                    </button>
+                    <MoreMenu iconOnly items={[
+                      { label: '编辑', onSelect: () => startEdit(p) },
+                      { label: '删除', danger: true, onSelect: () => del(p.id) },
+                    ]} />
                   </div>
                 </div>
-              )
-            })}
-          </div>
+                <div className="machine-metrics">
+                  <Metric label="流量" value={trafficLabel(p.traffic_bytes)} />
+                  <Metric label="计费" value={p.direction === 'twoway' ? '双向' : '单向'} />
+                  <Metric label="节点" value={meta.all ? '全部' : String(meta.count)} />
+                  <Metric label="用户" value={String(n)} />
+                </div>
+                <div className="machine-foot">
+                  <span className="text-[11px] font-mono text-ink-mut truncate" title={nodeTip}>{nodeLine}</span>
+                  <button type="button" className="row-act" onClick={() => startEdit(p)}>编辑</button>
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
       <Modal open={formOpen} title={editId ? '编辑套餐' : '新建套餐'} onClose={closeForm} size="lg" footer={

@@ -74,6 +74,7 @@ type agentConn struct {
 	loadMilli    int64
 	conns        int
 	coresRunning string
+	caps         []string
 }
 
 func (a *agentConn) nextID() string {
@@ -130,6 +131,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		writeCh:  make(chan []byte, 16),
 		closed:   make(chan struct{}),
 		pending:  map[string]chan json.RawMessage{},
+		caps:     append([]string{}, hello.Caps...),
 	}
 	h.registerConn(ac)
 	defer h.unregisterConn(ac)
@@ -270,7 +272,7 @@ func (h *Hub) readerLoop(parent context.Context, ac *agentConn) {
 			}
 			h.noteLive(ac, st)
 			h.applyStats(st.Samples)
-		case wsproto.TypeApplyAck, wsproto.TypeHelloAck, wsproto.TypeUpgradeAck, wsproto.TypeUninstallAck:
+		case wsproto.TypeApplyAck, wsproto.TypeHelloAck, wsproto.TypeUpgradeAck, wsproto.TypeUninstallAck, wsproto.TypeEnsureCoreAck, wsproto.TypeRemoveCoreAck:
 			ac.dispatchAck(env)
 		default:
 			log.Printf("hub: server %d unknown frame %q", ac.serverID, env.Type)
@@ -361,6 +363,24 @@ func (h *Hub) SendApply(serverID int64, cfg wsproto.ApplyConfig) error {
 		return fmt.Errorf("%s", msg)
 	}
 	return nil
+}
+
+func (h *Hub) HasCap(id int64, cap string) bool {
+	if cap == "" {
+		return false
+	}
+	h.mu.RLock()
+	ac, ok := h.conns[id]
+	h.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	for _, c := range ac.caps {
+		if c == cap {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Hub) ConnMeta(id int64) (osName, arch string, ok bool) {

@@ -397,10 +397,10 @@ export function MoreMenu({ label = '更多', items = [], disabled, iconOnly }) {
 
 export function SearchInput({ value, onChange, placeholder = '搜索…' }) {
   return (
-    <div className="relative flex-1 min-w-[12rem]">
-      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-mut" aria-hidden="true"><Icon name="search" size={14} /></span>
+    <div className="search-field">
+      <span className="search-field-icon" aria-hidden="true"><Icon name="search" size={14} /></span>
       <input
-        className="input-field pl-8"
+        className="input-field"
         type="search"
         name="q"
         autoComplete="off"
