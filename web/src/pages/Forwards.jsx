@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { peekList, putList } from '../lib/listCache'
 import { useToast, useDialog } from '../components/Layout'
@@ -8,8 +9,10 @@ import { parseShareURI } from '../lib/share'
 import {
   LAND_PROFILES, MAX_HOPS, inboundSettings, forwardKind, kindLabel, protoShort,
   formatSocks, hopText, hopProto, pathHops, landingText, usedPortsText, hopFromSaved,
+  relayPage, setRelayPage,
 } from '../lib/forwards'
-import { Badge, Empty, Field, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows } from '../components/ui'
+import { Badge, Empty, Field, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, Tabs } from '../components/ui'
+import MyForwards from './MyForwards'
 
 function emptyHop() {
   return { kind: 'panel', inbound_id: '', sk5_host: '', sk5_port: '1080', sk5_user: '', sk5_pass: '', uri: '' }
@@ -22,7 +25,7 @@ const emptyForm = {
   profile: 'vless-reality-vision',
   port: '',
   cert_id: '',
-  dest: 'www.microsoft.com:443',
+  dest: 'www.cloudflare.com:443',
   method: '2022-blake3-aes-256-gcm',
   transport: 'BOTH',
   dest_host: '',
@@ -116,7 +119,7 @@ function formFromInbound(inb) {
     profile: inb.profile === 'port-forward' ? 'vless-reality-vision' : inb.profile,
     port: inb.port,
     cert_id: inb.cert_id || '',
-    dest: st.dest || 'www.microsoft.com:443',
+    dest: st.dest || 'www.cloudflare.com:443',
     method: st.method || '2022-blake3-aes-256-gcm',
     transport: st.transport || 'BOTH',
     dest_host: st.dest_host || '',
@@ -137,7 +140,7 @@ function hopUsedIds(hops, except) {
   return s
 }
 
-export default function Forwards() {
+function ForwardsPanel() {
   const toast = useToast()
   const dialog = useDialog()
   const [servers, setServers] = useState(() => peekList('servers') ?? [])
@@ -183,7 +186,7 @@ export default function Forwards() {
     return m
   }, [servers])
 
-  const forwards = useMemo(() => list.filter(x => forwardKind(x)), [list])
+  const forwards = useMemo(() => list.filter(x => forwardKind(x) && relayPage(x) !== 'my'), [list])
   const landings = useMemo(
     () => list.filter(x => x.line_kind === 'direct' && LAND_PROFILES.includes(x.profile) && Number(x.id) !== Number(editId)),
     [list, editId],
@@ -258,7 +261,7 @@ export default function Forwards() {
       }
     }
     const existing = editId ? inboundSettings(byID.get(Number(editId))) : {}
-    const settings = { ...existing }
+    const settings = setRelayPage({ ...existing }, 'admin')
     const profile = f.profile
     if (isReality(profile) && String(f.dest || '').trim()) settings.dest = f.dest.trim()
     if (profile === 'ss2022') settings.method = f.method
@@ -379,14 +382,6 @@ export default function Forwards() {
 
   return (
     <div>
-      <PageHead
-        title="转发"
-        actions={
-          <button type="button" className="btn-primary" onClick={openCreate}>
-            <Icon name="plus" size={15} /> 新建转发
-          </button>
-        }
-      />
       {forwards.length > 0 ? (
         <div className="flex flex-col sm:flex-row gap-2 mb-3">
           <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索入口 / 落地 / 实例" />
@@ -395,6 +390,9 @@ export default function Forwards() {
             <option value="chain">链式</option>
             <option value="port">端口中转</option>
           </select>
+          <button type="button" className="btn-primary sm:ml-auto shrink-0" onClick={openCreate}>
+            <Icon name="plus" size={15} /> 新建转发
+          </button>
         </div>
       ) : null}
 
@@ -402,7 +400,11 @@ export default function Forwards() {
         {!ready ? (
           <SkeletonRows />
         ) : forwards.length === 0 ? (
-          <Empty title="还没有转发" hint="点右上角新建。链式按跳走；端口中转只把本机端口转到别人的 IP。" />
+          <Empty title="还没有转发" hint="链式按跳走；端口中转只把本机端口转到别人的 IP。" action={
+            <button type="button" className="btn-primary" onClick={openCreate}>
+              <Icon name="plus" size={15} /> 新建转发
+            </button>
+          } />
         ) : rows.length === 0 ? (
           <Empty title="没有匹配的转发" hint="换个关键词或类型。" />
         ) : (
@@ -673,6 +675,25 @@ export default function Forwards() {
           ) : null}
         </form>
       </Modal>
+    </div>
+  )
+}
+
+const forwardTabs = [
+  { id: 'relay', label: '中转' },
+  { id: 'forward', label: '转发' },
+]
+
+export default function Forwards() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requested = searchParams.get('tab')
+  const tab = forwardTabs.some(t => t.id === requested) ? requested : 'relay'
+  const goTab = (id) => setSearchParams(id === 'relay' ? {} : { tab: id }, { replace: true })
+  return (
+    <div>
+      <PageHead title="中转" />
+      <Tabs value={tab} onChange={goTab} items={forwardTabs} />
+      {tab === 'forward' ? <ForwardsPanel /> : <MyForwards embedded />}
     </div>
   )
 }

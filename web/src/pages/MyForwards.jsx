@@ -9,7 +9,7 @@ import { isDirectNode, nodeStatus } from '../lib/status'
 import { parseShareURI } from '../lib/share'
 import {
   LAND_PROFILES, inboundSettings, forwardKind, hopProto, pathHops, landingText,
-  usedPortsText, protoShort,
+  usedPortsText, protoShort, relayPage, setRelayPage,
 } from '../lib/forwards'
 import { Empty, Field, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows } from '../components/ui'
 
@@ -55,7 +55,7 @@ const emptyForm = {
   exit_uri: '',
 }
 
-export default function MyForwards() {
+export default function MyForwards({ embedded = false } = {}) {
   const toast = useToast()
   const dialog = useDialog()
   const [servers, setServers] = useState(() => peekList('servers') ?? [])
@@ -106,7 +106,11 @@ export default function MyForwards() {
     () => list.filter(x => isDirectNode(x) && LAND_PROFILES.includes(x.profile) && Number(x.id) !== Number(editId) && Number(x.id) !== Number(f.entry_id)),
     [list, editId, f.entry_id],
   )
-  const forwards = useMemo(() => list.filter(x => forwardKind(x) === 'chain'), [list])
+  const page = embedded ? 'admin' : 'my'
+  const forwards = useMemo(
+    () => list.filter(x => forwardKind(x) === 'chain' && relayPage(x) === page),
+    [list, page],
+  )
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -160,7 +164,7 @@ export default function MyForwards() {
   const bodyFromForm = () => {
     const template = editId ? byID.get(Number(editId)) : entryNode
     if (!template) return null
-    const settings = editId ? { ...inboundSettings(template) } : cloneEntrySettings(template)
+    const settings = setRelayPage(editId ? { ...inboundSettings(template) } : cloneEntrySettings(template), page)
     const body = {
       server_id: Number(template.server_id),
       name: String(f.name || '').trim() || `${entryNode?.name || template.name} → ${exitLabel}`,
@@ -341,18 +345,25 @@ export default function MyForwards() {
 
   return (
     <div>
-      <PageHead
-        title="中转"
-        desc="只做链式。端口中转在管理页「转发」。进页会测一次延迟，之后记住这次结果。"
-        actions={
-          <button type="button" className="btn-primary" onClick={openCreate}>
-            <Icon name="plus" size={15} /> 增加中转
-          </button>
-        }
-      />
+      {embedded ? null : (
+        <PageHead
+          title="中转"
+          desc="只做链式。端口中转在管理页「中转」。进页会测一次延迟，之后记住这次结果。"
+          actions={
+            <button type="button" className="btn-primary" onClick={openCreate}>
+              <Icon name="plus" size={15} /> 增加中转
+            </button>
+          }
+        />
+      )}
       {forwards.length > 0 ? (
         <div className="flex flex-col sm:flex-row gap-2 mb-3">
           <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索入口 / 出口 / 实例" />
+          {embedded ? (
+            <button type="button" className="btn-primary sm:ml-auto shrink-0" onClick={openCreate}>
+              <Icon name="plus" size={15} /> 增加中转
+            </button>
+          ) : null}
         </div>
       ) : null}
 

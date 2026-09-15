@@ -14,7 +14,7 @@
 - 用户 / 套餐（一人一套餐；套餐必须勾选节点，不选则没有节点；列表显示节点数量和机器名）；到期或超量从内核配置摘掉客户端。Agent 采集 Xray / AnyTLS / Mieru 用户流量；管理端「流量」按日、用户、节点统计，计费按套餐方向和节点倍率
 - 开户随机密码、用户编辑（用户名 / 套餐 / 到期 / 流量 / 登录密码）、流量进度、订阅二维码 / Clash·sing-box 导入
 - 节点页「复制」给出协议链接（VLESS `vless://`，Mieru 为小火箭 `mierus://…?udp=&port=&profile=default#节点名`）。「参数」查看公钥 / short_id
-- 链式转发：业务 → 转发，入口 → 落地。落地可以是本面板节点、SK5，或 IP+端口（dokodemo-door，不进订阅）。**Mieru / AnyTLS 不能当链式落地**；Mieru 可以直出，也可以当链式入口
+- 链式转发：业务 → 中转，入口 → 落地。落地可以是本面板节点、SK5，或 IP+端口（dokodemo-door，不进订阅）。**Mieru / AnyTLS 不能当链式落地**；Mieru 可以直出，也可以当链式入口
 - 管理端：侧栏分组、列表优先、弹窗创建/编辑（对照妙妙屋的操作习惯，不搬偷自己 / Nginx / TG / 十二套模板）
 
 ## 一键安装面板
@@ -56,7 +56,7 @@ liking-upgrade
 指定版本：
 
 ```bash
-liking-upgrade --release v0.1.62
+liking-upgrade --release v0.2.0
 ```
 
 只更新安装脚本本身：

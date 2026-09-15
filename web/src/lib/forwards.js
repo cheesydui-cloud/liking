@@ -20,6 +20,18 @@ export function forwardKind(inb) {
   return ''
 }
 
+// admin = 管理页中转；my = 用户页中转。未标记的旧数据算管理页。
+export function relayPage(inb) {
+  return inboundSettings(inb).relay_page === 'my' ? 'my' : 'admin'
+}
+
+export function setRelayPage(settings, page) {
+  const st = { ...(settings || {}) }
+  if (page === 'my') st.relay_page = 'my'
+  else st.relay_page = 'admin'
+  return st
+}
+
 export function kindLabel(k) {
   if (k === 'chain') return '链式'
   if (k === 'port') return '端口'

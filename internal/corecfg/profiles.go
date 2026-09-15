@@ -24,7 +24,7 @@ const (
 	CoreSingbox = "singbox"
 	CoreMita    = "mita"
 
-	DefaultRealityDest = "www.microsoft.com:443"
+	DefaultRealityDest = "www.cloudflare.com:443"
 )
 
 type Meta struct {

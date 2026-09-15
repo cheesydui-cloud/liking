@@ -10,11 +10,11 @@ import { peekList, putList } from '../lib/listCache'
 import { Badge, Empty, Field, FilterTabs, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, StatusWord, fmtBytes, fmtDateShort } from '../components/ui'
 
 const DEST_PRESETS = [
-  'www.microsoft.com:443',
-  'www.apple.com:443',
-  'dl.google.com:443',
   'www.cloudflare.com:443',
+  'www.microsoft.com:443',
+  'dl.google.com:443',
   'www.samsung.com:443',
+  'www.apple.com:443',
 ]
 
 const FINGERPRINTS = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'qq', 'random', 'randomized']
@@ -22,7 +22,7 @@ const FINGERPRINTS = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', '
 const emptyLine = {
   server_id: 0, name: '', profile: 'vless-reality-vision', port: '', listen: '0.0.0.0',
   line_kind: 'direct', cert_id: 0, enabled: true,
-  dest: 'www.microsoft.com:443', sni: '', path: '', host: '', mode: 'auto',
+  dest: 'www.cloudflare.com:443', sni: '', path: '', host: '', mode: 'auto',
   method: '2022-blake3-aes-256-gcm', transport: 'BOTH',
   fingerprint: 'chrome', short_ids: '', xver: 0, spider_x: '',
   min_version: '1.3', alpn: 'h2,http/1.1', reject_unknown_sni: true,
@@ -160,7 +160,7 @@ function formFromInbound(inb) {
     line_kind: 'direct',
     cert_id: inb.cert_id || 0,
     enabled: inb.enabled !== false,
-    dest: st.dest || 'www.microsoft.com:443',
+    dest: st.dest || 'www.cloudflare.com:443',
     sni: names || st.sni || '',
     path: st.path || '',
     host: st.host || '',
@@ -400,7 +400,7 @@ export default function Nodes() {
     <div>
       <PageHead
         title="节点"
-        desc="按实例分组。链式和端口中转在转发里。"
+        desc="按实例分组。链式和端口中转在中转里。"
         actions={
           servers.length > 0 ? (
             <button type="button" className="btn-primary" onClick={() => openCreateLine()}>
@@ -586,7 +586,7 @@ export default function Nodes() {
             <>
               <div>
                 <Field label="伪装目标 dest" hint="探测时会看到这个网站。必须是别人的站点，不能填本机。">
-                  <input className="input-field" value={f.dest} onChange={e => setF({ ...f, dest: e.target.value })} placeholder="www.microsoft.com:443" />
+                  <input className="input-field" value={f.dest} onChange={e => setF({ ...f, dest: e.target.value })} placeholder="www.cloudflare.com:443" />
                 </Field>
                 <div className="flex flex-wrap gap-1.5 mt-1.5">
                   {DEST_PRESETS.map(d => (
@@ -600,7 +600,7 @@ export default function Nodes() {
                 </div>
               </div>
               <Field label="SNI / serverNames" hint="客户端校验用。留空则用 dest 的域名。可逗号分隔多个。">
-                <input className="input-field" value={f.sni} onChange={e => setF({ ...f, sni: e.target.value })} placeholder={destHostName || 'www.microsoft.com'} />
+                <input className="input-field" value={f.sni} onChange={e => setF({ ...f, sni: e.target.value })} placeholder={destHostName || 'www.cloudflare.com'} />
               </Field>
             </>
           )}
