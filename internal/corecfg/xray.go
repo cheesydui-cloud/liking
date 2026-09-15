@@ -7,7 +7,7 @@ import (
 	"liking/internal/db"
 )
 
-func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound, apiPort int) (map[string]any, error) {
+func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound, apiPort int, speeds map[int64]int64) (map[string]any, error) {
 	var ins []any
 	var outs []any
 	var rules []any
@@ -30,6 +30,9 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 	})
 
 	used := false
+	limitOuts := map[uint32]struct{}{}
+	var speedRules []any
+	var directRules []any
 	for _, in := range inbounds {
 		if in.Core != CoreXray || !in.Enabled {
 			continue
@@ -55,11 +58,29 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 			rules = append(rules, map[string]any{
 				"type": "field", "inboundTag": []string{tag}, "outboundTag": obTag,
 			})
-		} else {
-			rules = append(rules, map[string]any{
-				"type": "field", "inboundTag": []string{tag}, "outboundTag": "direct",
-			})
+			continue
 		}
+		if directThrottle(in) {
+			for _, c := range clients[in.ID] {
+				mark, ok := clientSpeedMark(c, speeds)
+				if !ok {
+					continue
+				}
+				if _, seen := limitOuts[mark]; !seen {
+					limitOuts[mark] = struct{}{}
+					outs = append(outs, xrayLimitFreedom(mark))
+				}
+				speedRules = append(speedRules, map[string]any{
+					"type":        "field",
+					"inboundTag":  []string{tag},
+					"user":        []string{c.Email},
+					"outboundTag": limitTag(mark),
+				})
+			}
+		}
+		directRules = append(directRules, map[string]any{
+			"type": "field", "inboundTag": []string{tag}, "outboundTag": "direct",
+		})
 	}
 
 	// Socks inbounds used as Mieru chain egress (mita -> local xray -> landing).
@@ -86,6 +107,9 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 		})
 	}
 
+	rules = append(rules, speedRules...)
+	rules = append(rules, directRules...)
+
 	if !used {
 		return nil, nil
 	}
@@ -110,6 +134,16 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 func inboundTag(id int64) string  { return fmt.Sprintf("in-%d", id) }
 func outboundTag(id int64) string { return fmt.Sprintf("ob-%d", id) }
 func socksTag(id int64) string    { return fmt.Sprintf("socks-%d", id) }
+
+func xrayLimitFreedom(mark uint32) map[string]any {
+	return map[string]any{
+		"tag":      limitTag(mark),
+		"protocol": "freedom",
+		"streamSettings": map[string]any{
+			"sockopt": map[string]any{"mark": mark},
+		},
+	}
+}
 
 func xrayInbound(in *db.Inbound, clients []*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound) (map[string]any, error) {
 	st := ParseSettings(in.Settings)

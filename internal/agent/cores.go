@@ -125,10 +125,11 @@ func (c *Cores) Apply(cfg wsproto.ApplyConfig) error {
 	take(c.applyJSON("xray", "xray.json", cfg.Xray, lookBin("xray"), []string{"run", "-c"}))
 	take(c.applyJSON("singbox", "singbox.json", cfg.Singbox, lookBin("sing-box", "singbox"), []string{"run", "-c"}))
 	take(c.applyMita(cfg.Mita))
-	if len(errs) == 0 {
-		return nil
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
-	return fmt.Errorf("%s", strings.Join(errs, "; "))
+	applySpeedLimits(cfg.SpeedLimits)
+	return nil
 }
 
 func hasCfg(raw json.RawMessage) bool {
@@ -478,6 +479,7 @@ func (c *Cores) StopAll() {
 	if bin := lookBin("mita"); bin != "" {
 		_ = exec.Command(bin, "stop").Run()
 	}
+	applySpeedLimits(nil)
 }
 
 func (c *Cores) Close() {

@@ -1102,6 +1102,7 @@ func TestUserPasswordAndExtend(t *testing.T) {
 		"package_id":    pkg.ID,
 		"traffic_limit": int64(5 * 1024 * 1024 * 1024),
 		"password":      "newpass12",
+		"speed_limit":   50,
 	})
 	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/users/"+strconv.FormatInt(created.User.ID, 10), bytes.NewReader(edit))
 	if err != nil {
@@ -1121,10 +1122,13 @@ func TestUserPasswordAndExtend(t *testing.T) {
 			UsedUp       int64  `json:"used_up"`
 			UsedDown     int64  `json:"used_down"`
 			PackageID    *int64 `json:"package_id"`
+			SpeedLimit   int64  `json:"speed_limit"`
+			NetUpBps     int64  `json:"net_up_bps"`
+			NetDownBps   int64  `json:"net_down_bps"`
 		} `json:"user"`
 	}
 	decodeRes(t, res, &edited)
-	if edited.User.Username != "robert" || edited.User.Remark != "vip" || edited.User.TrafficLimit == nil || *edited.User.TrafficLimit != 5*1024*1024*1024 {
+	if edited.User.Username != "robert" || edited.User.Remark != "vip" || edited.User.TrafficLimit == nil || *edited.User.TrafficLimit != 5*1024*1024*1024 || edited.User.SpeedLimit != 50 {
 		t.Fatalf("edit %+v", edited.User)
 	}
 	if edited.User.Password != "newpass12" {
@@ -1133,6 +1137,22 @@ func TestUserPasswordAndExtend(t *testing.T) {
 	if edited.User.UsedUp != 111 || edited.User.UsedDown != 222 {
 		t.Fatalf("same package wiped traffic %+v", edited.User)
 	}
+	badSpeed, _ := json.Marshal(map[string]any{"speed_limit": 10001})
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/users/"+strconv.FormatInt(created.User.ID, 10), bytes.NewReader(badSpeed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode == 200 {
+		t.Fatal("speed_limit 10001 should fail")
+	}
+	io.ReadAll(res.Body)
+	res.Body.Close()
+
 	keep, _ := json.Marshal(map[string]any{"enabled": true})
 	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/users/"+strconv.FormatInt(created.User.ID, 10), bytes.NewReader(keep))
 	if err != nil {

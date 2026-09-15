@@ -3,7 +3,7 @@ import { api } from '../lib/api'
 import { peekList, putList } from '../lib/listCache'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, DayBars, Empty, Field, FilterTabs, Icon, Meter, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, billedBytes, fmtBytes, fmtDateShort } from '../components/ui'
+import { Badge, DayBars, Empty, Field, FilterTabs, Icon, Meter, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, billedBytes, fmtBps, fmtBytes, fmtDateShort } from '../components/ui'
 import { SubPanel } from '../components/SubPanel'
 import { NodePreviewList } from '../components/NodePreview'
 
@@ -54,15 +54,24 @@ function bytesFromGB(s) {
   return Math.round(n * 1024 * 1024 * 1024)
 }
 
-const emptyForm = { username: '', password: '', remark: '', package_id: '', days: 30, expires: '', traffic_gb: '', enabled: true, traffic_reset_day: 0 }
+const emptyForm = { username: '', password: '', remark: '', package_id: '', days: 30, expires: '', traffic_gb: '', enabled: true, traffic_reset_day: 0, speed_mbps: '' }
+
+function speedLimitBps(mbps) {
+  const n = Number(mbps) || 0
+  if (n <= 0) return 0
+  return Math.round(n * 1_000_000 / 8)
+}
 
 function UserFlags({ u }) {
   if (u.role === 'admin') return null
-  if (u.expires_at && u.expires_at * 1000 < Date.now()) return <Badge tone="danger">到期</Badge>
-  if (u.traffic_cap > 0 && billedBytes(u) >= u.traffic_cap) return <Badge tone="danger">超量</Badge>
-  if (u.quota_ratio >= 80) return <Badge tone="warn">{u.quota_ratio}%</Badge>
-  if (u.enabled === false) return <Badge tone="muted">停用</Badge>
-  return null
+  const flags = []
+  if (u.expires_at && u.expires_at * 1000 < Date.now()) flags.push(<Badge key="exp" tone="danger">到期</Badge>)
+  else if (u.traffic_cap > 0 && billedBytes(u) >= u.traffic_cap) flags.push(<Badge key="cap" tone="danger">超量</Badge>)
+  else if (u.quota_ratio >= 80) flags.push(<Badge key="q" tone="warn">{u.quota_ratio}%</Badge>)
+  else if (u.enabled === false) flags.push(<Badge key="off" tone="muted">停用</Badge>)
+  if (u.speed_limit > 0) flags.push(<Badge key="spd" tone="muted">{u.speed_limit} Mbps</Badge>)
+  if (!flags.length) return null
+  return flags
 }
 
 function cardDate(ts) {
@@ -88,6 +97,8 @@ function formatUserCard(u, pkgs = []) {
     const cap = u.traffic_cap || trafficCap(u, pkgs)
     if (cap > 0) lines.push(`流量：${fmtBytes(billedBytes(u))} / ${fmtBytes(cap)}`)
     else lines.push('流量：不限')
+    if (u.speed_limit > 0) lines.push(`限速：${u.speed_limit} Mbps`)
+    else lines.push('限速：不限')
   }
   if (u.sub_token) lines.push(`订阅：${origin}/api/sub/${u.sub_token}`)
   if (u.remark) lines.push(`备注：${u.remark}`)
@@ -102,9 +113,9 @@ function userTone(u) {
   return 'is-pkg'
 }
 
-function Metric({ label, value, danger, plain }) {
+function Metric({ label, value, danger, plain, tone }) {
   return (
-    <div className="metric">
+    <div className={`metric${tone ? ` is-${tone}` : ''}`}>
       <span className="metric-k">{label}</span>
       <span className={`metric-v${plain ? ' is-plain' : ''}${danger ? ' is-expired' : ''}`}>{value}</span>
     </div>
@@ -145,7 +156,13 @@ export default function Users() {
     } catch (e) { toast(e.message, 'error') }
     finally { setReady(true) }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    const t = setInterval(() => {
+      api.get('/users').then(a => setList(putList('users', a.users || []))).catch(() => {})
+    }, 5000)
+    return () => clearInterval(t)
+  }, [])
 
   const closeForm = () => {
     setFormOpen(false)
@@ -171,6 +188,7 @@ export default function Users() {
       traffic_gb: gbFromBytes(u.traffic_limit),
       enabled: u.enabled !== false,
       traffic_reset_day: u.traffic_reset_day || 0,
+      speed_mbps: u.speed_limit > 0 ? String(u.speed_limit) : '',
     })
     setFormOpen(true)
   }
@@ -200,6 +218,11 @@ export default function Users() {
         const to = pkgs.find(p => Number(p.id) === next)?.name || '新套餐'
         if (!(await dialog.confirm({ title: '更换套餐', message: `将从「${from}」换到「${to}」，已用流量会清零。` }))) return
       }
+      const speed = f.speed_mbps === '' ? 0 : Number(f.speed_mbps)
+      if (!Number.isFinite(speed) || speed < 0 || speed > 10000) {
+        toast('限速无效', 'error')
+        return
+      }
     }
     setBusy(true)
     try {
@@ -211,6 +234,7 @@ export default function Users() {
           expires_at: ymdToUnix(f.expires),
           traffic_limit: bytesFromGB(f.traffic_gb),
           traffic_reset_day: Number(f.traffic_reset_day) || 0,
+          speed_limit: f.speed_mbps === '' ? 0 : Math.round(Number(f.speed_mbps)),
         }
         if (!f.package_id) body.unbind_package = true
         else body.package_id = Number(f.package_id)
@@ -416,6 +440,9 @@ export default function Users() {
             const cap = u.traffic_cap || trafficCap(u, pkgs)
             const used = billedBytes(u)
             const expired = !!(u.expires_at && u.expires_at * 1000 < Date.now())
+            const capBps = speedLimitBps(u.speed_limit)
+            const upOver = capBps > 0 && (u.net_up_bps || 0) > capBps
+            const downOver = capBps > 0 && (u.net_down_bps || 0) > capBps
             return (
               <div key={u.id} className={`machine ${userTone(u)}`}>
                 <div className="machine-head">
@@ -453,6 +480,8 @@ export default function Users() {
                   <Metric label="到期" value={u.expires_at ? fmtDateShort(u.expires_at) : '不限期'} danger={expired} />
                   <Metric label="额度" value={cap > 0 ? fmtBytes(cap) : '不限'} />
                   <Metric label="计费" value={u.direction === 'twoway' ? '双向' : '单向'} plain />
+                  <Metric label="上行" value={fmtBps(u.net_up_bps)} tone={upOver ? undefined : 'up'} danger={upOver} />
+                  <Metric label="下行" value={fmtBps(u.net_down_bps)} tone={downOver ? undefined : 'down'} danger={downOver} />
                 </div>
                 <div className="machine-meter">
                   <Meter value={used} max={cap} />
@@ -512,6 +541,11 @@ export default function Users() {
           {editing && (
             <Field label="流量上限 GB" hint={f.traffic_gb === '' ? (selectedPkg?.traffic_bytes ? `留空跟随套餐 ${fmtBytes(selectedPkg.traffic_bytes)}` : '留空跟随套餐，0 为不限') : (Number(f.traffic_gb) === 0 ? '0 = 不限流量' : '覆盖套餐额度')}>
               <input className="input-field" type="number" min="0" step="0.1" placeholder="跟随套餐" value={f.traffic_gb} onChange={e => setF({ ...f, traffic_gb: e.target.value })} />
+            </Field>
+          )}
+          {editing && (
+            <Field label="限速 Mbps" hint={f.speed_mbps === '' || Number(f.speed_mbps) === 0 ? '0 或不填 = 不限。直连 Xray / AnyTLS 上下行同一上限；中转、Mieru、SK5 不节流' : '直连 Xray / AnyTLS 上下行同一上限；中转、Mieru、SK5 不节流'}>
+              <input className="input-field" type="number" min="0" max="10000" step="1" placeholder="不限" value={f.speed_mbps} onChange={e => setF({ ...f, speed_mbps: e.target.value })} />
             </Field>
           )}
           {editing && (

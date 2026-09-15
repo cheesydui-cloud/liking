@@ -49,13 +49,19 @@ type HelloAck struct {
 	Error    string `json:"error,omitempty"`
 }
 
+type SpeedLimit struct {
+	Mark uint32 `json:"mark"`
+	Mbps int64  `json:"mbps"`
+}
+
 type ApplyConfig struct {
-	Rev        string          `json:"rev"`
-	Xray       json.RawMessage `json:"xray,omitempty"`
-	Singbox    json.RawMessage `json:"singbox,omitempty"`
-	Mita       json.RawMessage `json:"mita,omitempty"`
-	XrayAPI    string          `json:"xray_api,omitempty"`
-	SingboxAPI string          `json:"singbox_api,omitempty"`
+	Rev         string          `json:"rev"`
+	Xray        json.RawMessage `json:"xray,omitempty"`
+	Singbox     json.RawMessage `json:"singbox,omitempty"`
+	Mita        json.RawMessage `json:"mita,omitempty"`
+	XrayAPI     string          `json:"xray_api,omitempty"`
+	SingboxAPI  string          `json:"singbox_api,omitempty"`
+	SpeedLimits []SpeedLimit    `json:"speed_limits,omitempty"`
 }
 
 type ApplyAck struct {

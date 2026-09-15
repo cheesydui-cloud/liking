@@ -38,6 +38,11 @@ func writeTimeoutFor(size int) time.Duration {
 	return d
 }
 
+type userLivePart struct {
+	up, down int64
+	at       time.Time
+}
+
 type Hub struct {
 	DB              *sql.DB
 	OnTrafficUpdate func(userID int64)
@@ -45,7 +50,13 @@ type Hub struct {
 
 	mu    sync.RWMutex
 	conns map[int64]*agentConn
+
+	userLiveMu sync.Mutex
+	userParts  map[int64]map[int64]userLivePart // userID -> serverID -> bps
+	userPartAt map[int64]time.Time              // serverID -> last stats time
 }
+
+const userLiveTTL = 15 * time.Second
 
 func NewHub(d *sql.DB) *Hub {
 	return &Hub{DB: d, conns: map[int64]*agentConn{}}
@@ -178,8 +189,11 @@ func (h *Hub) unregisterConn(ac *agentConn) {
 	h.mu.Lock()
 	if cur, ok := h.conns[ac.serverID]; ok && cur == ac {
 		delete(h.conns, ac.serverID)
+		h.mu.Unlock()
+		h.clearUserLive(ac.serverID)
+	} else {
+		h.mu.Unlock()
 	}
-	h.mu.Unlock()
 	ac.signalClose()
 	_ = db.MarkServerOffline(h.DB, ac.serverID)
 }
@@ -192,6 +206,7 @@ func (h *Hub) DropAll() {
 		delete(h.conns, id)
 	}
 	h.mu.Unlock()
+	h.clearAllUserLive()
 	for _, ac := range conns {
 		ac.signalClose()
 		_ = ac.ws.Close(websocket.StatusGoingAway, "panel restore")
@@ -210,6 +225,7 @@ func (h *Hub) Drop(id int64) {
 	}
 	ac.signalClose()
 	_ = ac.ws.Close(websocket.StatusGoingAway, "server deleted")
+	h.clearUserLive(id)
 	_ = db.MarkServerOffline(h.DB, id)
 }
 
@@ -221,6 +237,7 @@ func (h *Hub) Close() {
 	}
 	h.conns = map[int64]*agentConn{}
 	h.mu.Unlock()
+	h.clearAllUserLive()
 	for _, ac := range conns {
 		ac.signalClose()
 		_ = ac.ws.Close(websocket.StatusGoingAway, "panel shutting down")
@@ -271,7 +288,7 @@ func (h *Hub) readerLoop(parent context.Context, ac *agentConn) {
 				_ = db.SetServerCores(h.DB, ac.serverID, st.Cores)
 			}
 			h.noteLive(ac, st)
-			h.applyStats(st.Samples)
+			h.applyStats(ac.serverID, st.Samples)
 		case wsproto.TypeApplyAck, wsproto.TypeHelloAck, wsproto.TypeUpgradeAck, wsproto.TypeUninstallAck, wsproto.TypeEnsureCoreAck, wsproto.TypeRemoveCoreAck, wsproto.TypeProbeAck:
 			ac.dispatchAck(env)
 		default:
@@ -469,9 +486,12 @@ func (h *Hub) noteLive(ac *agentConn, st wsproto.Stats) {
 	ac.lastStatsAt = now
 }
 
-func (h *Hub) applyStats(samples []wsproto.Sample) {
+type liveBytes struct{ up, down int64 }
+
+func (h *Hub) applyStats(serverID int64, samples []wsproto.Sample) {
 	day := db.ClockDay(h.DB)
 	touched := map[int64]struct{}{}
+	live := map[int64]liveBytes{}
 	var items []db.TrafficWrite
 	for _, s := range samples {
 		if s.Email == "" || strings.HasPrefix(s.Email, "relay.") {
@@ -485,6 +505,10 @@ func (h *Hub) applyStats(samples []wsproto.Sample) {
 		if up == 0 && down == 0 {
 			continue
 		}
+		a := live[c.UserID]
+		a.up += up
+		a.down += down
+		live[c.UserID] = a
 		in, err := db.GetInbound(h.DB, c.InboundID)
 		if err != nil {
 			continue
@@ -511,6 +535,7 @@ func (h *Hub) applyStats(samples []wsproto.Sample) {
 		})
 		touched[u.ID] = struct{}{}
 	}
+	h.noteUserLive(serverID, live)
 	if err := db.AddTrafficBatch(h.DB, day, items); err != nil {
 		log.Printf("hub: traffic batch: %v", err)
 		return
@@ -520,6 +545,81 @@ func (h *Hub) applyStats(samples []wsproto.Sample) {
 			h.OnTrafficUpdate(uid)
 		}
 	}
+}
+
+func (h *Hub) noteUserLive(serverID int64, live map[int64]liveBytes) {
+	now := time.Now()
+	h.userLiveMu.Lock()
+	defer h.userLiveMu.Unlock()
+	if h.userParts == nil {
+		h.userParts = map[int64]map[int64]userLivePart{}
+	}
+	if h.userPartAt == nil {
+		h.userPartAt = map[int64]time.Time{}
+	}
+	dt := 5.0
+	if prev, ok := h.userPartAt[serverID]; ok {
+		d := now.Sub(prev).Seconds()
+		if d > 0.2 && d < 60 {
+			dt = d
+		}
+	}
+	h.userPartAt[serverID] = now
+	for uid, parts := range h.userParts {
+		if _, ok := live[uid]; ok {
+			continue
+		}
+		delete(parts, serverID)
+		if len(parts) == 0 {
+			delete(h.userParts, uid)
+		}
+	}
+	for uid, b := range live {
+		parts := h.userParts[uid]
+		if parts == nil {
+			parts = map[int64]userLivePart{}
+			h.userParts[uid] = parts
+		}
+		parts[serverID] = userLivePart{
+			up:   int64(float64(b.up) / dt),
+			down: int64(float64(b.down) / dt),
+			at:   now,
+		}
+	}
+}
+
+func (h *Hub) clearUserLive(serverID int64) {
+	h.userLiveMu.Lock()
+	defer h.userLiveMu.Unlock()
+	delete(h.userPartAt, serverID)
+	for uid, parts := range h.userParts {
+		delete(parts, serverID)
+		if len(parts) == 0 {
+			delete(h.userParts, uid)
+		}
+	}
+}
+
+func (h *Hub) clearAllUserLive() {
+	h.userLiveMu.Lock()
+	h.userParts = nil
+	h.userPartAt = nil
+	h.userLiveMu.Unlock()
+}
+
+func (h *Hub) UserLive(id int64) (up, down int64, ok bool) {
+	h.userLiveMu.Lock()
+	defer h.userLiveMu.Unlock()
+	now := time.Now()
+	for _, p := range h.userParts[id] {
+		if now.Sub(p.at) > userLiveTTL {
+			continue
+		}
+		up += p.up
+		down += p.down
+		ok = true
+	}
+	return
 }
 
 func readEnvelope(ctx context.Context, ws *websocket.Conn, timeout time.Duration) (wsproto.Envelope, error) {

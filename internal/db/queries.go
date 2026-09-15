@@ -97,8 +97,8 @@ func GetUser(d *sql.DB, id int64) (*User, error) {
 	var en int
 	var tlim sql.NullInt64
 	var totpEn int
-	err := d.QueryRow(`SELECT id,username,password_hash,role,remark,enabled,expires_at,traffic_limit,used_up,used_down,cycle_start,sub_token,created_at,totp_secret,totp_enabled,traffic_reset_day,password_plain FROM users WHERE id=?`, id).
-		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Remark, &en, &u.ExpiresAt, &tlim, &u.UsedUp, &u.UsedDown, &u.CycleStart, &u.SubToken, &u.CreatedAt, &u.TOTPSecret, &totpEn, &u.TrafficResetDay, &u.PasswordPlain)
+	err := d.QueryRow(`SELECT id,username,password_hash,role,remark,enabled,expires_at,traffic_limit,used_up,used_down,cycle_start,sub_token,created_at,totp_secret,totp_enabled,traffic_reset_day,password_plain,speed_limit FROM users WHERE id=?`, id).
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Remark, &en, &u.ExpiresAt, &tlim, &u.UsedUp, &u.UsedDown, &u.CycleStart, &u.SubToken, &u.CreatedAt, &u.TOTPSecret, &totpEn, &u.TrafficResetDay, &u.PasswordPlain, &u.SpeedLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -204,8 +204,8 @@ func UpdateUser(d *sql.DB, u *User) error {
 	if u.Enabled {
 		en = 1
 	}
-	_, err := d.Exec(`UPDATE users SET username=?, remark=?, enabled=?, expires_at=?, traffic_limit=?, traffic_reset_day=? WHERE id=?`,
-		u.Username, u.Remark, en, u.ExpiresAt, u.TrafficLimit, u.TrafficResetDay, u.ID)
+	_, err := d.Exec(`UPDATE users SET username=?, remark=?, enabled=?, expires_at=?, traffic_limit=?, traffic_reset_day=?, speed_limit=? WHERE id=?`,
+		u.Username, u.Remark, en, u.ExpiresAt, u.TrafficLimit, u.TrafficResetDay, u.SpeedLimit, u.ID)
 	return err
 }
 

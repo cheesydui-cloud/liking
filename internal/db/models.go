@@ -25,6 +25,9 @@ type User struct {
 	TOTPSecret      string `json:"-"`
 	TrafficResetDay int    `json:"traffic_reset_day"`
 	QuotaRatio      int    `json:"quota_ratio,omitempty"`
+	SpeedLimit      int64  `json:"speed_limit"`
+	NetUpBps        int64  `json:"net_up_bps"`
+	NetDownBps      int64  `json:"net_down_bps"`
 }
 
 type Server struct {

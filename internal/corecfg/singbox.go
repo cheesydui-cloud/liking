@@ -6,13 +6,14 @@ import (
 	"liking/internal/db"
 )
 
-func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound, apiPort int) (map[string]any, error) {
+func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound, apiPort int, speeds map[int64]int64) (map[string]any, error) {
 	var ins []any
 	var outs []any
 	used := false
 
 	outs = append(outs, map[string]any{"type": "direct", "tag": "direct"})
 
+	limitOuts := map[uint32]struct{}{}
 	for _, in := range inbounds {
 		if in.Core != CoreSingbox || !in.Enabled {
 			continue
@@ -32,6 +33,25 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 				return nil, err
 			}
 			outs = append(outs, obs...)
+			continue
+		}
+		if !directThrottle(in) {
+			continue
+		}
+		for _, c := range clients[in.ID] {
+			mark, ok := clientSpeedMark(c, speeds)
+			if !ok {
+				continue
+			}
+			if _, seen := limitOuts[mark]; seen {
+				continue
+			}
+			limitOuts[mark] = struct{}{}
+			outs = append(outs, map[string]any{
+				"type":         "direct",
+				"tag":          limitTag(mark),
+				"routing_mark": mark,
+			})
 		}
 	}
 
@@ -39,9 +59,10 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 		return nil, nil
 	}
 
-	// Route: each chained sing-box inbound uses a detour outbound.
+	// Chain inbound rules first so a limited user is not stolen onto freedom.
 	routeRules := []any{}
 	final := "direct"
+	var speedRules []any
 	for _, in := range inbounds {
 		if in.Core != CoreSingbox || !in.Enabled {
 			continue
@@ -51,8 +72,25 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 				"inbound":  []string{inboundTag(in.ID)},
 				"outbound": outboundTag(in.ID),
 			})
+			continue
+		}
+		if !directThrottle(in) {
+			continue
+		}
+		tag := inboundTag(in.ID)
+		for _, c := range clients[in.ID] {
+			mark, ok := clientSpeedMark(c, speeds)
+			if !ok {
+				continue
+			}
+			speedRules = append(speedRules, map[string]any{
+				"inbound":   []string{tag},
+				"auth_user": []string{c.Email},
+				"outbound":  limitTag(mark),
+			})
 		}
 	}
+	routeRules = append(routeRules, speedRules...)
 
 	cfg := map[string]any{
 		"log":       map[string]any{"level": "warn"},

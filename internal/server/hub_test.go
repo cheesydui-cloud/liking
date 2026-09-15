@@ -87,3 +87,79 @@ func TestNoteLive(t *testing.T) {
 		t.Fatalf("sample bps up=%d down=%d", ac2.upBps, ac2.downBps)
 	}
 }
+
+func TestUserLiveBps(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	tok, err := db.RandomHex(8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := db.CreateServer(d, "n1", "1.1.1.1", tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := db.CreateInbound(d, &db.Inbound{
+		ServerID: srv.ID, Name: "a", Profile: "vless-reality", Protocol: "vless",
+		Network: "tcp", Security: "reality", Core: "xray", Listen: "0.0.0.0",
+		Port: 443, Enabled: true, Settings: "{}", LineKind: "direct",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := db.CreateUser(d, "bob", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	email := db.EmailFor(u.ID, in.ID)
+	if err := db.UpsertClient(d, &db.Client{
+		InboundID: in.ID, UserID: u.ID, Email: email, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(d)
+	h.applyStats(srv.ID, []wsproto.Sample{{Email: email, Up: 10000, Down: 20000}})
+	up, down, ok := h.UserLive(u.ID)
+	if !ok || up != 2000 || down != 4000 {
+		t.Fatalf("first tick up=%d down=%d ok=%v", up, down, ok)
+	}
+
+	tok2, _ := db.RandomHex(8)
+	srv2, err := db.CreateServer(d, "n2", "2.2.2.2", tok2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in2, err := db.CreateInbound(d, &db.Inbound{
+		ServerID: srv2.ID, Name: "b", Profile: "vless-reality", Protocol: "vless",
+		Network: "tcp", Security: "reality", Core: "xray", Listen: "0.0.0.0",
+		Port: 443, Enabled: true, Settings: "{}", LineKind: "direct",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	email2 := db.EmailFor(u.ID, in2.ID)
+	if err := db.UpsertClient(d, &db.Client{
+		InboundID: in2.ID, UserID: u.ID, Email: email2, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.applyStats(srv2.ID, []wsproto.Sample{{Email: email2, Up: 5000, Down: 5000}})
+	up, down, ok = h.UserLive(u.ID)
+	if !ok || up != 3000 || down != 5000 {
+		t.Fatalf("sum up=%d down=%d ok=%v", up, down, ok)
+	}
+
+	h.applyStats(srv.ID, nil)
+	up, down, ok = h.UserLive(u.ID)
+	if !ok || up != 1000 || down != 1000 {
+		t.Fatalf("after idle server1 up=%d down=%d ok=%v", up, down, ok)
+	}
+
+	h.clearUserLive(srv2.ID)
+	if _, _, ok := h.UserLive(u.ID); ok {
+		t.Fatal("expected idle after both servers cleared")
+	}
+}

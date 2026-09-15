@@ -55,13 +55,14 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 	// landing server we must see every chain entry pointing here — ListInbounds
 	// already loaded them.
 
+	speeds := loadUserSpeeds(d, clients)
 	apiPort := pickAPIPort(ins, XrayAPIPort)
 	sbPort := pickAPIPort(ins, SingboxAPIPort, apiPort)
-	xray, err := buildXray(ins, clients, certs, byID, apiPort)
+	xray, err := buildXray(ins, clients, certs, byID, apiPort, speeds)
 	if err != nil {
 		return nil, err
 	}
-	sb, err := buildSingbox(ins, clients, certs, byID, sbPort)
+	sb, err := buildSingbox(ins, clients, certs, byID, sbPort, speeds)
 	if err != nil {
 		return nil, err
 	}
@@ -94,10 +95,14 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 		}
 		b.Apply.Mita = raw
 	}
+	b.Apply.SpeedLimits = collectSpeedLimits(ins, clients, speeds)
 	sum := sha256.New()
 	sum.Write(b.Apply.Xray)
 	sum.Write(b.Apply.Singbox)
 	sum.Write(b.Apply.Mita)
+	if raw, err := json.Marshal(b.Apply.SpeedLimits); err == nil {
+		sum.Write(raw)
+	}
 	b.Rev = hex.EncodeToString(sum.Sum(nil))[:16]
 	b.Apply.Rev = b.Rev
 	return b, nil

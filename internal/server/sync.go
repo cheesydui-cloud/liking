@@ -105,6 +105,20 @@ func (s *Server) provisionAndSyncUser(u *db.User) {
 		log.Printf("provision user %d: %v", u.ID, err)
 		return
 	}
+	if u != nil {
+		if clients, err := db.ListClientsByUser(s.DB, u.ID); err == nil {
+			for _, c := range clients {
+				if c == nil {
+					continue
+				}
+				in, err := db.GetInbound(s.DB, c.InboundID)
+				if err != nil || in == nil {
+					continue
+				}
+				ids = append(ids, in.ServerID)
+			}
+		}
+	}
 	s.syncServers(ids...)
 }
 

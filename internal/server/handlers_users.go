@@ -56,6 +56,10 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]any, 0, len(list))
 	for _, u := range list {
+		if up, down, ok := s.Hub.UserLive(u.ID); ok {
+			u.NetUpBps = up
+			u.NetDownBps = down
+		}
 		out = append(out, adminUserView(u))
 	}
 	jsonOK(w, map[string]any{"users": out})
@@ -169,6 +173,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		ExtendDays      *int            `json:"extend_days"`
 		Password        *string         `json:"password"`
 		TrafficResetDay *int            `json:"traffic_reset_day"`
+		SpeedLimit      *int64          `json:"speed_limit"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -237,6 +242,13 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		u.TrafficResetDay = *req.TrafficResetDay
+	}
+	if req.SpeedLimit != nil {
+		if *req.SpeedLimit < 0 || *req.SpeedLimit > 10000 {
+			jsonErr(w, http.StatusBadRequest, "限速无效")
+			return
+		}
+		u.SpeedLimit = *req.SpeedLimit
 	}
 	if err := db.UpdateUser(s.DB, u); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
