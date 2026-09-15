@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
+import { peekList, putList } from '../lib/listCache'
 import { copyText } from '../lib/copy'
 import { isDirectNode, serverStatus } from '../lib/status'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, FilterTabs, Icon, LineStatus, Meter, Modal, MoreMenu, PageHead, SearchInput, fmtAgo, fmtBps, fmtBytes, machineTone } from '../components/ui'
+import { Badge, Empty, Field, FilterTabs, Icon, LineStatus, Meter, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, fmtAgo, fmtBps, fmtBytes, machineTone } from '../components/ui'
 import { CORE_OPTIONS, coreLabel, fmtExpires, fmtResetDay, isExpired, parseCores, ymd, ymdToUnix } from '../lib/display'
 import { DEFAULT_PORT_MAX, DEFAULT_PORT_MIN, formatPortRange, parsePort } from '../lib/ports'
 
@@ -75,8 +76,9 @@ function withGhProxyFlag(cmd, on, url) {
 export default function Servers() {
   const toast = useToast()
   const dialog = useDialog()
-  const [list, setList] = useState([])
-  const [ins, setIns] = useState([])
+  const [list, setList] = useState(() => peekList('servers') ?? [])
+  const [ins, setIns] = useState(() => peekList('inbounds') ?? [])
+  const [ready, setReady] = useState(() => peekList('servers') !== undefined)
   const [name, setName] = useState('')
   const [host, setHost] = useState('')
   const [cmd, setCmd] = useState('')
@@ -105,14 +107,15 @@ export default function Servers() {
   const load = async () => {
     try {
       const [a, b] = await Promise.all([api.get('/servers'), api.get('/inbounds')])
-      setList(a.servers || [])
-      setIns(b.inbounds || [])
+      setList(putList('servers', a.servers || []))
+      setIns(putList('inbounds', b.inbounds || []))
     } catch (e) { toast(e.message, 'error') }
+    finally { setReady(true) }
   }
   useEffect(() => {
     load()
     const t = setInterval(() => {
-      api.get('/servers').then(a => setList(a.servers || [])).catch(() => {})
+      api.get('/servers').then(a => setList(putList('servers', a.servers || []))).catch(() => {})
     }, 5000)
     return () => clearInterval(t)
   }, [])
@@ -454,7 +457,9 @@ export default function Servers() {
           </div>
         </div>
       )}
-      {list.length === 0 ? (
+      {!ready ? (
+        <div className="card overflow-hidden"><SkeletonRows /></div>
+      ) : list.length === 0 ? (
         <div className="card overflow-hidden">
           <Empty title="还没有实例" hint="先起一个名字，添加后把安装命令拿到机器上以 root 执行，再到节点页挂协议。" action={
             <button type="button" className="btn-primary" onClick={openCreate}><Icon name="plus" size={15} /> 添加实例</button>

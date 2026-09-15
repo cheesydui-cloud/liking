@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
+import { peekList, putList } from '../lib/listCache'
 import { useToast, useDialog } from '../components/Layout'
 import { formatPortRange } from '../lib/ports'
 import { hopStatus, isDirectNode, nodeStatus } from '../lib/status'
@@ -8,7 +9,7 @@ import {
   LAND_PROFILES, inboundSettings, forwardKind, kindLabel, protoShort,
   hopProto, pathHops, landingText, usedPortsText,
 } from '../lib/forwards'
-import { Empty, Field, FilterTabs, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput } from '../components/ui'
+import { Empty, Field, FilterTabs, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows } from '../components/ui'
 
 function landingProto(inb, byID) {
   if (forwardKind(inb) === 'port') {
@@ -69,8 +70,9 @@ const emptyForm = {
 export default function MyForwards() {
   const toast = useToast()
   const dialog = useDialog()
-  const [servers, setServers] = useState([])
-  const [list, setList] = useState([])
+  const [servers, setServers] = useState(() => peekList('servers') ?? [])
+  const [list, setList] = useState(() => peekList('inbounds') ?? [])
+  const [ready, setReady] = useState(() => peekList('inbounds') !== undefined)
   const [f, setF] = useState(emptyForm)
   const [editId, setEditId] = useState(0)
   const [open, setOpen] = useState(false)
@@ -83,14 +85,15 @@ export default function MyForwards() {
   const load = async () => {
     try {
       const [a, b] = await Promise.all([api.get('/servers'), api.get('/inbounds')])
-      setServers(a.servers || [])
-      setList(b.inbounds || [])
+      setServers(putList('servers', a.servers || []))
+      setList(putList('inbounds', b.inbounds || []))
     } catch (e) { toast(e.message, 'error') }
+    finally { setReady(true) }
   }
   useEffect(() => {
     load()
     const t = setInterval(() => {
-      api.get('/servers').then(a => setServers(a.servers || [])).catch(() => {})
+      api.get('/servers').then(a => setServers(putList('servers', a.servers || []))).catch(() => {})
     }, 5000)
     return () => clearInterval(t)
   }, [])
@@ -370,7 +373,9 @@ export default function MyForwards() {
         </div>
       ) : null}
 
-      {forwards.length === 0 ? (
+      {!ready ? (
+        <div className="card overflow-hidden"><SkeletonRows /></div>
+      ) : forwards.length === 0 ? (
         <div className="card overflow-hidden">
           <Empty title="还没有中转" hint="链式会新建一条入口，原来的节点不动。出口可以选面板节点，或粘贴 vless / ss / trojan 链接。" action={
             <button type="button" className="btn-primary" onClick={openCreate}>

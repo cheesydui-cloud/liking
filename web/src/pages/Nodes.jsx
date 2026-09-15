@@ -6,7 +6,8 @@ import { formatPortRange, serverPortRange } from '../lib/ports'
 import { isDirectNode, nodeStatus, serverHasCore } from '../lib/status'
 import { useToast, useDialog } from '../components/Layout'
 import { coreLabel } from '../lib/display'
-import { Badge, Empty, Field, FilterTabs, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, StatusWord, fmtBytes, fmtDateShort } from '../components/ui'
+import { peekList, putList } from '../lib/listCache'
+import { Badge, Empty, Field, FilterTabs, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, StatusWord, fmtBytes, fmtDateShort } from '../components/ui'
 
 const DEST_PRESETS = [
   'www.microsoft.com:443',
@@ -183,10 +184,11 @@ export default function Nodes() {
   const dialog = useDialog()
   const [params, setParams] = useSearchParams()
   const serverQ = params.get('server') || ''
-  const [servers, setServers] = useState([])
-  const [list, setList] = useState([])
-  const [certs, setCerts] = useState([])
-  const [profiles, setProfiles] = useState([])
+  const [servers, setServers] = useState(() => peekList('servers') ?? [])
+  const [list, setList] = useState(() => peekList('inbounds') ?? [])
+  const [certs, setCerts] = useState(() => peekList('certs') ?? [])
+  const [profiles, setProfiles] = useState(() => peekList('profiles') ?? [])
+  const [ready, setReady] = useState(() => peekList('servers') !== undefined && peekList('inbounds') !== undefined)
   const [f, setF] = useState(emptyLine)
   const [editId, setEditId] = useState(0)
   const [lineOpen, setLineOpen] = useState(false)
@@ -202,16 +204,17 @@ export default function Nodes() {
       const [a, b, c, d] = await Promise.all([
         api.get('/servers'), api.get('/inbounds'), api.get('/certs'), api.get('/profiles'),
       ])
-      setServers(a.servers || [])
-      setList(b.inbounds || [])
-      setCerts(c.certs || [])
-      setProfiles(d.profiles || [])
+      setServers(putList('servers', a.servers || []))
+      setList(putList('inbounds', b.inbounds || []))
+      setCerts(putList('certs', c.certs || []))
+      setProfiles(putList('profiles', d.profiles || []))
     } catch (e) { toast(e.message, 'error') }
+    finally { setReady(true) }
   }
   useEffect(() => {
     load()
     const t = setInterval(() => {
-      api.get('/servers').then(a => setServers(a.servers || [])).catch(() => {})
+      api.get('/servers').then(a => setServers(putList('servers', a.servers || []))).catch(() => {})
     }, 5000)
     return () => clearInterval(t)
   }, [])
@@ -425,7 +428,9 @@ export default function Nodes() {
           )}
         </div>
       )}
-      {servers.length === 0 ? (
+      {!ready ? (
+        <div className="card overflow-hidden"><SkeletonRows /></div>
+      ) : servers.length === 0 ? (
         <div className="card overflow-hidden">
           <Empty title="还没有实例" hint="先添加一台实例并装上 Agent，再来挂节点。" action={
             <Link to="/servers" className="btn-primary">去添加实例</Link>

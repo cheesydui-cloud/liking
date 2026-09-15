@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
+import { peekList, putList } from '../lib/listCache'
 import { serverStatus } from '../lib/status'
 import { Badge, DayBars, Empty, Icon, LineStatus, PageHead, SkeletonRows, fmtAgo, fmtBps, fmtBytes, machineTone } from '../components/ui'
 
@@ -10,10 +11,14 @@ function alertItemsOf(d) {
 }
 
 export default function Dashboard() {
-  const [d, setD] = useState(null)
+  const [d, setD] = useState(() => peekList('dashboard') ?? null)
   const [err, setErr] = useState('')
   useEffect(() => {
-    const pull = () => api.get('/dashboard').then(setD).catch(e => setErr(e.message))
+    const pull = () => api.get('/dashboard').then(data => {
+      putList('dashboard', data)
+      if (Array.isArray(data.server_list)) putList('servers', data.server_list)
+      setD(data)
+    }).catch(e => setErr(e.message))
     pull()
     const t = setInterval(pull, 5000)
     return () => clearInterval(t)

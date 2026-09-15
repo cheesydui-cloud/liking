@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
+import { clearLists, putList } from '../lib/listCache'
 import { BrandMark, Icon, Modal } from './ui'
 
 const UserCtx = createContext(null)
@@ -47,7 +48,10 @@ export function UserProvider({ children }) {
   }, [panelName])
 
   useEffect(() => {
-    const h = () => setUser(null)
+    const h = () => {
+      clearLists()
+      setUser(null)
+    }
     window.addEventListener('lk-unauthorized', h)
     return () => window.removeEventListener('lk-unauthorized', h)
   }, [])
@@ -172,8 +176,15 @@ export function Layout({ children }) {
     mainRef.current?.focus({ preventScroll: true })
   }, [loc.pathname])
 
+  useEffect(() => {
+    if (!isAdmin) return
+    api.get('/servers').then(a => putList('servers', a.servers || [])).catch(() => {})
+    api.get('/inbounds').then(a => putList('inbounds', a.inbounds || [])).catch(() => {})
+  }, [isAdmin])
+
   const logout = async () => {
     try { await api.post('/logout') } catch {}
+    clearLists()
     setUser(null)
     navigate('/login', { replace: true })
   }

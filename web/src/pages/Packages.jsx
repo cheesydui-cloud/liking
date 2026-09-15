@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
+import { peekList, putList } from '../lib/listCache'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, SearchInput, StatusWord } from '../components/ui'
+import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, StatusWord } from '../components/ui'
 
 const emptyForm = { name: '', gb: '', direction: 'oneway', inbound_ids: [], multipliers: {} }
 
@@ -74,10 +75,11 @@ function Metric({ label, value }) {
 export default function Packages() {
   const toast = useToast()
   const dialog = useDialog()
-  const [list, setList] = useState([])
-  const [servers, setServers] = useState([])
-  const [ins, setIns] = useState([])
-  const [users, setUsers] = useState([])
+  const [list, setList] = useState(() => peekList('packages') ?? [])
+  const [servers, setServers] = useState(() => peekList('servers') ?? [])
+  const [ins, setIns] = useState(() => peekList('inbounds') ?? [])
+  const [users, setUsers] = useState(() => peekList('users') ?? [])
+  const [ready, setReady] = useState(() => peekList('packages') !== undefined)
   const [f, setF] = useState(emptyForm)
   const [editId, setEditId] = useState(0)
   const [formOpen, setFormOpen] = useState(false)
@@ -87,11 +89,12 @@ export default function Packages() {
   const load = async () => {
     try {
       const [a, b, c, d] = await Promise.all([api.get('/packages'), api.get('/servers'), api.get('/inbounds'), api.get('/users')])
-      setList(a.packages || [])
-      setServers(b.servers || [])
-      setIns(c.inbounds || [])
-      setUsers(d.users || [])
+      setList(putList('packages', a.packages || []))
+      setServers(putList('servers', b.servers || []))
+      setIns(putList('inbounds', c.inbounds || []))
+      setUsers(putList('users', d.users || []))
     } catch (e) { toast(e.message, 'error') }
+    finally { setReady(true) }
   }
   useEffect(() => { load() }, [])
 
@@ -227,7 +230,9 @@ export default function Packages() {
           </button>
         }
       />
-      {list.length === 0 ? (
+      {!ready ? (
+        <div className="card overflow-hidden"><SkeletonRows /></div>
+      ) : list.length === 0 ? (
         <div className="card overflow-hidden">
           <Empty title="暂无套餐" hint="勾选节点，再把套餐绑给用户。" action={
             <button type="button" className="btn-primary" onClick={openCreate}><Icon name="plus" size={15} /> 新建套餐</button>

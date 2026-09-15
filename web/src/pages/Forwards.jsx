@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
+import { peekList, putList } from '../lib/listCache'
 import { useToast, useDialog } from '../components/Layout'
 import { formatPortRange } from '../lib/ports'
 import { hopStatus, nodeStatus } from '../lib/status'
@@ -8,7 +9,7 @@ import {
   LAND_PROFILES, MAX_HOPS, inboundSettings, forwardKind, kindLabel, protoShort,
   formatSocks, hopText, hopProto, pathHops, landingText, usedPortsText, hopFromSaved,
 } from '../lib/forwards'
-import { Badge, Empty, Field, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput } from '../components/ui'
+import { Badge, Empty, Field, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows } from '../components/ui'
 
 function emptyHop() {
   return { kind: 'panel', inbound_id: '', sk5_host: '', sk5_port: '1080', sk5_user: '', sk5_pass: '', uri: '' }
@@ -139,10 +140,11 @@ function hopUsedIds(hops, except) {
 export default function Forwards() {
   const toast = useToast()
   const dialog = useDialog()
-  const [servers, setServers] = useState([])
-  const [list, setList] = useState([])
-  const [certs, setCerts] = useState([])
-  const [profiles, setProfiles] = useState([])
+  const [servers, setServers] = useState(() => peekList('servers') ?? [])
+  const [list, setList] = useState(() => peekList('inbounds') ?? [])
+  const [certs, setCerts] = useState(() => peekList('certs') ?? [])
+  const [profiles, setProfiles] = useState(() => peekList('profiles') ?? [])
+  const [ready, setReady] = useState(() => peekList('inbounds') !== undefined)
   const [f, setF] = useState(emptyForm)
   const [editId, setEditId] = useState(0)
   const [open, setOpen] = useState(false)
@@ -155,16 +157,17 @@ export default function Forwards() {
       const [a, b, c, d] = await Promise.all([
         api.get('/servers'), api.get('/inbounds'), api.get('/certs'), api.get('/profiles'),
       ])
-      setServers(a.servers || [])
-      setList(b.inbounds || [])
-      setCerts(c.certs || [])
-      setProfiles(d.profiles || [])
+      setServers(putList('servers', a.servers || []))
+      setList(putList('inbounds', b.inbounds || []))
+      setCerts(putList('certs', c.certs || []))
+      setProfiles(putList('profiles', d.profiles || []))
     } catch (e) { toast(e.message, 'error') }
+    finally { setReady(true) }
   }
   useEffect(() => {
     load()
     const t = setInterval(() => {
-      api.get('/servers').then(a => setServers(a.servers || [])).catch(() => {})
+      api.get('/servers').then(a => setServers(putList('servers', a.servers || []))).catch(() => {})
     }, 5000)
     return () => clearInterval(t)
   }, [])
@@ -396,7 +399,9 @@ export default function Forwards() {
       ) : null}
 
       <div className="card overflow-hidden">
-        {forwards.length === 0 ? (
+        {!ready ? (
+          <SkeletonRows />
+        ) : forwards.length === 0 ? (
           <Empty title="还没有转发" hint="点右上角新建。链式按跳走；端口中转只把本机端口转到别人的 IP。" />
         ) : rows.length === 0 ? (
           <Empty title="没有匹配的转发" hint="换个关键词或类型。" />

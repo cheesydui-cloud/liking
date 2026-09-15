@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
+import { peekList, putList } from '../lib/listCache'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, DayBars, Empty, Field, FilterTabs, Icon, Meter, Modal, MoreMenu, PageHead, SearchInput, billedBytes, fmtBytes, fmtDateShort } from '../components/ui'
+import { Badge, DayBars, Empty, Field, FilterTabs, Icon, Meter, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, billedBytes, fmtBytes, fmtDateShort } from '../components/ui'
 import { SubPanel } from '../components/SubPanel'
 
 function randPassword() {
@@ -112,8 +113,9 @@ function Metric({ label, value, danger, plain }) {
 export default function Users() {
   const toast = useToast()
   const dialog = useDialog()
-  const [list, setList] = useState([])
-  const [pkgs, setPkgs] = useState([])
+  const [list, setList] = useState(() => peekList('users') ?? [])
+  const [pkgs, setPkgs] = useState(() => peekList('packages') ?? [])
+  const [ready, setReady] = useState(() => peekList('users') !== undefined)
   const [f, setF] = useState(emptyForm)
   const [busy, setBusy] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
@@ -133,9 +135,10 @@ export default function Users() {
   const load = async () => {
     try {
       const [a, b] = await Promise.all([api.get('/users'), api.get('/packages')])
-      setList(a.users || [])
-      setPkgs(b.packages || [])
+      setList(putList('users', a.users || []))
+      setPkgs(putList('packages', b.packages || []))
     } catch (e) { toast(e.message, 'error') }
+    finally { setReady(true) }
   }
   useEffect(() => { load() }, [])
 
@@ -375,7 +378,9 @@ export default function Users() {
         />
       </div>
 
-      {!hasCustomers ? (
+      {!ready ? (
+        <div className="card overflow-hidden"><SkeletonRows /></div>
+      ) : !hasCustomers ? (
         <div className="card overflow-hidden">
           <Empty title="暂无用户" hint="先建套餐并勾选节点，再开账号。" action={
             <button type="button" className="btn-primary" onClick={openCreate}><Icon name="plus" size={15} /> 新建用户</button>
