@@ -52,21 +52,17 @@ export default function Traffic() {
 
   return (
     <div>
-      <PageHead
-        title="流量"
-        actions={
-          <div className="flex flex-wrap items-center gap-4">
-            <FilterTabs
-              value={daysN}
-              onChange={setDaysN}
-              items={RANGES.map(n => [n, `${n} 天`])}
-            />
-            <button type="button" className="btn-ghost h-8" onClick={() => api.download(`/traffic.csv?days=${daysN}`, 'liking-traffic.csv').catch(e => toast(e.message, 'error'))}>
-              <Icon name="download" size={14} /> 导出 CSV
-            </button>
-          </div>
-        }
-      />
+      <PageHead title="流量" />
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-4">
+        <FilterTabs
+          value={daysN}
+          onChange={setDaysN}
+          items={RANGES.map(n => [n, `${n} 天`])}
+        />
+        <button type="button" className="btn-ghost h-8 shrink-0 self-start sm:ml-auto" onClick={() => api.download(`/traffic.csv?days=${daysN}`, 'liking-traffic.csv').catch(e => toast(e.message, 'error'))}>
+          <Icon name="download" size={14} /> 导出 CSV
+        </button>
+      </div>
       {pollErr ? <div className="alert-row is-warn mb-4">{pollErr}</div> : null}
       <div className="stat-row">
         <div>
@@ -107,7 +103,8 @@ export default function Traffic() {
           {users.length === 0 ? (
             <div className="px-4 py-6 text-[13px] text-ink-mut">这个区间没有用户流量。</div>
           ) : (
-            <div className="table-wrap">
+            <>
+            <div className="hidden md:block table-wrap">
               <table className="data">
                 <thead><tr><th>用户</th><th>上行</th><th>下行</th><th>合计</th></tr></thead>
                 <tbody>
@@ -122,6 +119,17 @@ export default function Traffic() {
                 </tbody>
               </table>
             </div>
+            <div className="md:hidden divide-y" style={{ borderColor: 'var(--color-line-soft)' }}>
+              {users.map(u => (
+                <div key={u.id} className="px-3.5 py-3">
+                  <div className="font-medium">{u.name}</div>
+                  <div className="text-[12px] text-ink-mut mt-0.5 font-mono">
+                    ↑ {fmtBytes(u.up)} · ↓ {fmtBytes(u.down)} · {fmtBytes((u.up || 0) + (u.down || 0))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            </>
           )}
         </div>
         <div className="card overflow-hidden">
@@ -132,7 +140,8 @@ export default function Traffic() {
           {inbounds.length === 0 ? (
             <div className="px-4 py-6 text-[13px] text-ink-mut">这个区间没有节点流量。</div>
           ) : (
-            <div className="table-wrap">
+            <>
+            <div className="hidden md:block table-wrap">
               <table className="data">
                 <thead><tr><th>节点</th><th>上行</th><th>下行</th><th>合计</th></tr></thead>
                 <tbody>
@@ -147,6 +156,17 @@ export default function Traffic() {
                 </tbody>
               </table>
             </div>
+            <div className="md:hidden divide-y" style={{ borderColor: 'var(--color-line-soft)' }}>
+              {inbounds.map(inb => (
+                <div key={inb.id} className="px-3.5 py-3">
+                  <div className="font-medium">{inb.name || `节点 ${inb.id}`}</div>
+                  <div className="text-[12px] text-ink-mut mt-0.5 font-mono">
+                    ↑ {fmtBytes(inb.up)} · ↓ {fmtBytes(inb.down)} · {fmtBytes((inb.up || 0) + (inb.down || 0))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            </>
           )}
         </div>
       </div>

@@ -215,12 +215,13 @@ export function HourArea({ hours = [], className = '' }) {
   if (!rows.length) return null
   const values = rows.map(d => (Number(d.up) || 0) + (Number(d.down) || 0))
   const max = Math.max(0, ...values)
-  const padL = 58
+  const W = Math.max(Math.floor(w), 1)
+  const compact = W < 480
+  const padL = compact ? 48 : 58
   const padR = 16
   const padT = 10
   const padB = 28
-  const H = 280
-  const W = Math.max(Math.floor(w), 1)
+  const H = compact ? 220 : 280
   const plotW = Math.max(W - padL - padR, 1)
   const plotH = H - padT - padB
   const n = rows.length
@@ -252,7 +253,11 @@ export function HourArea({ hours = [], className = '' }) {
     setHi(h => (h === best ? h : best))
   }
   const hover = hi >= 0 ? pts[hi] : null
-  const hideOddX = W < 880
+  const hideX = (i) => {
+    if (compact) return i % 4 !== 0 && i !== n - 1
+    if (W < 880) return i % 2 === 1
+    return false
+  }
 
   return (
     <div className={`traffic-area-card ${className}`}>
@@ -263,8 +268,9 @@ export function HourArea({ hours = [], className = '' }) {
       <div
         className="traffic-area-body"
         ref={wrapRef}
-        onMouseMove={onMove}
-        onMouseLeave={() => setHi(-1)}
+        onPointerDown={onMove}
+        onPointerMove={onMove}
+        onPointerLeave={() => setHi(-1)}
       >
         {W > 1 ? (
           <svg width={W} height={H} className="traffic-area-svg" role="img" aria-label="24小时流量统计">
@@ -297,7 +303,7 @@ export function HourArea({ hours = [], className = '' }) {
                 x={p.x}
                 y={H - 8}
                 textAnchor="middle"
-                className={`traffic-area-xlab${hideOddX && i % 2 === 1 ? ' is-hide' : ''}`}
+                className={`traffic-area-xlab${hideX(i) ? ' is-hide' : ''}`}
               >
                 {hourTick(p.row.hour)}
               </text>
@@ -393,12 +399,19 @@ export function Meter({ value = 0, max = 0, className = '', mark = 80 }) {
 }
 
 export function PageHead({ title, desc, actions }) {
+  if (!desc && !actions) {
+    return (
+      <div className="mb-4 max-lg:hidden">
+        <h1 className="page-title">{title}</h1>
+      </div>
+    )
+  }
   return (
     <div className="mb-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h1 className="page-title">{title}</h1>
-          {desc && <p className="page-desc mt-1.5 max-w-2xl leading-relaxed">{desc}</p>}
+          {desc && <p className="page-desc max-lg:mt-0 mt-1.5 max-w-2xl leading-relaxed">{desc}</p>}
         </div>
         {actions && <div className="hidden sm:flex flex-wrap items-center gap-2 shrink-0">{actions}</div>}
       </div>
@@ -539,12 +552,12 @@ export function MoreMenu({ label = '更多', items = [], disabled, iconOnly }) {
     }
     const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
     const onClose = () => setOpen(false)
-    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('pointerdown', onDoc)
     document.addEventListener('keydown', onKey)
     window.addEventListener('scroll', onClose, true)
     window.addEventListener('resize', onClose)
     return () => {
-      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('pointerdown', onDoc)
       document.removeEventListener('keydown', onKey)
       window.removeEventListener('scroll', onClose, true)
       window.removeEventListener('resize', onClose)

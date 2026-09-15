@@ -139,7 +139,8 @@ export default function Dashboard() {
         {asArray(d.server_list).length === 0 ? (
           <Empty title="还没有实例" hint="添加一台实例，复制一键安装命令，在机器上以 root 执行。" action={<Link to="/servers" className="btn-primary">去添加</Link>} />
         ) : (
-          <div className="table-wrap">
+          <>
+          <div className="hidden md:block table-wrap">
             <table className="data">
               <thead><tr><th>名称</th><th>地址</th><th>状态</th><th>上行</th><th>下行</th><th>已用</th><th>心跳</th></tr></thead>
               <tbody>
@@ -166,6 +167,30 @@ export default function Dashboard() {
               </tbody>
             </table>
           </div>
+          <div className="md:hidden divide-y" style={{ borderColor: 'var(--color-line-soft)' }}>
+            {asArray(d.server_list).map(s => (
+              <div key={s.id} className={`stack-row px-3.5 py-3 ${machineTone(s)}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-medium">{s.name}</div>
+                    <div className="copy-text mt-0.5">{s.public_host || '—'}</div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <LineStatus status={serverStatus(s)} />
+                    {s.last_error ? <Badge tone="danger" className="ml-1">下发失败</Badge> : null}
+                    {s.needs_reinstall ? <Badge tone="warn" className="ml-1">需重装</Badge>
+                      : s.needs_upgrade ? <Badge tone="warn" className="ml-1">可升级</Badge> : null}
+                    {s.over_quota ? <Badge tone="danger" className="ml-1">流量已满</Badge> : null}
+                  </div>
+                </div>
+                <div className="text-[12px] text-ink-mut mt-1.5 font-mono">
+                  ↑ {s.online ? fmtBps(s.net_up_bps) : '—'} · ↓ {s.online ? fmtBps(s.net_down_bps) : '—'} · {fmtBytes((s.used_up || 0) + (s.used_down || 0))}{s.traffic_limit ? ` / ${fmtBytes(s.traffic_limit)}` : ''}
+                </div>
+                <div className="text-[12px] text-ink-mut mt-0.5 font-mono">{fmtAgo(s.last_seen)}</div>
+              </div>
+            ))}
+          </div>
+          </>
         )}
       </div>
       ) : null}

@@ -181,7 +181,7 @@ export default function MyNodes() {
                 <span className="node-cluster-count">{g.nodes.length} 个</span>
               </div>
               <div className="card overflow-hidden mb-4">
-                <div className="table-wrap">
+                <div className="hidden md:block table-wrap">
                   <table className="data">
                     <thead>
                       <tr>
@@ -223,6 +223,37 @@ export default function MyNodes() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+                <div className="md:hidden divide-y" style={{ borderColor: 'var(--color-line-soft)' }}>
+                  {g.nodes.map(n => (
+                    <div key={n.id} className="px-3.5 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-medium">
+                            {n.name}
+                            {n.line_kind === 'chain' ? <span className="line-tag">中转</span> : null}
+                          </div>
+                          <div className="copy-text mt-0.5">{n.host ? `${n.host}:${n.port}` : '—'}</div>
+                          <div className="text-[12px] text-ink-mut mt-0.5">
+                            {n.profile} · 近 14 日 {fmtBytes((n.period_up || 0) + (n.period_down || 0))} · 累计 {fmtBytes((n.used_up || 0) + (n.used_down || 0))}
+                          </div>
+                        </div>
+                        <div className="inline-flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            className={`icon-btn${n.starred ? ' is-on' : ''}`}
+                            disabled={starBusy}
+                            onClick={() => toggleStar(n)}
+                            aria-label={n.starred ? '取消常用' : '标为常用'}
+                            title={n.starred ? '取消常用' : '常用，进订阅'}
+                          >
+                            <Icon name={n.starred ? 'star-on' : 'star'} size={14} />
+                          </button>
+                          <button type="button" className="row-act" disabled={!n.uri} onClick={() => copyNode(n)}>复制</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </section>

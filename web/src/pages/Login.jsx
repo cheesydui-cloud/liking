@@ -56,7 +56,7 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-dvh bg-app flex items-start sm:items-center justify-center p-6">
+    <div className="login-page bg-app flex items-start sm:items-center justify-center">
       <div className="login-box w-full max-w-[360px]">
         <div className="flex items-center gap-3 mb-8">
           <BrandMark size={28} />

@@ -91,7 +91,7 @@ export function UserProvider({ children }) {
       <ToastCtx.Provider value={toast}>
         <DialogCtx.Provider value={{ confirm, prompt }}>
           {children}
-          <div className="fixed right-4 bottom-4 z-[90] flex flex-col gap-2" aria-live="polite" aria-relevant="additions">
+          <div className="toast-stack fixed right-4 bottom-4 z-[90] flex flex-col gap-2" aria-live="polite" aria-relevant="additions">
             {toasts.map(t => (
               <div key={t.id} className="card px-3.5 py-2.5 text-[13px] min-w-[220px]"
                 style={{
@@ -187,6 +187,13 @@ export function Layout({ children }) {
   }, [loc.pathname])
 
   useEffect(() => {
+    if (!open) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [open])
+
+  useEffect(() => {
     if (!isAdmin) return
     const g = cacheGen()
     const ac = new AbortController()
@@ -252,7 +259,7 @@ export function Layout({ children }) {
   ]
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-dvh max-h-dvh overflow-hidden">
       <a href="#main" className="skip-link">跳到内容</a>
       {open && (
         <button type="button" className="fixed inset-0 modal-scrim z-30 lg:hidden" aria-label="关闭菜单" onClick={() => setOpen(false)} />
@@ -298,23 +305,23 @@ export function Layout({ children }) {
       </aside>
       <main id="main" ref={mainRef} tabIndex={-1} className="flex-1 min-w-0 flex flex-col bg-app outline-none">
         <div className="topbar h-12 px-3 sm:px-5 flex items-center gap-2 shrink-0">
-          <button type="button" className="lg:hidden btn-ghost h-9 w-9 px-0" onClick={() => setOpen(true)} aria-label="打开菜单">
+          <button type="button" className="lg:hidden btn-ghost h-11 w-11 px-0" onClick={() => setOpen(true)} aria-label="打开菜单">
             <Icon name="menu" size={16} />
           </button>
           {pageTitle ? <div className="lg:hidden text-[14px] font-medium truncate">{pageTitle}</div> : null}
           {announceText ? (
-            <div className="flex-1 min-w-0 text-[13px] text-ink-soft truncate" title={announceText}>{announceText}</div>
+            <div className="hidden sm:block flex-1 min-w-0 text-[13px] text-ink-soft truncate" title={announceText}>{announceText}</div>
           ) : <div className="flex-1" />}
           {isAdmin ? (
-            <Link to={userView ? '/' : '/my'} className="btn-ghost h-9 shrink-0">
-              {userView ? '返回管理' : '用户页'}
+            <Link to={userView ? '/' : '/my'} className="btn-ghost h-9 shrink-0 px-2.5 text-[13px]">
+              {userView ? '管理' : '用户页'}
             </Link>
           ) : null}
           <button type="button" className="btn-ghost h-9 w-9 px-0" onClick={toggleTheme} aria-label={dark ? '切换浅色' : '切换深色'}>
             <Icon name={dark ? 'sun' : 'moon'} size={15} />
           </button>
         </div>
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 sm:py-5 pb-24 sm:pb-5">
+        <div ref={scrollRef} className="scroll-pane flex-1 overflow-y-auto px-3 sm:px-5 py-4 sm:py-5 pb-24 sm:pb-5">
           <div className="max-w-[1280px]">
             {announceLong ? <div className="notice mb-4">{announceText}</div> : null}
             {children}
