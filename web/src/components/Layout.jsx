@@ -236,7 +236,7 @@ export function Layout({ children }) {
         { to: '/my/forwards', icon: 'forward', label: '中转' },
       ] : []),
     ] },
-    { label: '账号', items: [{ to: '/my/settings', icon: 'gear', label: '设置' }] },
+    ...(isAdmin ? [] : [{ label: '账号', items: [{ to: '/my/settings', icon: 'gear', label: '设置' }] }]),
   ]
 
   return (

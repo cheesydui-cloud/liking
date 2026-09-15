@@ -43,6 +43,12 @@ function RequireAdmin() {
   return <Outlet />
 }
 
+function MySettings() {
+  const { user } = useUser()
+  if (user?.role === 'admin') return <Navigate to="/settings?tab=account" replace />
+  return <Settings accountOnly />
+}
+
 export default function App() {
   return (
     <BrowserRouter useTransitions={false}>
@@ -51,8 +57,8 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route element={<AuthLayout />}>
             <Route path="/my" element={<My />} />
-            <Route path="/my/settings" element={<Settings accountOnly />} />
-            <Route path="/my/password" element={<Navigate to="/my/settings" replace />} />
+            <Route path="/my/settings" element={<MySettings />} />
+            <Route path="/my/password" element={<MySettings />} />
             <Route element={<RequireAdmin />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/nodes" element={<Nodes />} />
