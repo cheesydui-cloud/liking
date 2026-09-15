@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { peekList, putList } from '../lib/listCache'
 import { serverStatus } from '../lib/status'
-import { Badge, DayBars, Empty, Icon, LineStatus, PageHead, SkeletonRows, fmtAgo, fmtBps, fmtBytes, machineTone } from '../components/ui'
+import { Badge, DayBars, Empty, HourArea, Icon, LineStatus, PageHead, SkeletonRows, fmtAgo, fmtBps, fmtBytes, machineTone } from '../components/ui'
 
 function alertItemsOf(d) {
   if (Array.isArray(d.alert_items) && d.alert_items.length) return d.alert_items
@@ -38,7 +38,7 @@ export default function Dashboard() {
   const next = steps.find(s => !s.done)
   const showSetup = (d.members || 0) === 0
   const heroTone = (d.online || 0) > 0 ? 'is-live' : (d.servers || 0) > 0 ? 'is-off' : 'is-off'
-  const hasHourBars = (d.hours || []).some(x => (x.up || 0) + (x.down || 0) > 0)
+  const hours = d.hours || []
   const hasDayBars = (d.days || []).some(x => (x.up || 0) + (x.down || 0) > 0)
 
   return (
@@ -109,20 +109,16 @@ export default function Dashboard() {
         )}
       </div>
       ) : null}
-      {hasHourBars && (
+      {hours.length > 0 && (
         <div className="mt-5">
-          <div className="flex items-center justify-between mb-1">
-            <div className="text-[14px] font-semibold">近 24 小时</div>
-            <Link to="/traffic" className="btn-ghost h-8">明细</Link>
-          </div>
-          <DayBars days={d.hours} />
+          <HourArea hours={hours} />
         </div>
       )}
       {hasDayBars && (
         <div className="mt-5">
           <div className="flex items-center justify-between mb-1">
             <div className="text-[14px] font-semibold">近 30 日</div>
-            {!hasHourBars ? <Link to="/traffic" className="btn-ghost h-8">明细</Link> : null}
+            <Link to="/traffic" className="btn-ghost h-8">明细</Link>
           </div>
           <DayBars days={d.days} />
         </div>

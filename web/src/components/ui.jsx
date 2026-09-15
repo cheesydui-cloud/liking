@@ -154,10 +154,158 @@ function hourLabel(hour) {
   return hh
 }
 
+function hourTick(hour) {
+  return `${hourLabel(hour)}:00`
+}
+
 function hourTitle(hour) {
   const s = String(hour || '')
   if (s.length >= 13) return `${s.slice(5, 10)} ${s.slice(11, 13)}:00`
   return s
+}
+
+function catmullRomPath(pts) {
+  if (!pts.length) return ''
+  if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y}`
+  let d = `M ${pts[0].x} ${pts[0].y}`
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)]
+    const p1 = pts[i]
+    const p2 = pts[i + 1]
+    const p3 = pts[Math.min(pts.length - 1, i + 2)]
+    const c1x = p1.x + (p2.x - p0.x) / 6
+    const c1y = p1.y + (p2.y - p0.y) / 6
+    const c2x = p2.x - (p3.x - p1.x) / 6
+    const c2y = p2.y - (p3.y - p1.y) / 6
+    d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`
+  }
+  return d
+}
+
+export function HourArea({ hours = [], className = '' }) {
+  const rows = Array.isArray(hours) ? hours : []
+  const wrapRef = useRef(null)
+  const [w, setW] = useState(0)
+  const [hi, setHi] = useState(-1)
+  const gid = useId().replace(/:/g, '')
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setW(el.clientWidth))
+    ro.observe(el)
+    setW(el.clientWidth)
+    return () => ro.disconnect()
+  }, [])
+  if (!rows.length) return null
+  const values = rows.map(d => (Number(d.up) || 0) + (Number(d.down) || 0))
+  const max = Math.max(0, ...values)
+  const padL = 58
+  const padR = 16
+  const padT = 10
+  const padB = 28
+  const H = 280
+  const W = Math.max(Math.floor(w), 1)
+  const plotW = Math.max(W - padL - padR, 1)
+  const plotH = H - padT - padB
+  const n = rows.length
+  const pts = values.map((v, i) => ({
+    x: padL + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW),
+    y: padT + (max <= 0 ? plotH : (1 - v / max) * plotH),
+    v,
+    row: rows[i],
+  }))
+  const line = catmullRomPath(pts)
+  const last = pts[pts.length - 1]
+  const area = line ? `${line} L ${last.x} ${padT + plotH} L ${pts[0].x} ${padT + plotH} Z` : ''
+  const yTicks = max <= 0
+    ? [{ p: 0, y: padT + plotH, label: '0' }]
+    : [1, 0.75, 0.5, 0.25, 0].map(p => ({
+      p,
+      y: padT + (1 - p) * plotH,
+      label: p === 0 ? '0' : fmtBytes(max * p),
+    }))
+  const onMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    let best = 0
+    let bestD = Infinity
+    for (let i = 0; i < pts.length; i++) {
+      const d = Math.abs(pts[i].x - x)
+      if (d < bestD) { bestD = d; best = i }
+    }
+    setHi(best)
+  }
+  const hover = hi >= 0 ? pts[hi] : null
+  const hideOddX = W < 880
+
+  return (
+    <div className={`traffic-area-card ${className}`}>
+      <div className="traffic-area-head">
+        <i className="traffic-area-dot" aria-hidden="true" />
+        24小时流量统计
+      </div>
+      <div
+        className="traffic-area-body"
+        ref={wrapRef}
+        onMouseMove={onMove}
+        onMouseLeave={() => setHi(-1)}
+      >
+        {W > 1 ? (
+          <svg width={W} height={H} className="traffic-area-svg" role="img" aria-label="24小时流量统计">
+            <defs>
+              <linearGradient id={`ta-${gid}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#ff7a1a" stopOpacity="0.38" />
+                <stop offset="100%" stopColor="#ff7a1a" stopOpacity="0.02" />
+              </linearGradient>
+              <clipPath id={`tc-${gid}`}>
+                <rect x={padL} y={padT} width={plotW} height={plotH} />
+              </clipPath>
+            </defs>
+            {yTicks.map((t, i) => (
+              <g key={i}>
+                {t.p > 0 ? (
+                  <line x1={padL} x2={W - padR} y1={t.y} y2={t.y} className="traffic-area-grid" />
+                ) : (
+                  <line x1={padL} x2={W - padR} y1={t.y} y2={t.y} className="traffic-area-base" />
+                )}
+                <text x={padL - 8} y={t.y + 3.5} textAnchor="end" className="traffic-area-ylab">{t.label}</text>
+              </g>
+            ))}
+            <g clipPath={`url(#tc-${gid})`}>
+              {area ? <path d={area} fill={`url(#ta-${gid})`} /> : null}
+              {line ? <path d={line} fill="none" stroke="#ff7a1a" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" /> : null}
+            </g>
+            {pts.map((p, i) => (
+              <text
+                key={p.row.hour || i}
+                x={p.x}
+                y={H - 8}
+                textAnchor="middle"
+                className={`traffic-area-xlab${hideOddX && i % 2 === 1 ? ' is-hide' : ''}`}
+              >
+                {hourTick(p.row.hour)}
+              </text>
+            ))}
+            {hover ? (
+              <>
+                <line x1={hover.x} x2={hover.x} y1={padT} y2={padT + plotH} className="traffic-area-cursor" />
+                <circle cx={hover.x} cy={Math.min(Math.max(hover.y, padT), padT + plotH)} r="4.5" fill="#fff" stroke="#ff7a1a" strokeWidth="2" />
+              </>
+            ) : null}
+          </svg>
+        ) : <div style={{ height: H }} />}
+        {hover ? (
+          <div
+            className="traffic-area-tip"
+            style={{ left: Math.min(Math.max(hover.x, 72), W - 72), top: Math.max(Math.min(hover.y, padT + plotH) - 8, 28) }}
+          >
+            <div>时间: {hourTick(hover.row.hour)}</div>
+            <div className="is-val">流量: {fmtBytes(hover.v)}</div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
 }
 
 export function DayBars({ days = [], className = '', legend = true, label = '' }) {

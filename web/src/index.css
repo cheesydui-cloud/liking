@@ -817,6 +817,70 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
   .page-cta-bar > .btn-primary { flex: 1; min-height: 44px; }
 }
 
+.traffic-area-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.traffic-area-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--color-line-soft);
+  font-size: 14px;
+  font-weight: 600;
+}
+.traffic-area-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff7a1a;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.traffic-area-body { position: relative; }
+.traffic-area-svg { display: block; }
+.traffic-area-grid {
+  stroke: var(--color-line);
+  stroke-dasharray: 4 4;
+  stroke-width: 1;
+}
+.traffic-area-base {
+  stroke: #3b82f6;
+  stroke-width: 1.6;
+}
+.traffic-area-cursor {
+  stroke: #3b82f6;
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+.traffic-area-ylab,
+.traffic-area-xlab {
+  fill: var(--color-ink-mut);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.traffic-area-xlab.is-hide { display: none; }
+.traffic-area-tip {
+  position: absolute;
+  transform: translate(-50%, -110%);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-ink);
+  box-shadow: 0 6px 18px rgba(26, 25, 22, 0.12);
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 2;
+}
+.traffic-area-tip .is-val { color: #ff7a1a; }
+.dark .traffic-area-tip { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
+
 .traffic-legend {
   display: flex;
   justify-content: flex-end;
