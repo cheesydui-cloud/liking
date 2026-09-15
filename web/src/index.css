@@ -582,6 +582,10 @@ button.chip:hover { border-color: var(--color-ink-mut); background: var(--color-
 }
 .icon-btn:active { transform: translateY(0.5px); }
 .icon-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+.icon-btn.is-on {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-line));
+}
 .icon-row {
   display: flex;
   align-items: center;

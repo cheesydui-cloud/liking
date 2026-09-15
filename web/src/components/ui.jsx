@@ -40,6 +40,8 @@ export function Icon({ name, size = 18, className = '' }) {
     more: <><circle cx="12" cy="5" r="1.15" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.15" fill="currentColor" stroke="none" /><circle cx="12" cy="19" r="1.15" fill="currentColor" stroke="none" /></>,
     pencil: <><path d="M4 20h4L19.2 8.8l-4-4L4 16v4z" /><path d="M13.2 6.8l4 4" /></>,
     forward: <><path d="M4 7h11" /><path d="M12 4l3 3-3 3" /><path d="M20 17H9" /><path d="M12 14l-3 3 3 3" /></>,
+    star: <><path d="M12 3.8 14.2 9l5.8.6-4.4 3.9 1.3 5.7L12 16.6 6.9 19.2 8.2 13.5 3.8 9.6 9.6 9z" /></>,
+    'star-on': <><path d="M12 3.8 14.2 9l5.8.6-4.4 3.9 1.3 5.7L12 16.6 6.9 19.2 8.2 13.5 3.8 9.6 9.6 9z" fill="currentColor" /></>,
   }
   return <svg {...common}>{p[name] || p.spark}</svg>
 }

@@ -42,6 +42,7 @@ func (s *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "error", http.StatusInternalServerError)
 		return
 	}
+	clients = filterStarredClients(s.DB, u, clients)
 	writeSubInfo(w, u)
 	over := s.serverOverMap()
 
@@ -94,20 +95,84 @@ func writeSubInfo(w http.ResponseWriter, u *db.User) {
 }
 
 func inboundLive(d *sql.DB, in *db.Inbound, over map[int64]bool) bool {
-	if in == nil || !in.Enabled {
-		return false
+	return inboundSkipReason(d, in, over) == ""
+}
+
+// inboundSkipReason 空字符串表示进订阅。skip 表示端口中转等，不进列表也不进「未进订阅」。
+func inboundSkipReason(d *sql.DB, in *db.Inbound, over map[int64]bool) string {
+	if in == nil {
+		return "skip"
 	}
 	if !corecfg.UserFacing(in.Profile) {
-		return false
+		return "skip"
+	}
+	if !in.Enabled {
+		return "停用"
 	}
 	if over != nil && over[in.ServerID] {
-		return false
+		return "实例已满"
 	}
 	srv, err := db.GetServer(d, in.ServerID)
-	if err != nil {
-		return false
+	if err != nil || srv == nil {
+		return "缺核心"
 	}
-	return db.ServerHasCore(srv, in.Core)
+	if !db.ServerHasCore(srv, in.Core) {
+		return "缺核心"
+	}
+	return ""
+}
+
+func starredSettingKey(userID int64) string {
+	return "starred_inbounds." + strconv.FormatInt(userID, 10)
+}
+
+func loadStarredIDs(d *sql.DB, userID int64) []int64 {
+	raw, _ := db.GetSetting(d, starredSettingKey(userID))
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return []int64{}
+	}
+	var ids []int64
+	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+		return []int64{}
+	}
+	out := make([]int64, 0, len(ids))
+	seen := map[int64]struct{}{}
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func filterStarredClients(d *sql.DB, u *db.User, clients []*db.Client) []*db.Client {
+	if u == nil || u.Role != "admin" || len(clients) == 0 {
+		return clients
+	}
+	ids := loadStarredIDs(d, u.ID)
+	if len(ids) == 0 {
+		return clients
+	}
+	allow := map[int64]struct{}{}
+	for _, id := range ids {
+		allow[id] = struct{}{}
+	}
+	out := make([]*db.Client, 0, len(ids))
+	for _, c := range clients {
+		if c == nil {
+			continue
+		}
+		if _, ok := allow[c.InboundID]; ok {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func detectSubFormat(ua string) string {

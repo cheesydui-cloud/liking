@@ -148,6 +148,7 @@ const PAGE_TITLES = {
   '/traffic': '流量',
   '/settings': '设置',
   '/my': '订阅',
+  '/my/nodes': '节点',
   '/my/forwards': '中转',
   '/my/settings': '设置',
 }
@@ -180,6 +181,12 @@ export function Layout({ children }) {
     if (!isAdmin) return
     api.get('/servers').then(a => putList('servers', a.servers || [])).catch(() => {})
     api.get('/inbounds').then(a => putList('inbounds', a.inbounds || [])).catch(() => {})
+    api.get('/me/nodes').then(d => putList('me-nodes', {
+      nodes: d.nodes || [],
+      hidden: d.hidden || [],
+      starred: d.starred || [],
+      announce: d.announce || '',
+    })).catch(() => {})
   }, [isAdmin])
 
   const logout = async () => {
@@ -223,8 +230,11 @@ export function Layout({ children }) {
     },
   ] : [
     { items: [
-      { to: '/my', end: true, icon: 'spark', label: '我的订阅' },
-      ...(isAdmin ? [{ to: '/my/forwards', icon: 'forward', label: '中转' }] : []),
+      { to: '/my', end: true, icon: 'spark', label: isAdmin ? '订阅' : '我的订阅' },
+      ...(isAdmin ? [
+        { to: '/my/nodes', icon: 'plugs', label: '节点' },
+        { to: '/my/forwards', icon: 'forward', label: '中转' },
+      ] : []),
     ] },
     { label: '账号', items: [{ to: '/my/settings', icon: 'gear', label: '设置' }] },
   ]

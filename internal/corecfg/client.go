@@ -21,11 +21,30 @@ func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
+	existing, err := db.ListClientsByUser(d, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	keep := map[int64]struct{}{}
+	for _, id := range ids {
+		keep[id] = struct{}{}
+	}
+	touched := map[int64]struct{}{}
+	for _, c := range existing {
+		if c == nil {
+			continue
+		}
+		if _, ok := keep[c.InboundID]; ok {
+			continue
+		}
+		if in, err := db.GetInbound(d, c.InboundID); err == nil && in != nil {
+			touched[in.ServerID] = struct{}{}
+		}
+	}
 	if err := db.DeleteClientsNotIn(d, u.ID, ids); err != nil {
 		return nil, err
 	}
 	totals, _ := db.ServerTrafficTotals(d)
-	servers := map[int64]struct{}{}
 	for _, iid := range ids {
 		in, err := db.GetInbound(d, iid)
 		if err != nil {
@@ -34,30 +53,41 @@ func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
 		if !UserFacing(in.Profile) {
 			continue
 		}
-		servers[in.ServerID] = struct{}{}
+		created := false
 		c, err := db.GetClient(d, in.ID, u.ID)
 		if err == sql.ErrNoRows {
 			c, err = newClient(u, in)
 			if err != nil {
 				return nil, err
 			}
+			created = true
 		} else if err != nil {
 			return nil, err
 		}
 		srv, _ := db.GetServer(d, in.ServerID)
 		used := totals[in.ServerID]
 		over := db.ServerOverQuota(srv, used.Up+used.Down)
-		c.Enabled = ok && in.Enabled && !over
-		c.Email = db.EmailFor(u.ID, in.ID)
+		wantEnabled := ok && in.Enabled && !over
+		wantEmail := db.EmailFor(u.ID, in.ID)
+		wantUser := c.Username
 		if in.Profile == ProfileMieru {
-			c.Username = db.EmailFor(u.ID, in.ID)
+			wantUser = wantEmail
+		}
+		if !created && c.Enabled == wantEnabled && c.Email == wantEmail && c.Username == wantUser {
+			continue
+		}
+		c.Enabled = wantEnabled
+		c.Email = wantEmail
+		if in.Profile == ProfileMieru {
+			c.Username = wantUser
 		}
 		if err := db.UpsertClient(d, c); err != nil {
 			return nil, err
 		}
+		touched[in.ServerID] = struct{}{}
 	}
-	out := make([]int64, 0, len(servers))
-	for id := range servers {
+	out := make([]int64, 0, len(touched))
+	for id := range touched {
 		out = append(out, id)
 	}
 	return out, nil

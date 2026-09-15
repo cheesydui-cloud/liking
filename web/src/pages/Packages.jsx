@@ -3,6 +3,7 @@ import { api } from '../lib/api'
 import { peekList, putList } from '../lib/listCache'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, StatusWord } from '../components/ui'
+import { NodePreviewList } from '../components/NodePreview'
 
 const emptyForm = { name: '', gb: '', direction: 'oneway', inbound_ids: [], multipliers: {} }
 
@@ -85,6 +86,10 @@ export default function Packages() {
   const [formOpen, setFormOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [q, setQ] = useState('')
+  const [previewPkg, setPreviewPkg] = useState(null)
+  const [previewData, setPreviewData] = useState(null)
+  const [previewErr, setPreviewErr] = useState('')
+  const [previewLoading, setPreviewLoading] = useState(false)
 
   const load = async () => {
     try {
@@ -188,6 +193,21 @@ export default function Packages() {
     } catch (e) { toast(e.message, 'error') }
   }
 
+  const openPreview = async (p) => {
+    setPreviewPkg(p)
+    setPreviewData(null)
+    setPreviewErr('')
+    setPreviewLoading(true)
+    try {
+      const d = await api.get(`/packages/${p.id}/nodes`)
+      setPreviewData(d)
+    } catch (e) {
+      setPreviewErr(e.message || '加载失败')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
   const pickableIns = useMemo(
     () => ins.filter(x => x.profile !== 'port-forward' && x.user_facing !== false),
     [ins],
@@ -264,6 +284,7 @@ export default function Packages() {
                     </button>
                     <MoreMenu iconOnly items={[
                       { label: '编辑', onSelect: () => startEdit(p) },
+                      { label: '预览', onSelect: () => openPreview(p) },
                       { label: '删除', danger: true, onSelect: () => del(p.id) },
                     ]} />
                   </div>
@@ -399,6 +420,12 @@ export default function Packages() {
             )}
           </div>
         </form>
+      </Modal>
+      <Modal open={!!previewPkg} title={previewPkg ? `${previewPkg.name} 的节点` : '预览'} onClose={() => setPreviewPkg(null)} size="lg" footer={
+        <button type="button" className="btn-ghost" onClick={() => setPreviewPkg(null)}>关闭</button>
+      }>
+        <p className="text-[12px] text-ink-mut mb-3">只读预览这个套餐进订阅的节点，不是管理员自己的订阅。</p>
+        <NodePreviewList data={previewData} error={previewErr} loading={previewLoading} />
       </Modal>
     </div>
   )

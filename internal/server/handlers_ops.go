@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -106,6 +107,31 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{"ok": okN, "total": len(req.Users), "users": out})
 }
 
+type facingNode struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	Profile      string `json:"profile"`
+	ServerName   string `json:"server_name"`
+	ServerID     int64  `json:"server_id"`
+	ServerOnline int    `json:"server_online"`
+	LineKind     string `json:"line_kind"`
+	UsedUp       int64  `json:"used_up"`
+	UsedDown     int64  `json:"used_down"`
+	PeriodUp     int64  `json:"period_up"`
+	PeriodDown   int64  `json:"period_down"`
+	URI          string `json:"uri,omitempty"`
+	Starred      bool   `json:"starred,omitempty"`
+}
+
+type hiddenNode struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	ServerName string `json:"server_name"`
+	Reason     string `json:"reason"`
+}
+
 func (s *Server) handleMeNodes(w http.ResponseWriter, r *http.Request) {
 	u := userFromCtx(r.Context())
 	if u == nil {
@@ -120,56 +146,184 @@ func (s *Server) handleMeNodes(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	over := s.serverOverMap()
-	totals, _ := db.UserInboundTrafficTotals(s.DB, u.ID)
-	type node struct {
-		ID         int64  `json:"id"`
-		Name       string `json:"name"`
-		Host       string `json:"host"`
-		Port       int    `json:"port"`
-		Profile    string `json:"profile"`
-		ServerName string `json:"server_name"`
-		LineKind   string `json:"line_kind"`
-		UsedUp     int64  `json:"used_up"`
-		UsedDown   int64  `json:"used_down"`
-		URI        string `json:"uri,omitempty"`
+	starred := []int64{}
+	if u.Role == "admin" {
+		starred = loadStarredIDs(s.DB, u.ID)
 	}
-	out := []node{}
+	nodes, hidden := s.listFacingNodes(ids, u, true, starred)
+	announce, _ := db.GetSetting(s.DB, "announce")
+	jsonOK(w, map[string]any{
+		"nodes":    nodes,
+		"hidden":   hidden,
+		"starred":  starred,
+		"announce": announce,
+	})
+}
+
+func (s *Server) handleMeStarred(w http.ResponseWriter, r *http.Request) {
+	u := userFromCtx(r.Context())
+	if u == nil {
+		jsonErr(w, http.StatusUnauthorized, "未登录")
+		return
+	}
+	if u.Role != "admin" {
+		jsonErr(w, http.StatusForbidden, "没有权限")
+		return
+	}
+	var req struct {
+		InboundIDs []int64 `json:"inbound_ids"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效请求")
+		return
+	}
+	valid := map[int64]struct{}{}
+	if list, err := db.ListInbounds(s.DB); err == nil {
+		for _, in := range list {
+			if in != nil && corecfg.UserFacing(in.Profile) {
+				valid[in.ID] = struct{}{}
+			}
+		}
+	}
+	keep := make([]int64, 0, len(req.InboundIDs))
+	seen := map[int64]struct{}{}
+	for _, id := range req.InboundIDs {
+		if _, ok := valid[id]; !ok {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		keep = append(keep, id)
+	}
+	raw, err := json.Marshal(keep)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := db.SetSetting(s.DB, starredSettingKey(u.ID), string(raw)); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	jsonOK(w, map[string]any{"starred": keep})
+}
+
+func (s *Server) handleUserNodes(w http.ResponseWriter, r *http.Request) {
+	id, err := chiID(r, "id")
+	if err != nil || id <= 0 {
+		jsonErr(w, http.StatusBadRequest, "无效用户")
+		return
+	}
+	u, err := db.GetUser(s.DB, id)
+	if err != nil || u == nil {
+		jsonErr(w, http.StatusNotFound, "用户不存在")
+		return
+	}
+	ids, err := db.InboundIDsForUser(s.DB, u)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	nodes, hidden := s.listFacingNodes(ids, nil, false, nil)
+	jsonOK(w, map[string]any{"nodes": nodes, "hidden": hidden})
+}
+
+func (s *Server) handlePackageNodes(w http.ResponseWriter, r *http.Request) {
+	id, err := chiID(r, "id")
+	if err != nil || id <= 0 {
+		jsonErr(w, http.StatusBadRequest, "无效套餐")
+		return
+	}
+	p, err := db.GetPackage(s.DB, id)
+	if err != nil || p == nil {
+		jsonErr(w, http.StatusNotFound, "套餐不存在")
+		return
+	}
+	ids, err := db.PackageInboundIDs(s.DB, p)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	nodes, hidden := s.listFacingNodes(ids, nil, false, nil)
+	jsonOK(w, map[string]any{"nodes": nodes, "hidden": hidden})
+}
+
+func (s *Server) listFacingNodes(ids []int64, viewer *db.User, withURI bool, starred []int64) ([]facingNode, []hiddenNode) {
+	over := s.serverOverMap()
+	out := []facingNode{}
+	hidden := []hiddenNode{}
+	starSet := map[int64]struct{}{}
+	for _, id := range starred {
+		starSet[id] = struct{}{}
+	}
+	var totals map[int64]db.TrafficSum
+	period := map[int64]db.TrafficSum{}
+	if viewer != nil {
+		totals, _ = db.UserInboundTrafficTotals(s.DB, viewer.ID)
+		from, to := dayRangeDB(s.DB, 14)
+		if list, err := db.TrafficByInbound(s.DB, from, to, viewer.ID); err == nil {
+			for _, t := range list {
+				period[t.ID] = db.TrafficSum{Up: t.Up, Down: t.Down}
+			}
+		}
+	}
 	for _, id := range ids {
 		in, err := db.GetInbound(s.DB, id)
 		if err != nil || in == nil {
 			continue
 		}
-		if !inboundLive(s.DB, in, over) {
+		reason := inboundSkipReason(s.DB, in, over)
+		if reason == "skip" {
 			continue
 		}
-		host := corecfg.ShareHost(in)
+		if reason != "" {
+			hidden = append(hidden, hiddenNode{
+				ID:         in.ID,
+				Name:       in.Name,
+				ServerName: in.ServerName,
+				Reason:     reason,
+			})
+			continue
+		}
 		kind := in.LineKind
 		if kind == "" {
 			kind = "direct"
 		}
-		n := node{
-			ID:         in.ID,
-			Name:       in.Name,
-			Host:       host,
-			Port:       in.Port,
-			Profile:    in.Profile,
-			ServerName: in.ServerName,
-			LineKind:   kind,
+		n := facingNode{
+			ID:           in.ID,
+			Name:         in.Name,
+			Host:         corecfg.ShareHost(in),
+			Port:         in.Port,
+			Profile:      in.Profile,
+			ServerName:   in.ServerName,
+			ServerID:     in.ServerID,
+			ServerOnline: in.ServerOnline,
+			LineKind:     kind,
 		}
-		if t, ok := totals[in.ID]; ok {
-			n.UsedUp = t.Up
-			n.UsedDown = t.Down
+		if totals != nil {
+			if t, ok := totals[in.ID]; ok {
+				n.UsedUp = t.Up
+				n.UsedDown = t.Down
+			}
 		}
-		if cl, err := db.GetClient(s.DB, in.ID, u.ID); err == nil && cl != nil && cl.Enabled {
-			if uri, err := corecfg.ShareURI(in, cl); err == nil {
-				n.URI = uri
+		if t, ok := period[in.ID]; ok {
+			n.PeriodUp = t.Up
+			n.PeriodDown = t.Down
+		}
+		if _, ok := starSet[in.ID]; ok {
+			n.Starred = true
+		}
+		if withURI && viewer != nil {
+			if cl, err := db.GetClient(s.DB, in.ID, viewer.ID); err == nil && cl != nil && cl.Enabled {
+				if uri, err := corecfg.ShareURI(in, cl); err == nil {
+					n.URI = uri
+				}
 			}
 		}
 		out = append(out, n)
 	}
-	announce, _ := db.GetSetting(s.DB, "announce")
-	jsonOK(w, map[string]any{"nodes": out, "announce": announce})
+	return out, hidden
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {

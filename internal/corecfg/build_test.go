@@ -216,6 +216,70 @@ func TestProvisionAdminGetsClients(t *testing.T) {
 	}
 }
 
+func TestProvisionUserIncremental(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	admin, err := db.CreateUser(d, "admin", "h", "admin", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := db.CreateServer(d, "n1", "10.0.0.1", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &db.Inbound{
+		ServerID: srv.ID, Name: "v1", Profile: ProfileVLESSRealityVision,
+		Port: 443, Enabled: true, LineKind: "direct", Settings: "{}",
+	}
+	if err := Normalize(in, nil); err != nil {
+		t.Fatal(err)
+	}
+	created, err := db.CreateInbound(d, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids, err := ProvisionUser(d, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != srv.ID {
+		t.Fatalf("first provision %+v", ids)
+	}
+	c1, err := db.GetClient(d, created.ID, admin.ID)
+	if err != nil || c1.UUID == "" {
+		t.Fatalf("client %+v %v", c1, err)
+	}
+	ids, err = ProvisionUser(d, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("unchanged provision %+v", ids)
+	}
+	c2, err := db.GetClient(d, created.ID, admin.ID)
+	if err != nil || c2.UUID != c1.UUID {
+		t.Fatalf("uuid changed %+v -> %+v %v", c1, c2, err)
+	}
+	created.Enabled = false
+	if err := db.UpdateInbound(d, created); err != nil {
+		t.Fatal(err)
+	}
+	ids, err = ProvisionUser(d, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != srv.ID {
+		t.Fatalf("disable provision %+v", ids)
+	}
+	c3, err := db.GetClient(d, created.ID, admin.ID)
+	if err != nil || c3.Enabled || c3.UUID != c1.UUID {
+		t.Fatalf("after disable %+v %v", c3, err)
+	}
+}
+
 func TestBuildIncludesMitaWhenCoreNotReported(t *testing.T) {
 	d, err := db.Open(":memory:")
 	if err != nil {

@@ -99,6 +99,7 @@ func (s *Server) Router() http.Handler {
 		r.Put("/api/me", s.handleProfile)
 		r.Get("/api/me/traffic", s.handleMeTraffic)
 		r.Get("/api/me/nodes", s.handleMeNodes)
+		r.Put("/api/me/starred", s.handleMeStarred)
 		r.Post("/api/password", s.handlePassword)
 		r.Post("/api/totp/begin", s.handleTOTPBegin)
 		r.Post("/api/totp/enable", s.handleTOTPEnable)
@@ -141,6 +142,7 @@ func (s *Server) Router() http.Handler {
 			r.Put("/api/users/{id}", s.handleUpdateUser)
 			r.Delete("/api/users/{id}", s.handleDeleteUser)
 			r.Get("/api/users/{id}/traffic", s.handleUserTraffic)
+			r.Get("/api/users/{id}/nodes", s.handleUserNodes)
 			r.Post("/api/users/{id}/reset-traffic", s.handleResetTraffic)
 			r.Post("/api/users/{id}/rotate-sub", s.handleRotateSub)
 			r.Post("/api/users/{id}/password", s.handleSetUserPassword)
@@ -148,6 +150,7 @@ func (s *Server) Router() http.Handler {
 
 			r.Get("/api/packages", s.handleListPackages)
 			r.Post("/api/packages", s.handleCreatePackage)
+			r.Get("/api/packages/{id}/nodes", s.handlePackageNodes)
 			r.Put("/api/packages/{id}", s.handleUpdatePackage)
 			r.Delete("/api/packages/{id}", s.handleDeletePackage)
 

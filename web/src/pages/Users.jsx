@@ -5,6 +5,7 @@ import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, DayBars, Empty, Field, FilterTabs, Icon, Meter, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, billedBytes, fmtBytes, fmtDateShort } from '../components/ui'
 import { SubPanel } from '../components/SubPanel'
+import { NodePreviewList } from '../components/NodePreview'
 
 function randPassword() {
   const a = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
@@ -121,6 +122,10 @@ export default function Users() {
   const [formOpen, setFormOpen] = useState(false)
   const [editUser, setEditUser] = useState(null)
   const [subUser, setSubUser] = useState(null)
+  const [previewUser, setPreviewUser] = useState(null)
+  const [previewData, setPreviewData] = useState(null)
+  const [previewErr, setPreviewErr] = useState('')
+  const [previewLoading, setPreviewLoading] = useState(false)
   const [trafficUser, setTrafficUser] = useState(null)
   const [trafficDetail, setTrafficDetail] = useState(null)
   const [q, setQ] = useState('')
@@ -328,6 +333,21 @@ export default function Users() {
     } catch (e) { toast(e.message, 'error') }
   }
 
+  const openPreview = async (u) => {
+    setPreviewUser(u)
+    setPreviewData(null)
+    setPreviewErr('')
+    setPreviewLoading(true)
+    try {
+      const d = await api.get(`/users/${u.id}/nodes`)
+      setPreviewData(d)
+    } catch (e) {
+      setPreviewErr(e.message || '加载失败')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase()
     const now = Date.now()
@@ -417,6 +437,7 @@ export default function Users() {
                     <MoreMenu iconOnly items={[
                       { label: '编辑', onSelect: () => openEdit(u) },
                       { label: '订阅', onSelect: () => setSubUser(u) },
+                      { label: '预览节点', onSelect: () => openPreview(u) },
                       { label: '复制名片', onSelect: () => copyCard(u) },
                       { label: '重置密码', onSelect: () => resetPassword(u) },
                       { sep: true },
@@ -526,6 +547,12 @@ export default function Users() {
         </>
       }>
         {subUser && <SubPanel token={subUser.sub_token} onCopied={(msg, kind) => toast(msg, kind)} />}
+      </Modal>
+      <Modal open={!!previewUser} title={previewUser ? `${previewUser.username} 会看到的节点` : '预览节点'} onClose={() => setPreviewUser(null)} size="lg" footer={
+        <button type="button" className="btn-ghost" onClick={() => setPreviewUser(null)}>关闭</button>
+      }>
+        <p className="text-[12px] text-ink-mut mb-3">只读预览，不是管理员自己的订阅。不含该用户的分享链接。</p>
+        <NodePreviewList data={previewData} error={previewErr} loading={previewLoading} />
       </Modal>
       <Modal open={!!trafficUser} title={trafficUser ? `${trafficUser.username} 的流量` : '流量'} onClose={() => { setTrafficUser(null); setTrafficDetail(null) }} size="lg" footer={
         <button type="button" className="btn-ghost" onClick={() => { setTrafficUser(null); setTrafficDetail(null) }}>关闭</button>

@@ -10,6 +10,7 @@ import Forwards from './pages/Forwards'
 import Traffic from './pages/Traffic'
 import Settings from './pages/Settings'
 import My from './pages/My'
+import MyNodes from './pages/MyNodes'
 import MyForwards from './pages/MyForwards'
 import { BrandMark } from './components/ui'
 
@@ -64,6 +65,7 @@ export default function App() {
               <Route path="/certs" element={<Navigate to="/settings?tab=certs" replace />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/password" element={<Navigate to="/settings?tab=account" replace />} />
+              <Route path="/my/nodes" element={<MyNodes />} />
               <Route path="/my/forwards" element={<MyForwards />} />
             </Route>
           </Route>
