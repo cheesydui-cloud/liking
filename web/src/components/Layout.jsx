@@ -209,15 +209,15 @@ export function Layout({ children }) {
     {
       label: '服务器',
       items: [
-        { to: '/nodes', icon: 'plugs', label: '节点' },
         { to: '/servers', icon: 'servers', label: '实例' },
+        { to: '/nodes', icon: 'plugs', label: '节点' },
       ],
     },
     {
       label: '业务',
       items: [
-        { to: '/users', icon: 'users', label: '用户' },
         { to: '/packages', icon: 'package', label: '套餐' },
+        { to: '/users', icon: 'users', label: '用户' },
         { to: '/forwards', icon: 'forward', label: '中转' },
         { to: '/traffic', icon: 'bars', label: '流量' },
       ],
