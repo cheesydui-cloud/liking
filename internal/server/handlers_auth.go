@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -298,13 +297,13 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	alertItems, alerts := dashboardAlerts(s.DB, servers, users)
 	announce, _ := db.GetSetting(s.DB, "announce")
 	jsonOK(w, map[string]any{
-		"version":     version.Version,
-		"servers":     len(servers),
-		"online":      online,
-		"users":       len(users),
-		"members":     members,
-		"inbounds":    len(ins),
-		"packages":    len(pkgs),
+		"version":      version.Version,
+		"servers":      len(servers),
+		"online":       online,
+		"users":        len(users),
+		"members":      members,
+		"inbounds":     len(ins),
+		"packages":     len(pkgs),
 		"used_bytes":   used,
 		"raw_bytes":    raw,
 		"today_bytes":  today,
@@ -314,64 +313,11 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"days":         days,
 		"hours":        hours,
 		"server_list":  servers,
-		"alerts":      alerts,
-		"alert_items": alertItems,
-		"announce":    announce,
-		"timezone":    db.Timezone(s.DB),
+		"alerts":       alerts,
+		"alert_items":  alertItems,
+		"announce":     announce,
+		"timezone":     db.Timezone(s.DB),
 	})
-}
-
-type dashAlert struct {
-	Text string `json:"text"`
-	To   string `json:"to,omitempty"`
-	Kind string `json:"kind,omitempty"`
-}
-
-func dashboardAlerts(d *sql.DB, servers []*db.Server, users []*db.User) ([]dashAlert, []string) {
-	var items []dashAlert
-	push := func(text, to, kind string) {
-		items = append(items, dashAlert{Text: text, To: to, Kind: kind})
-	}
-	for _, x := range servers {
-		if x.LastError != "" {
-			push(x.Name+" 下发失败", "/servers", "danger")
-		}
-		if x.NeedsReinstall {
-			push(x.Name+" Agent 太旧，请用安装命令重装", "/servers", "warn")
-		} else if x.NeedsUpgrade {
-			push(x.Name+" Agent 可升级到 "+version.Version, "/servers", "warn")
-		}
-		if x.OverQuota {
-			push(x.Name+" 已达流量上限，节点已停用", "/servers", "danger")
-		}
-	}
-	for _, u := range users {
-		if u == nil || u.Role == "admin" {
-			continue
-		}
-		if u.QuotaRatio >= 100 {
-			push(u.Username+" 流量已用尽", "/users", "danger")
-		} else if u.QuotaRatio >= 80 {
-			push(u.Username+" 流量已用 "+strconv.Itoa(u.QuotaRatio)+"%", "/users", "warn")
-		}
-	}
-	certs, _ := db.ListCerts(d)
-	now := time.Now().Unix()
-	for _, c := range certs {
-		if c.ExpiresAt > 0 && c.ExpiresAt < now {
-			push("证书 "+c.Name+" 已过期", "/settings?tab=certs", "danger")
-		} else if c.ExpiresAt > 0 && c.ExpiresAt < now+30*86400 {
-			push("证书 "+c.Name+" 即将到期", "/settings?tab=certs", "warn")
-		}
-	}
-	if len(items) > 12 {
-		items = items[:12]
-	}
-	out := make([]string, 0, len(items))
-	for _, it := range items {
-		out = append(out, it.Text)
-	}
-	return items, out
 }
 
 func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {

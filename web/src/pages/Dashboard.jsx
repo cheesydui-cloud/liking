@@ -48,22 +48,22 @@ export default function Dashboard() {
         <Link to="/traffic" className="dash-stat">
           <div className="dash-stat-k">计费</div>
           <div className="dash-stat-v">{fmtBytes(d.used_bytes || 0)}</div>
-          <div className="dash-stat-h">累计 × 倍率</div>
+          <div className="dash-stat-h">用户已用</div>
         </Link>
         <Link to="/traffic" className="dash-stat">
           <div className="dash-stat-k">今日</div>
           <div className="dash-stat-v">{fmtBytes(d.today_bytes || 0)}</div>
-          <div className="dash-stat-h">实际最后一跳</div>
+          <div className="dash-stat-h">当天合计</div>
         </Link>
         <Link to="/traffic" className="dash-stat">
           <div className="dash-stat-k">本月</div>
           <div className="dash-stat-v">{fmtBytes(d.month_bytes || 0)}</div>
-          <div className="dash-stat-h">实际 · 每月 1 号清零</div>
+          <div className="dash-stat-h">1 日起算</div>
         </Link>
         <Link to="/users" className="dash-stat">
           <div className="dash-stat-k">用户</div>
           <div className="dash-stat-v">{d.members ?? d.users ?? 0}</div>
-          <div className="dash-stat-h">系统用户</div>
+          <div className="dash-stat-h">不含管理员</div>
         </Link>
         <div className="dash-stat is-live">
           <div className="dash-stat-k">实时</div>
@@ -71,20 +71,23 @@ export default function Dashboard() {
             <span>↑ {fmtBps(d.nic_up_bps || 0)}</span>
             <span>↓ {fmtBps(d.nic_down_bps || 0)}</span>
           </div>
-          <div className="dash-stat-h">全部规则入口</div>
+          <div className="dash-stat-h">全部用户节点</div>
         </div>
       </div>
       {alerts.length > 0 && (
         <div className="mb-5">
-          {alerts.map((a, i) => (
-            <Link
-              key={i}
-              to={a.to || '/servers'}
-              className={`alert-row ${a.kind === 'danger' ? 'is-fault' : 'is-warn'}`}
-            >
-              {a.text}
-            </Link>
-          ))}
+          <div className="text-[14px] font-semibold mb-1">报警</div>
+          <div className="flex flex-col gap-1.5">
+            {alerts.map((a, i) => (
+              <Link
+                key={`${a.to || ''}-${a.text}-${i}`}
+                to={a.to || '/servers'}
+                className={`alert-row ${a.kind === 'danger' ? 'is-fault' : 'is-warn'}`}
+              >
+                {a.text}
+              </Link>
+            ))}
+          </div>
         </div>
       )}
       {hours.length > 0 && (

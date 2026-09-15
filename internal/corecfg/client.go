@@ -44,7 +44,8 @@ func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
 	if err := db.DeleteClientsNotIn(d, u.ID, ids); err != nil {
 		return nil, err
 	}
-	totals, _ := db.ServerTrafficTotals(d)
+	srvs, _ := db.ListServers(d)
+	totals, _ := db.ServerQuotaTotals(d, srvs, db.ClockNow(d))
 	for _, iid := range ids {
 		in, err := db.GetInbound(d, iid)
 		if err != nil {

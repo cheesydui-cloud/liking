@@ -29,7 +29,7 @@ func TestDashboardAlertsOldAgent(t *testing.T) {
 		{Name: "jp", NeedsReinstall: true},
 		{Name: "hk", NeedsUpgrade: true},
 	}, []*db.User{
-		{Username: "alice", Role: "user", QuotaRatio: 90},
+		{Username: "alice", Role: "user", Enabled: true, QuotaRatio: 90},
 		{Username: "admin", Role: "admin", QuotaRatio: 100},
 	})
 	if len(items) != 3 || len(strs) != 3 {

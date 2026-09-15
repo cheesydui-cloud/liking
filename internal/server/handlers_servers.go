@@ -36,7 +36,7 @@ func (s *Server) reconcileOnline(list []*db.Server) {
 
 func (s *Server) decorateServers(list []*db.Server) {
 	s.reconcileOnline(list)
-	totals, _ := db.ServerTrafficTotals(s.DB)
+	totals, _ := db.ServerQuotaTotals(s.DB, list, db.ClockNow(s.DB))
 	for _, x := range list {
 		x.Token = ""
 		if t, ok := totals[x.ID]; ok {
@@ -70,7 +70,7 @@ func (s *Server) serverOverMap() map[int64]bool {
 	if err != nil {
 		return nil
 	}
-	totals, _ := db.ServerTrafficTotals(s.DB)
+	totals, _ := db.ServerQuotaTotals(s.DB, list, db.ClockNow(s.DB))
 	out := map[int64]bool{}
 	for _, x := range list {
 		t := totals[x.ID]

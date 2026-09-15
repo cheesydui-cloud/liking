@@ -56,7 +56,10 @@ type Hub struct {
 	userPartAt map[int64]time.Time              // serverID -> last stats time
 }
 
-const userLiveTTL = 15 * time.Second
+// userLiveTTL is how long a per-server live sample stays visible after the last
+// successful stats tick that included that user. Empty Collect results must not
+// clear it: the agent TryLock / statsquery timeout path sends no samples.
+var userLiveTTL = 15 * time.Second
 
 func NewHub(d *sql.DB) *Hub {
 	return &Hub{DB: d, conns: map[int64]*agentConn{}}
@@ -548,6 +551,9 @@ func (h *Hub) applyStats(serverID int64, samples []wsproto.Sample) {
 }
 
 func (h *Hub) noteUserLive(serverID int64, live map[int64]liveBytes) {
+	if len(live) == 0 {
+		return
+	}
 	now := time.Now()
 	h.userLiveMu.Lock()
 	defer h.userLiveMu.Unlock()
@@ -565,15 +571,6 @@ func (h *Hub) noteUserLive(serverID int64, live map[int64]liveBytes) {
 		}
 	}
 	h.userPartAt[serverID] = now
-	for uid, parts := range h.userParts {
-		if _, ok := live[uid]; ok {
-			continue
-		}
-		delete(parts, serverID)
-		if len(parts) == 0 {
-			delete(h.userParts, uid)
-		}
-	}
 	for uid, b := range live {
 		parts := h.userParts[uid]
 		if parts == nil {
@@ -584,6 +581,20 @@ func (h *Hub) noteUserLive(serverID int64, live map[int64]liveBytes) {
 			up:   int64(float64(b.up) / dt),
 			down: int64(float64(b.down) / dt),
 			at:   now,
+		}
+	}
+	h.pruneUserLiveLocked(now)
+}
+
+func (h *Hub) pruneUserLiveLocked(now time.Time) {
+	for uid, parts := range h.userParts {
+		for sid, p := range parts {
+			if now.Sub(p.at) > userLiveTTL {
+				delete(parts, sid)
+			}
+		}
+		if len(parts) == 0 {
+			delete(h.userParts, uid)
 		}
 	}
 }
@@ -610,11 +621,8 @@ func (h *Hub) clearAllUserLive() {
 func (h *Hub) UserLive(id int64) (up, down int64, ok bool) {
 	h.userLiveMu.Lock()
 	defer h.userLiveMu.Unlock()
-	now := time.Now()
+	h.pruneUserLiveLocked(time.Now())
 	for _, p := range h.userParts[id] {
-		if now.Sub(p.at) > userLiveTTL {
-			continue
-		}
 		up += p.up
 		down += p.down
 		ok = true
@@ -625,12 +633,9 @@ func (h *Hub) UserLive(id int64) (up, down int64, ok bool) {
 func (h *Hub) AllUserLive() (up, down int64) {
 	h.userLiveMu.Lock()
 	defer h.userLiveMu.Unlock()
-	now := time.Now()
+	h.pruneUserLiveLocked(time.Now())
 	for _, parts := range h.userParts {
 		for _, p := range parts {
-			if now.Sub(p.at) > userLiveTTL {
-				continue
-			}
 			up += p.up
 			down += p.down
 		}

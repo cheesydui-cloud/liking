@@ -154,13 +154,115 @@ func TestUserLiveBps(t *testing.T) {
 
 	h.applyStats(srv.ID, nil)
 	up, down, ok = h.UserLive(u.ID)
-	if !ok || up != 1000 || down != 1000 {
-		t.Fatalf("after idle server1 up=%d down=%d ok=%v", up, down, ok)
+	if !ok || up != 3000 || down != 5000 {
+		t.Fatalf("empty tick must keep live up=%d down=%d ok=%v", up, down, ok)
 	}
 
 	h.clearUserLive(srv2.ID)
+	up, down, ok = h.UserLive(u.ID)
+	if !ok || up != 2000 || down != 4000 {
+		t.Fatalf("after disconnect server2 up=%d down=%d ok=%v", up, down, ok)
+	}
+
+	h.clearUserLive(srv.ID)
 	if _, _, ok := h.UserLive(u.ID); ok {
 		t.Fatal("expected idle after both servers cleared")
+	}
+}
+
+func TestUserLiveChainInbound(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	tok, err := db.RandomHex(8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := db.CreateServer(d, "jp", "1.1.1.1", tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := db.CreateInbound(d, &db.Inbound{
+		ServerID: srv.ID, Name: "tw", Profile: "vless-reality-vision", Protocol: "vless",
+		Network: "tcp", Security: "reality", Core: "xray", Listen: "0.0.0.0",
+		Port: 18461, Enabled: true, Settings: "{}", LineKind: "chain",
+		ExitURI: "ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpwYXNz@203.0.113.9:51491",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := db.CreateUser(d, "mmvxv", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	email := db.EmailFor(u.ID, in.ID)
+	if err := db.UpsertClient(d, &db.Client{
+		InboundID: in.ID, UserID: u.ID, Email: email, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(d)
+	h.applyStats(srv.ID, []wsproto.Sample{
+		{Email: "relay.i4", Up: 99999, Down: 99999},
+		{Email: email, Up: 10000, Down: 40000},
+	})
+	up, down, ok := h.UserLive(u.ID)
+	if !ok || up != 2000 || down != 8000 {
+		t.Fatalf("chain live up=%d down=%d ok=%v", up, down, ok)
+	}
+	h.applyStats(srv.ID, []wsproto.Sample{{Email: "relay.i4", Up: 1, Down: 1}})
+	up, down, ok = h.UserLive(u.ID)
+	if !ok || up != 2000 || down != 8000 {
+		t.Fatalf("relay-only tick wiped chain live up=%d down=%d ok=%v", up, down, ok)
+	}
+}
+
+func TestUserLiveTTL(t *testing.T) {
+	old := userLiveTTL
+	userLiveTTL = 20 * time.Millisecond
+	defer func() { userLiveTTL = old }()
+
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	tok, err := db.RandomHex(8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := db.CreateServer(d, "n1", "1.1.1.1", tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := db.CreateInbound(d, &db.Inbound{
+		ServerID: srv.ID, Name: "a", Profile: "vless-reality", Protocol: "vless",
+		Network: "tcp", Security: "reality", Core: "xray", Listen: "0.0.0.0",
+		Port: 443, Enabled: true, Settings: "{}", LineKind: "direct",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := db.CreateUser(d, "bob", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	email := db.EmailFor(u.ID, in.ID)
+	if err := db.UpsertClient(d, &db.Client{
+		InboundID: in.ID, UserID: u.ID, Email: email, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(d)
+	h.applyStats(srv.ID, []wsproto.Sample{{Email: email, Up: 10000, Down: 20000}})
+	if _, _, ok := h.UserLive(u.ID); !ok {
+		t.Fatal("expected live")
+	}
+	time.Sleep(40 * time.Millisecond)
+	if _, _, ok := h.UserLive(u.ID); ok {
+		t.Fatal("expected ttl expiry")
 	}
 }
 

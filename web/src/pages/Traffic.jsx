@@ -126,7 +126,7 @@ export default function Traffic() {
         </div>
       </div>
       <div className="mt-4 text-[12px] text-ink-mut">
-        1 GiB = 1024³ 字节。链式只计入站，不重复计落地。计费含双向和节点倍率，原始是内核累计，网卡是 Agent 实时。
+        1 GiB = 1024³ 字节。链式只计入站，不重复计落地。计费：单向只计下行，双向计上下行；节点倍率在入账时乘。原始是内核累计。
       </div>
     </div>
   )

@@ -2390,7 +2390,7 @@ func TestTrafficAPI(t *testing.T) {
 	for _, u := range list.Users {
 		if u.Username == "carol" {
 			found = true
-			if u.BilledBytes != 50 || u.Direction != "twoway" || u.TrafficCap != 1024 {
+			if u.BilledBytes != 25 || u.Direction != "twoway" || u.TrafficCap != 1024 {
 				t.Fatalf("user %+v", u)
 			}
 		}
@@ -2434,7 +2434,7 @@ func TestTrafficAPI(t *testing.T) {
 	if len(tr.Inbounds) != 1 || tr.Inbounds[0].ID != inb.Inbound.ID {
 		t.Fatalf("inbounds %+v", tr.Inbounds)
 	}
-	if tr.Billed != 50 {
+	if tr.Billed != 25 {
 		t.Fatalf("billed %d", tr.Billed)
 	}
 
@@ -2464,7 +2464,7 @@ func TestTrafficAPI(t *testing.T) {
 		Hours []any `json:"hours"`
 	}
 	decodeRes(t, res, &dash)
-	if dash.Used != 50 || dash.Today != 100 || len(dash.Days) != 30 || len(dash.Hours) != 24 {
+	if dash.Used != 25 || dash.Today != 100 || len(dash.Days) != 30 || len(dash.Hours) != 24 {
 		t.Fatalf("dash %+v", dash)
 	}
 

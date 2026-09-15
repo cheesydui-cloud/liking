@@ -455,10 +455,21 @@ type TrafficSum struct {
 }
 
 func ServerTrafficTotals(d *sql.DB) (map[int64]TrafficSum, error) {
-	rows, err := d.Query(`SELECT i.server_id, COALESCE(SUM(t.up),0), COALESCE(SUM(t.down),0)
+	return queryServerTraffic(d, `SELECT i.server_id, COALESCE(SUM(t.up),0), COALESCE(SUM(t.down),0)
 		FROM inbounds i
 		LEFT JOIN traffic_daily t ON t.inbound_id = i.id
 		GROUP BY i.server_id`)
+}
+
+func serverTrafficSince(d *sql.DB, fromDay string) (map[int64]TrafficSum, error) {
+	return queryServerTraffic(d, `SELECT i.server_id, COALESCE(SUM(t.up),0), COALESCE(SUM(t.down),0)
+		FROM inbounds i
+		LEFT JOIN traffic_daily t ON t.inbound_id = i.id AND t.day >= ?
+		GROUP BY i.server_id`, fromDay)
+}
+
+func queryServerTraffic(d *sql.DB, q string, args ...any) (map[int64]TrafficSum, error) {
+	rows, err := d.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -473,6 +484,43 @@ func ServerTrafficTotals(d *sql.DB) (map[int64]TrafficSum, error) {
 		out[id] = s
 	}
 	return out, rows.Err()
+}
+
+// ServerQuotaTotals is lifetime traffic, except servers with traffic_reset_day
+// only count from the current monthly cycle.
+func ServerQuotaTotals(d *sql.DB, servers []*Server, now time.Time) (map[int64]TrafficSum, error) {
+	lifetime, err := ServerTrafficTotals(d)
+	if err != nil {
+		return nil, err
+	}
+	if lifetime == nil {
+		lifetime = map[int64]TrafficSum{}
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	groups := map[string][]int64{}
+	for _, s := range servers {
+		day := ServerCycleStartDay(s, now)
+		if day == "" {
+			continue
+		}
+		groups[day] = append(groups[day], s.ID)
+	}
+	for day, ids := range groups {
+		part, err := serverTrafficSince(d, day)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			if t, ok := part[id]; ok {
+				lifetime[id] = t
+			} else {
+				lifetime[id] = TrafficSum{}
+			}
+		}
+	}
+	return lifetime, nil
 }
 
 func DeleteServer(d *sql.DB, id int64) error {
@@ -1234,12 +1282,17 @@ func UserInboundTrafficTotals(d *sql.DB, userID int64) (map[int64]TrafficSum, er
 	return out, rows.Err()
 }
 
+// UserBilledBytes is the quota-facing total.
+// 单向 counts downlink only; 双向 counts uplink + downlink.
+// Node multipliers are already folded into used_up / used_down at write time.
 func UserBilledBytes(u *User, pkg *Package) int64 {
-	raw := u.UsedUp + u.UsedDown
-	if pkg != nil && pkg.Direction == "twoway" {
-		return raw * 2
+	if u == nil {
+		return 0
 	}
-	return raw
+	if pkg != nil && pkg.Direction == "oneway" {
+		return u.UsedDown
+	}
+	return u.UsedUp + u.UsedDown
 }
 
 func UserLimitBytes(u *User, pkg *Package) int64 {

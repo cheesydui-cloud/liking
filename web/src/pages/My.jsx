@@ -118,6 +118,8 @@ export default function My() {
               <span className="stat-val">{user?.expires_at ? fmtDate(user.expires_at) : '—'}</span>
               {user?.expires_at && user.expires_at * 1000 < Date.now() ? (
                 <div className="text-[12px] mt-1" style={{ color: 'var(--color-danger)' }}>已到期，节点已从订阅摘掉</div>
+              ) : user?.expires_at && user.expires_at * 1000 < Date.now() + 7 * 86400 * 1000 ? (
+                <div className="text-[12px] mt-1" style={{ color: 'var(--color-warn)' }}>即将到期</div>
               ) : null}
             </div>
           </>

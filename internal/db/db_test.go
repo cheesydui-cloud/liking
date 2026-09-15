@@ -131,7 +131,7 @@ func TestOpenMigrateAndCRUD(t *testing.T) {
 	lim := int64(10)
 	user.TrafficLimit = &lim
 	user.UsedUp = 6
-	user.UsedDown = 5
+	user.UsedDown = 11
 	if UserAccessOK(user, p) {
 		t.Fatal("over quota")
 	}
@@ -513,6 +513,56 @@ func TestServerTrafficTotals(t *testing.T) {
 	}
 }
 
+func TestServerQuotaTotalsCycle(t *testing.T) {
+	d, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	tok, err := RandomHex(8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := CreateServer(d, "n1", "1.1.1.1", tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := CreateInbound(d, &Inbound{
+		ServerID: s.ID, Name: "a", Profile: "ss2022", Protocol: "shadowsocks",
+		Network: "tcp", Security: "none", Core: "xray", Listen: "0.0.0.0",
+		Port: 8789, Enabled: true, Settings: "{}", LineKind: "direct",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := CreateUser(d, "alice", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AddDailyTraffic(d, "2026-08-20", u.ID, in.ID, 1000, 2000); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddDailyTraffic(d, "2026-09-02", u.ID, in.ID, 50, 70); err != nil {
+		t.Fatal(err)
+	}
+	s.TrafficResetDay = 1
+	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.FixedZone("CST", 8*3600))
+	got, err := ServerQuotaTotals(d, []*Server{s}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[s.ID].Up != 50 || got[s.ID].Down != 70 {
+		t.Fatalf("cycle %+v", got[s.ID])
+	}
+	life, err := ServerTrafficTotals(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if life[s.ID].Up != 1050 || life[s.ID].Down != 2070 {
+		t.Fatalf("lifetime %+v", life[s.ID])
+	}
+}
+
 func TestClientByIdentityAndBilling(t *testing.T) {
 	d, err := Open(":memory:")
 	if err != nil {
@@ -564,8 +614,24 @@ func TestClientByIdentityAndBilling(t *testing.T) {
 		t.Fatal(err)
 	}
 	u, _ = GetUser(d, u.ID)
-	if u.BilledBytes != 50 || u.Direction != "twoway" || u.TrafficCap != 1024 {
+	if u.BilledBytes != 25 || u.Direction != "twoway" || u.TrafficCap != 1024 {
 		t.Fatalf("billing %+v", u)
+	}
+}
+
+func TestUserBilledOnewayAndTwoway(t *testing.T) {
+	u := &User{UsedUp: 10, UsedDown: 15}
+	if n := UserBilledBytes(u, nil); n != 25 {
+		t.Fatalf("nil pkg %d", n)
+	}
+	if n := UserBilledBytes(u, &Package{Direction: "twoway"}); n != 25 {
+		t.Fatalf("twoway %d", n)
+	}
+	if n := UserBilledBytes(u, &Package{Direction: "oneway"}); n != 15 {
+		t.Fatalf("oneway %d", n)
+	}
+	if n := UserBilledBytes(nil, &Package{Direction: "twoway"}); n != 0 {
+		t.Fatalf("nil user %d", n)
 	}
 }
 
@@ -709,7 +775,7 @@ func TestUserNeedsProvisionQuota(t *testing.T) {
 	if err != nil || need {
 		t.Fatalf("under quota %v %v", need, err)
 	}
-	if err := AddUserTraffic(d, u.ID, 100, 0); err != nil {
+	if err := AddUserTraffic(d, u.ID, 0, 100); err != nil {
 		t.Fatal(err)
 	}
 	u, _ = GetUser(d, u.ID)

@@ -26,13 +26,17 @@ export function ymd(ts) {
   if (!ts) return ''
   const d = new Date(Number(ts) * 1000)
   if (Number.isNaN(d.getTime())) return ''
-  const z = n => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d)
 }
 
 export function ymdToUnix(s) {
   if (!s) return 0
-  const d = new Date(`${s}T23:59:59`)
+  const d = new Date(`${s}T23:59:59+08:00`)
   const n = d.getTime()
   return Number.isNaN(n) ? 0 : Math.floor(n / 1000)
 }

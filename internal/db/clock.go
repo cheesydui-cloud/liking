@@ -77,3 +77,38 @@ func trimTZ(s string) string {
 	}
 	return string(out)
 }
+
+// MonthResetStart is midnight of the current billing cycle when reset is on
+// calendar day `day` (1–31) in now's location. Day 31 in a short month clamps.
+func MonthResetStart(now time.Time, day int) time.Time {
+	if day < 1 || day > 31 {
+		return time.Time{}
+	}
+	loc := now.Location()
+	y, m, _ := now.Date()
+	start := clampMonthDay(y, m, day, loc)
+	if now.Before(start) {
+		prev := time.Date(y, m, 1, 0, 0, 0, 0, loc).AddDate(0, -1, 0)
+		start = clampMonthDay(prev.Year(), prev.Month(), day, loc)
+	}
+	return start
+}
+
+func clampMonthDay(y int, m time.Month, day int, loc *time.Location) time.Time {
+	last := time.Date(y, m+1, 0, 0, 0, 0, 0, loc).Day()
+	if day > last {
+		day = last
+	}
+	return time.Date(y, m, day, 0, 0, 0, 0, loc)
+}
+
+func ServerCycleStartDay(s *Server, now time.Time) string {
+	if s == nil || s.TrafficResetDay < 1 {
+		return ""
+	}
+	t := MonthResetStart(now, s.TrafficResetDay)
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format("2006-01-02")
+}

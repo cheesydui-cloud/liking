@@ -62,13 +62,24 @@ function speedLimitBps(mbps) {
   return Math.round(n * 1_000_000 / 8)
 }
 
+function userExpiryTs(u) {
+  const a = Number(u?.expires_at) || 0
+  const b = Number(u?.package_expires_at) || 0
+  if (!a) return b
+  if (!b) return a
+  return Math.min(a, b)
+}
+
 function UserFlags({ u }) {
   if (u.role === 'admin') return null
   const flags = []
-  if (u.expires_at && u.expires_at * 1000 < Date.now()) flags.push(<Badge key="exp" tone="danger">到期</Badge>)
-  else if (u.traffic_cap > 0 && billedBytes(u) >= u.traffic_cap) flags.push(<Badge key="cap" tone="danger">超量</Badge>)
+  const exp = userExpiryTs(u)
+  const now = Date.now()
+  if (exp && exp * 1000 < now) flags.push(<Badge key="exp" tone="danger">到期</Badge>)
+  else if (exp && exp * 1000 < now + 7 * 86400 * 1000) flags.push(<Badge key="soon" tone="warn">即将到期</Badge>)
+  if (u.traffic_cap > 0 && billedBytes(u) >= u.traffic_cap) flags.push(<Badge key="cap" tone="danger">超量</Badge>)
   else if (u.quota_ratio >= 80) flags.push(<Badge key="q" tone="warn">{u.quota_ratio}%</Badge>)
-  else if (u.enabled === false) flags.push(<Badge key="off" tone="muted">停用</Badge>)
+  if (u.enabled === false) flags.push(<Badge key="off" tone="muted">停用</Badge>)
   if (u.speed_limit > 0) flags.push(<Badge key="spd" tone="muted">{u.speed_limit} Mbps</Badge>)
   if (!flags.length) return null
   return flags
@@ -108,7 +119,8 @@ function formatUserCard(u, pkgs = []) {
 
 function userTone(u) {
   if (u.enabled === false) return 'is-off'
-  if (u.expires_at && u.expires_at * 1000 < Date.now()) return 'is-fault'
+  const exp = userExpiryTs(u)
+  if (exp && exp * 1000 < Date.now()) return 'is-fault'
   if (u.traffic_cap > 0 && billedBytes(u) >= u.traffic_cap) return 'is-fault'
   return 'is-pkg'
 }
@@ -383,7 +395,8 @@ export default function Users() {
         if (!(u.quota_ratio >= 80 && u.quota_ratio < 100)) return false
       }
       if (statusFilter === 'expired') {
-        if (!(u.expires_at && u.expires_at * 1000 < now)) return false
+        const exp = userExpiryTs(u)
+        if (!(exp && exp * 1000 < now)) return false
       }
       if (!needle) return true
       const hay = [u.username, u.remark, u.package_name]
@@ -439,7 +452,8 @@ export default function Users() {
           {rows.map(u => {
             const cap = u.traffic_cap || trafficCap(u, pkgs)
             const used = billedBytes(u)
-            const expired = !!(u.expires_at && u.expires_at * 1000 < Date.now())
+            const expTs = userExpiryTs(u)
+            const expired = !!(expTs && expTs * 1000 < Date.now())
             const capBps = speedLimitBps(u.speed_limit)
             const upOver = capBps > 0 && (u.net_up_bps || 0) > capBps
             const downOver = capBps > 0 && (u.net_down_bps || 0) > capBps
@@ -477,7 +491,7 @@ export default function Users() {
                 </div>
                 <div className="machine-metrics">
                   <Metric label="套餐" value={u.package_name || '未绑定'} plain />
-                  <Metric label="到期" value={u.expires_at ? fmtDateShort(u.expires_at) : '不限期'} danger={expired} />
+                  <Metric label="到期" value={expTs ? fmtDateShort(expTs) : '不限期'} danger={expired} />
                   <Metric label="额度" value={cap > 0 ? fmtBytes(cap) : '不限'} />
                   <Metric label="计费" value={u.direction === 'twoway' ? '双向' : '单向'} plain />
                   <Metric label="上行" value={fmtBps(u.net_up_bps)} tone={upOver ? undefined : 'up'} danger={upOver} />
@@ -594,7 +608,11 @@ export default function Users() {
         {trafficUser && (
           <div>
             <Meter className="mb-3" value={billedBytes(trafficUser)} max={trafficUser.traffic_cap || trafficCap(trafficUser, pkgs)} />
-            {trafficUser.direction === 'twoway' ? <div className="text-[12px] text-ink-mut mb-3">套餐双向计费，进度条已按上下行之和 × 2。</div> : null}
+            {trafficUser.direction === 'twoway' ? (
+              <div className="text-[12px] text-ink-mut mb-3">双向：上行和下行都计入额度。节点倍率在入账时已乘过。</div>
+            ) : trafficUser.direction === 'oneway' ? (
+              <div className="text-[12px] text-ink-mut mb-3">单向：只计下行。</div>
+            ) : null}
             {trafficDetail ? (
               <>
                 <div className="text-[13px] font-medium mb-2">近 14 日（原始）</div>

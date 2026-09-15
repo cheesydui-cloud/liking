@@ -324,6 +324,7 @@ export default function Packages() {
                 <button type="button" className={`seg-item${f.direction === 'oneway' ? ' is-on' : ''}`} onClick={() => setF({ ...f, direction: 'oneway' })}>单向</button>
                 <button type="button" className={`seg-item${f.direction === 'twoway' ? ' is-on' : ''}`} onClick={() => setF({ ...f, direction: 'twoway' })}>双向</button>
               </div>
+              <div className="text-[12px] text-ink-mut mt-1.5">{f.direction === 'twoway' ? '上行 + 下行计入额度' : '只计下行'}</div>
             </div>
           </div>
           <div>

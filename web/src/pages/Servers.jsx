@@ -478,6 +478,8 @@ export default function Servers() {
             const st = serverStatus(s)
             const fresh = st === '未安装'
             const expired = isExpired(s.expires_at)
+            const expSoon = !expired && s.expires_at && Number(s.expires_at) * 1000 < Date.now() + 7 * 86400 * 1000
+            const quotaPct = s.traffic_limit ? Math.min(100, Math.floor(used * 100 / Number(s.traffic_limit))) : 0
             return (
               <div key={s.id} className={`machine ${machineTone(s)}`}>
                 <div className="machine-head">
@@ -485,10 +487,11 @@ export default function Servers() {
                     <div className="machine-title">
                       <span className="machine-name truncate">{s.name}</span>
                       <LineStatus status={st} />
-                      {expired ? <Badge tone="danger">已到期</Badge> : null}
+                      {expired ? <Badge tone="danger">已到期</Badge> : expSoon ? <Badge tone="warn">即将到期</Badge> : null}
                       {s.needs_reinstall ? <Badge tone="warn">需重装</Badge>
                         : s.needs_upgrade ? <Badge tone="warn">可升级</Badge> : null}
-                      {s.over_quota ? <Badge tone="danger">流量已满</Badge> : null}
+                      {s.over_quota ? <Badge tone="danger">流量已满</Badge>
+                        : quotaPct >= 80 ? <Badge tone="warn">{quotaPct}%</Badge> : null}
                     </div>
                     <div className="machine-host">
                       <span className="machine-host-addr">{s.public_host || '未填公开地址'}</span>
