@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import { UserProvider, useUser, Layout } from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -25,58 +25,48 @@ function Loading() {
   )
 }
 
-function AdminRoute({ children }) {
+function AuthLayout() {
   const { user } = useUser()
   if (user === undefined) return <Loading />
   if (user === null) return <Navigate to="/login" replace />
-  if (user.role !== 'admin') return <Navigate to="/my" replace />
-  return <Layout>{children}</Layout>
+  return (
+    <Layout>
+      <Outlet />
+    </Layout>
+  )
 }
 
-function UserRoute({ children }) {
+function RequireAdmin() {
   const { user } = useUser()
-  if (user === undefined) return <Loading />
-  if (user === null) return <Navigate to="/login" replace />
-  return <Layout>{children}</Layout>
-}
-
-function AdminUserRoute({ children }) {
-  const { user } = useUser()
-  if (user === undefined) return <Loading />
-  if (user === null) return <Navigate to="/login" replace />
-  if (user.role !== 'admin') return <Navigate to="/my" replace />
-  return <Layout>{children}</Layout>
-}
-
-function Root() {
-  const { user } = useUser()
-  if (user === undefined) return <Loading />
-  if (user === null) return <Navigate to="/login" replace />
-  if (user.role !== 'admin') return <Navigate to="/my" replace />
-  return <Layout><Dashboard /></Layout>
+  if (user?.role !== 'admin') return <Navigate to="/my" replace />
+  return <Outlet />
 }
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter useTransitions={false}>
       <UserProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route path="/" element={<Root />} />
-          <Route path="/nodes" element={<AdminRoute><Nodes /></AdminRoute>} />
-          <Route path="/servers" element={<AdminRoute><Servers /></AdminRoute>} />
-          <Route path="/inbounds" element={<Navigate to="/nodes" replace />} />
-          <Route path="/users" element={<AdminRoute><Users /></AdminRoute>} />
-          <Route path="/packages" element={<AdminRoute><Packages /></AdminRoute>} />
-          <Route path="/forwards" element={<AdminRoute><Forwards /></AdminRoute>} />
-          <Route path="/traffic" element={<AdminRoute><Traffic /></AdminRoute>} />
-          <Route path="/certs" element={<Navigate to="/settings?tab=certs" replace />} />
-          <Route path="/settings" element={<AdminRoute><Settings /></AdminRoute>} />
-          <Route path="/password" element={<Navigate to="/settings?tab=account" replace />} />
-          <Route path="/my" element={<UserRoute><My /></UserRoute>} />
-          <Route path="/my/forwards" element={<AdminUserRoute><MyForwards /></AdminUserRoute>} />
-          <Route path="/my/settings" element={<UserRoute><Settings accountOnly /></UserRoute>} />
-          <Route path="/my/password" element={<Navigate to="/my/settings" replace />} />
+          <Route element={<AuthLayout />}>
+            <Route path="/my" element={<My />} />
+            <Route path="/my/settings" element={<Settings accountOnly />} />
+            <Route path="/my/password" element={<Navigate to="/my/settings" replace />} />
+            <Route element={<RequireAdmin />}>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/nodes" element={<Nodes />} />
+              <Route path="/servers" element={<Servers />} />
+              <Route path="/inbounds" element={<Navigate to="/nodes" replace />} />
+              <Route path="/users" element={<Users />} />
+              <Route path="/packages" element={<Packages />} />
+              <Route path="/forwards" element={<Forwards />} />
+              <Route path="/traffic" element={<Traffic />} />
+              <Route path="/certs" element={<Navigate to="/settings?tab=certs" replace />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/password" element={<Navigate to="/settings?tab=account" replace />} />
+              <Route path="/my/forwards" element={<MyForwards />} />
+            </Route>
+          </Route>
           <Route path="*" element={
             <div className="min-h-dvh grid place-items-center">
               <div className="text-center">

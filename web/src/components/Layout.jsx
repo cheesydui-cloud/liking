@@ -168,6 +168,7 @@ export function Layout({ children }) {
   const announceLong = announceText.length > 80
 
   useEffect(() => {
+    setOpen(false)
     mainRef.current?.focus({ preventScroll: true })
   }, [loc.pathname])
 
@@ -235,7 +236,7 @@ export function Layout({ children }) {
             <div className="sidebar-ver mt-0.5">{isAdmin && userView ? '用户页' : isAdmin ? '管理' : '用户'}{version ? ` v${version}` : ''}</div>
           </div>
         </div>
-        <nav className="flex-1 px-2.5 overflow-y-auto" onClick={() => setOpen(false)}>
+        <nav className="flex-1 px-2.5 overflow-y-auto">
           {groups.map((g, i) => (
             <div key={i} className={i ? 'mt-3.5' : ''}>
               {g.label && <div className="sidebar-group px-2.5 mb-1">{g.label}</div>}
