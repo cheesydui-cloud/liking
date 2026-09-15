@@ -148,25 +148,61 @@ export function billedBytes(u) {
   return (Number(u.used_up) || 0) + (Number(u.used_down) || 0)
 }
 
-export function DayBars({ days = [], className = '' }) {
+function hourLabel(hour) {
+  const s = String(hour || '')
+  const hh = s.length >= 13 ? s.slice(11, 13) : s.slice(-2)
+  return hh
+}
+
+function hourTitle(hour) {
+  const s = String(hour || '')
+  if (s.length >= 13) return `${s.slice(5, 10)} ${s.slice(11, 13)}:00`
+  return s
+}
+
+export function DayBars({ days = [], className = '', legend = true, label = '' }) {
   const rows = Array.isArray(days) ? days : []
   const max = Math.max(1, ...rows.map(d => (Number(d.up) || 0) + (Number(d.down) || 0)))
   if (!rows.length) return null
+  const isHour = rows.some(d => d.hour)
+  const dense = rows.length > 16
+  const aria = label || (isHour ? '近 24 小时流量' : '每日流量')
   return (
-    <div className={`traffic-bars ${className}`} role="img" aria-label="近 14 日流量">
-      {rows.map(d => {
-        const tot = (Number(d.up) || 0) + (Number(d.down) || 0)
-        const pct = Math.max(tot ? 6 : 2, Math.round((tot / max) * 100))
-        const label = String(d.day || '').slice(5)
-        return (
-          <div key={d.day} className="traffic-bar" title={`${d.day}  ↑${fmtBytes(d.up || 0)}  ↓${fmtBytes(d.down || 0)}`}>
-            <div className="traffic-bar-track">
-              <div className="traffic-bar-fill" style={{ height: `${pct}%` }} />
+    <div className={className}>
+      {legend ? (
+        <div className="traffic-legend">
+          <span><i className="is-up" aria-hidden="true" />上行</span>
+          <span><i className="is-down" aria-hidden="true" />下行</span>
+        </div>
+      ) : null}
+      <div className={`traffic-bars ${isHour ? 'is-hours' : 'is-days'} ${dense ? 'is-dense' : ''}`} role="img" aria-label={aria}>
+        {rows.map((d, i) => {
+          const up = Number(d.up) || 0
+          const down = Number(d.down) || 0
+          const tot = up + down
+          const pct = Math.max(tot ? 6 : 2, Math.round((tot / max) * 100))
+          const key = d.hour || d.day || i
+          const text = d.hour ? hourLabel(d.hour) : String(d.day || '').slice(5)
+          const title = d.hour ? hourTitle(d.hour) : d.day
+          return (
+            <div key={key} className="traffic-bar" title={`${title}  ↑${fmtBytes(up)}  ↓${fmtBytes(down)}`}>
+              <div className="traffic-bar-track">
+                <div className="traffic-bar-stack" style={{ height: `${pct}%` }}>
+                  {tot === 0 ? (
+                    <div className="traffic-bar-fill is-empty" />
+                  ) : (
+                    <>
+                      {up > 0 ? <div className="traffic-bar-fill is-up" style={{ flex: up }} /> : null}
+                      {down > 0 ? <div className="traffic-bar-fill is-down" style={{ flex: down }} /> : null}
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="traffic-bar-label">{text}</div>
             </div>
-            <div className="traffic-bar-label">{label}</div>
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
     </div>
   )
 }

@@ -2461,9 +2461,10 @@ func TestTrafficAPI(t *testing.T) {
 		Used  int64 `json:"used_bytes"`
 		Today int64 `json:"today_bytes"`
 		Days  []any `json:"days"`
+		Hours []any `json:"hours"`
 	}
 	decodeRes(t, res, &dash)
-	if dash.Used != 50 || dash.Today != 100 || len(dash.Days) != 14 {
+	if dash.Used != 50 || dash.Today != 100 || len(dash.Days) != 30 || len(dash.Hours) != 24 {
 		t.Fatalf("dash %+v", dash)
 	}
 

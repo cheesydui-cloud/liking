@@ -37,6 +37,7 @@ var backupTables = []string{
 }
 
 var wipeOrder = []string{
+	"traffic_hourly",
 	"traffic_daily",
 	"clients",
 	"package_inbounds",

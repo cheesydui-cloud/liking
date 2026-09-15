@@ -1,0 +1,5 @@
+CREATE TABLE traffic_hourly (
+  hour TEXT PRIMARY KEY,
+  up   INTEGER NOT NULL DEFAULT 0,
+  down INTEGER NOT NULL DEFAULT 0
+);

@@ -634,6 +634,39 @@ func TestAddTrafficBatch(t *testing.T) {
 	if u.UsedUp != 11 || u.UsedDown != 22 {
 		t.Fatalf("user traffic %+v", u)
 	}
+	hour := ClockHour(d)
+	got, err := TrafficHourSeries(d, hour, hour)
+	if err != nil || len(got) != 1 || got[0].Up != 11 || got[0].Down != 22 || got[0].Hour != hour {
+		t.Fatalf("hourly %+v %v", got, err)
+	}
+	if err := AddTrafficBatch(d, "2026-09-15", items); err != nil {
+		t.Fatal(err)
+	}
+	got, err = TrafficHourSeries(d, hour, hour)
+	if err != nil || len(got) != 1 || got[0].Up != 22 || got[0].Down != 44 {
+		t.Fatalf("hourly add %+v %v", got, err)
+	}
+}
+
+func TestFillTrafficHours(t *testing.T) {
+	loc := time.FixedZone("CST", 8*3600)
+	now := time.Date(2026, 9, 15, 17, 40, 0, 0, loc)
+	got := []TrafficPoint{{Hour: "2026-09-15T17", Up: 10, Down: 20}}
+	filled := FillTrafficHours(now, 24, got)
+	if len(filled) != 24 {
+		t.Fatalf("len %d", len(filled))
+	}
+	if filled[0].Hour != "2026-09-14T18" {
+		t.Fatalf("first %s", filled[0].Hour)
+	}
+	last := filled[len(filled)-1]
+	if last.Hour != "2026-09-15T17" || last.Up != 10 || last.Down != 20 {
+		t.Fatalf("last %+v", last)
+	}
+	from, to := HourRange(now, 24)
+	if from != "2026-09-14T18" || to != "2026-09-15T17" {
+		t.Fatalf("range %s %s", from, to)
+	}
 }
 
 func TestUserNeedsProvisionQuota(t *testing.T) {

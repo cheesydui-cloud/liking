@@ -38,6 +38,19 @@ func ClockDay(d *sql.DB) string {
 	return ClockNow(d).Format("2006-01-02")
 }
 
+func ClockHour(d *sql.DB) string {
+	return HourKey(ClockNow(d))
+}
+
+func hourFloor(t time.Time) time.Time {
+	t = t.In(t.Location())
+	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, t.Location())
+}
+
+func HourKey(t time.Time) string {
+	return hourFloor(t).Format("2006-01-02T15")
+}
+
 func ClockMonth(d *sql.DB) string {
 	return ClockNow(d).Format("2006-01")
 }

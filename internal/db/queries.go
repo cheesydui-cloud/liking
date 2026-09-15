@@ -276,6 +276,9 @@ func AddTrafficBatch(d *sql.DB, day string, items []TrafficWrite) error {
 	if len(items) == 0 {
 		return nil
 	}
+	now := ClockNow(d)
+	hour := HourKey(now)
+	cutoff := HourKey(now.Add(-48 * time.Hour))
 	tx, err := d.Begin()
 	if err != nil {
 		return err
@@ -292,6 +295,13 @@ func AddTrafficBatch(d *sql.DB, day string, items []TrafficWrite) error {
 		return err
 	}
 	defer dayStmt.Close()
+	hourStmt, err := tx.Prepare(`INSERT INTO traffic_hourly(hour,up,down) VALUES(?,?,?)
+		ON CONFLICT(hour) DO UPDATE SET up=up+excluded.up, down=down+excluded.down`)
+	if err != nil {
+		return err
+	}
+	defer hourStmt.Close()
+	var hourUp, hourDown int64
 	for _, it := range items {
 		if it.BilledUp == 0 && it.BilledDown == 0 && it.RawUp == 0 && it.RawDown == 0 {
 			continue
@@ -300,6 +310,16 @@ func AddTrafficBatch(d *sql.DB, day string, items []TrafficWrite) error {
 			return err
 		}
 		if _, err := dayStmt.Exec(day, it.UserID, it.InboundID, it.RawUp, it.RawDown); err != nil {
+			return err
+		}
+		hourUp += it.RawUp
+		hourDown += it.RawDown
+	}
+	if hourUp != 0 || hourDown != 0 {
+		if _, err := hourStmt.Exec(hour, hourUp, hourDown); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM traffic_hourly WHERE hour<?`, cutoff); err != nil {
 			return err
 		}
 	}
@@ -1011,7 +1031,8 @@ func ClientByIdentity(d *sql.DB, id string) (*Client, error) {
 }
 
 type TrafficPoint struct {
-	Day  string `json:"day"`
+	Day  string `json:"day,omitempty"`
+	Hour string `json:"hour,omitempty"`
 	Up   int64  `json:"up"`
 	Down int64  `json:"down"`
 }
@@ -1052,6 +1073,57 @@ func TrafficSeries(d *sql.DB, from, to string, userID, inboundID int64) ([]Traff
 		out = []TrafficPoint{}
 	}
 	return out, rows.Err()
+}
+
+func TrafficHourSeries(d *sql.DB, from, to string) ([]TrafficPoint, error) {
+	rows, err := d.Query(`SELECT hour, up, down FROM traffic_hourly WHERE hour>=? AND hour<=? ORDER BY hour`, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TrafficPoint
+	for rows.Next() {
+		var p TrafficPoint
+		if err := rows.Scan(&p.Hour, &p.Up, &p.Down); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	if out == nil {
+		out = []TrafficPoint{}
+	}
+	return out, rows.Err()
+}
+
+func HourRange(now time.Time, n int) (from, to string) {
+	if n < 1 {
+		n = 24
+	}
+	end := hourFloor(now)
+	start := end.Add(-time.Duration(n-1) * time.Hour)
+	return HourKey(start), HourKey(end)
+}
+
+func FillTrafficHours(now time.Time, n int, got []TrafficPoint) []TrafficPoint {
+	if n < 1 {
+		n = 24
+	}
+	end := hourFloor(now)
+	start := end.Add(-time.Duration(n-1) * time.Hour)
+	idx := map[string]TrafficPoint{}
+	for _, p := range got {
+		idx[p.Hour] = p
+	}
+	var out []TrafficPoint
+	for t := start; !t.After(end); t = t.Add(time.Hour) {
+		key := HourKey(t)
+		if p, ok := idx[key]; ok {
+			out = append(out, p)
+		} else {
+			out = append(out, TrafficPoint{Hour: key})
+		}
+	}
+	return out
 }
 
 func FillTrafficDays(from, to string, got []TrafficPoint) []TrafficPoint {

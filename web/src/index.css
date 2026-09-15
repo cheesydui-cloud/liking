@@ -817,12 +817,36 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
   .page-cta-bar > .btn-primary { flex: 1; min-height: 44px; }
 }
 
+.traffic-legend {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--color-ink-mut);
+}
+.traffic-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.traffic-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.traffic-legend i.is-up { background: var(--color-ok); }
+.traffic-legend i.is-down { background: var(--color-accent); }
+
 .traffic-bars {
   display: flex;
   align-items: stretch;
   gap: 4px;
   height: 132px;
 }
+.traffic-bars.is-dense { gap: 2px; }
 .traffic-bar {
   flex: 1;
   min-width: 0;
@@ -837,12 +861,31 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
   align-items: flex-end;
   justify-content: center;
 }
-.traffic-bar-fill {
+.traffic-bar-stack {
   width: 70%;
   max-width: 22px;
   min-height: 2px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
   border-radius: 6px 6px 0 0;
+  overflow: hidden;
+}
+.traffic-bars.is-dense .traffic-bar-stack {
+  width: 80%;
+  max-width: 16px;
+}
+.traffic-bar-fill {
+  width: 100%;
+  min-height: 0;
+}
+.traffic-bar-fill.is-up { background: var(--color-ok); }
+.traffic-bar-fill.is-down { background: var(--color-accent); }
+.traffic-bar-fill.is-empty {
+  flex: 1;
   background: var(--color-accent);
+  opacity: 0.22;
+  min-height: 2px;
 }
 .traffic-bar-label {
   margin-top: 6px;
@@ -850,6 +893,14 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
   line-height: 1;
   color: var(--color-ink-mut);
   font-variant-numeric: tabular-nums;
+}
+.traffic-bars.is-dense .traffic-bar-label { font-size: 9px; }
+
+@media (max-width: 720px) {
+  .traffic-bars.is-hours .traffic-bar:nth-child(even) .traffic-bar-label,
+  .traffic-bars.is-days.is-dense .traffic-bar:not(:nth-child(5n)):not(:last-child) .traffic-bar-label {
+    visibility: hidden;
+  }
 }
 
 .plan-card, .server-card {

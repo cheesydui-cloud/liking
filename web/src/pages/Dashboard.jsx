@@ -38,7 +38,8 @@ export default function Dashboard() {
   const next = steps.find(s => !s.done)
   const showSetup = (d.members || 0) === 0
   const heroTone = (d.online || 0) > 0 ? 'is-live' : (d.servers || 0) > 0 ? 'is-off' : 'is-off'
-  const hasBars = (d.days || []).some(x => (x.up || 0) + (x.down || 0) > 0)
+  const hasHourBars = (d.hours || []).some(x => (x.up || 0) + (x.down || 0) > 0)
+  const hasDayBars = (d.days || []).some(x => (x.up || 0) + (x.down || 0) > 0)
 
   return (
     <div>
@@ -108,11 +109,20 @@ export default function Dashboard() {
         )}
       </div>
       ) : null}
-      {hasBars && (
+      {hasHourBars && (
         <div className="mt-5">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-[14px] font-semibold">近 14 日</div>
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[14px] font-semibold">近 24 小时</div>
             <Link to="/traffic" className="btn-ghost h-8">明细</Link>
+          </div>
+          <DayBars days={d.hours} />
+        </div>
+      )}
+      {hasDayBars && (
+        <div className="mt-5">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[14px] font-semibold">近 30 日</div>
+            {!hasHourBars ? <Link to="/traffic" className="btn-ghost h-8">明细</Link> : null}
           </div>
           <DayBars days={d.days} />
         </div>

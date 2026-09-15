@@ -277,9 +277,13 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		raw += u.UsedUp + u.UsedDown
 		used += u.BilledBytes
 	}
-	from, to := dayRangeDB(s.DB, 14)
+	from, to := dayRangeDB(s.DB, 30)
 	days, _ := db.TrafficSeries(s.DB, from, to, 0, 0)
 	days = db.FillTrafficDays(from, to, days)
+	now := db.ClockNow(s.DB)
+	hourFrom, hourTo := db.HourRange(now, 24)
+	hours, _ := db.TrafficHourSeries(s.DB, hourFrom, hourTo)
+	hours = db.FillTrafficHours(now, 24, hours)
 	var today int64
 	if n := len(days); n > 0 {
 		today = days[n-1].Up + days[n-1].Down
@@ -298,6 +302,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"raw_bytes":   raw,
 		"today_bytes": today,
 		"days":        days,
+		"hours":       hours,
 		"server_list": servers,
 		"alerts":      alerts,
 		"alert_items": alertItems,
