@@ -622,6 +622,22 @@ func (h *Hub) UserLive(id int64) (up, down int64, ok bool) {
 	return
 }
 
+func (h *Hub) AllUserLive() (up, down int64) {
+	h.userLiveMu.Lock()
+	defer h.userLiveMu.Unlock()
+	now := time.Now()
+	for _, parts := range h.userParts {
+		for _, p := range parts {
+			if now.Sub(p.at) > userLiveTTL {
+				continue
+			}
+			up += p.up
+			down += p.down
+		}
+	}
+	return
+}
+
 func readEnvelope(ctx context.Context, ws *websocket.Conn, timeout time.Duration) (wsproto.Envelope, error) {
 	c, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

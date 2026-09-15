@@ -288,6 +288,13 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if n := len(days); n > 0 {
 		today = days[n-1].Up + days[n-1].Down
 	}
+	monthFrom := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Format("2006-01-02")
+	monthDays, _ := db.TrafficSeries(s.DB, monthFrom, to, 0, 0)
+	var monthRaw int64
+	for _, p := range monthDays {
+		monthRaw += p.Up + p.Down
+	}
+	nicUp, nicDown := s.Hub.AllUserLive()
 	alertItems, alerts := dashboardAlerts(s.DB, servers, users)
 	announce, _ := db.GetSetting(s.DB, "announce")
 	jsonOK(w, map[string]any{
@@ -298,12 +305,15 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"members":     members,
 		"inbounds":    len(ins),
 		"packages":    len(pkgs),
-		"used_bytes":  used,
-		"raw_bytes":   raw,
-		"today_bytes": today,
-		"days":        days,
-		"hours":       hours,
-		"server_list": servers,
+		"used_bytes":   used,
+		"raw_bytes":    raw,
+		"today_bytes":  today,
+		"month_bytes":  monthRaw,
+		"nic_up_bps":   nicUp,
+		"nic_down_bps": nicDown,
+		"days":         days,
+		"hours":        hours,
+		"server_list":  servers,
 		"alerts":      alerts,
 		"alert_items": alertItems,
 		"announce":    announce,

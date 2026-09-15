@@ -37,24 +37,41 @@ export default function Dashboard() {
   ]
   const next = steps.find(s => !s.done)
   const showSetup = (d.members || 0) === 0
-  const heroTone = (d.online || 0) > 0 ? 'is-live' : (d.servers || 0) > 0 ? 'is-off' : 'is-off'
   const hours = d.hours || []
   const hasDayBars = (d.days || []).some(x => (x.up || 0) + (x.down || 0) > 0)
+  const showServers = (d.servers || 0) > 0 || !showSetup
 
   return (
     <div>
       <PageHead title="总览" />
-      <div className={`run-hero ${heroTone}`}>
-        <div className="run-hero-count">{d.online ?? 0}</div>
-        <div className="run-hero-label">
-          <span className="run-hero-live">在线</span>
-          <span className="text-ink-mut"> / 共 {d.servers || 0} 台</span>
-        </div>
-        <div className="run-hero-meta">
-          <Link to="/nodes">节点 <span className="n">{d.inbounds || 0}</span></Link>
-          <Link to="/users">用户 <span className="n">{d.members ?? d.users ?? 0}</span></Link>
-          <Link to="/traffic">计费 <span className="n">{fmtBytes(d.used_bytes || 0)}</span></Link>
-          <Link to="/traffic">今日 <span className="n">{fmtBytes(d.today_bytes || 0)}</span></Link>
+      <div className="dash-stats">
+        <Link to="/traffic" className="dash-stat">
+          <div className="dash-stat-k">计费</div>
+          <div className="dash-stat-v">{fmtBytes(d.used_bytes || 0)}</div>
+          <div className="dash-stat-h">累计 × 倍率</div>
+        </Link>
+        <Link to="/traffic" className="dash-stat">
+          <div className="dash-stat-k">今日</div>
+          <div className="dash-stat-v">{fmtBytes(d.today_bytes || 0)}</div>
+          <div className="dash-stat-h">实际最后一跳</div>
+        </Link>
+        <Link to="/traffic" className="dash-stat">
+          <div className="dash-stat-k">本月</div>
+          <div className="dash-stat-v">{fmtBytes(d.month_bytes || 0)}</div>
+          <div className="dash-stat-h">实际 · 每月 1 号清零</div>
+        </Link>
+        <Link to="/users" className="dash-stat">
+          <div className="dash-stat-k">用户</div>
+          <div className="dash-stat-v">{d.members ?? d.users ?? 0}</div>
+          <div className="dash-stat-h">系统用户</div>
+        </Link>
+        <div className="dash-stat is-live">
+          <div className="dash-stat-k">实时</div>
+          <div className="dash-stat-live">
+            <span>↑ {fmtBps(d.nic_up_bps || 0)}</span>
+            <span>↓ {fmtBps(d.nic_down_bps || 0)}</span>
+          </div>
+          <div className="dash-stat-h">全部规则入口</div>
         </div>
       </div>
       {alerts.length > 0 && (
@@ -70,8 +87,40 @@ export default function Dashboard() {
           ))}
         </div>
       )}
-      {(d.servers || 0) > 0 || !showSetup ? (
-      <div className="card overflow-hidden">
+      {hours.length > 0 && (
+        <div className="mt-5">
+          <HourArea hours={hours} />
+        </div>
+      )}
+      {hasDayBars && (
+        <div className="mt-5">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[14px] font-semibold">近 30 日</div>
+            <Link to="/traffic" className="btn-ghost h-8">明细</Link>
+          </div>
+          <DayBars days={d.days} />
+        </div>
+      )}
+      {showSetup ? (
+        <div className="setup-list">
+          <div className="text-[14px] font-semibold mb-1">开始使用</div>
+          <p className="text-[13px] text-ink-mut mb-2">按顺序做完就能给用户发订阅。</p>
+          {steps.map(s => (
+            <div key={s.n} className={`setup-step ${s.done ? 'is-done' : (next && next.n === s.n ? 'is-now' : '')}`}>
+              <div className="setup-n" aria-hidden="true">{s.done ? <Icon name="check" size={12} /> : s.n}</div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[14px] font-medium">{s.t}</div>
+                {s.hint ? <div className="text-[12px] text-ink-mut mt-0.5">{s.hint}</div> : null}
+              </div>
+              {!s.done && s.to && next && next.n === s.n ? (
+                <Link to={s.to} className="btn-primary h-8 shrink-0">去做</Link>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {showServers ? (
+      <div className="card overflow-hidden mt-5">
         <div className="panel-head">
           <div>实例</div>
           <Link to="/servers" className="btn-ghost h-8">管理</Link>
@@ -108,38 +157,6 @@ export default function Dashboard() {
           </div>
         )}
       </div>
-      ) : null}
-      {hours.length > 0 && (
-        <div className="mt-5">
-          <HourArea hours={hours} />
-        </div>
-      )}
-      {hasDayBars && (
-        <div className="mt-5">
-          <div className="flex items-center justify-between mb-1">
-            <div className="text-[14px] font-semibold">近 30 日</div>
-            <Link to="/traffic" className="btn-ghost h-8">明细</Link>
-          </div>
-          <DayBars days={d.days} />
-        </div>
-      )}
-      {showSetup ? (
-        <div className="setup-list">
-          <div className="text-[14px] font-semibold mb-1">开始使用</div>
-          <p className="text-[13px] text-ink-mut mb-2">按顺序做完就能给用户发订阅。</p>
-          {steps.map(s => (
-            <div key={s.n} className={`setup-step ${s.done ? 'is-done' : (next && next.n === s.n ? 'is-now' : '')}`}>
-              <div className="setup-n" aria-hidden="true">{s.done ? <Icon name="check" size={12} /> : s.n}</div>
-              <div className="min-w-0 flex-1">
-                <div className="text-[14px] font-medium">{s.t}</div>
-                {s.hint ? <div className="text-[12px] text-ink-mut mt-0.5">{s.hint}</div> : null}
-              </div>
-              {!s.done && s.to && next && next.n === s.n ? (
-                <Link to={s.to} className="btn-primary h-8 shrink-0">去做</Link>
-              ) : null}
-            </div>
-          ))}
-        </div>
       ) : null}
       {d.online === 0 && (d.servers || 0) > 0 && (
         <div className="alert-row is-warn mt-4">

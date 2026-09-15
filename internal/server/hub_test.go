@@ -163,3 +163,53 @@ func TestUserLiveBps(t *testing.T) {
 		t.Fatal("expected idle after both servers cleared")
 	}
 }
+
+func TestAllUserLiveIncludesAdmin(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	tok, _ := db.RandomHex(8)
+	srv, err := db.CreateServer(d, "n1", "1.1.1.1", tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := db.CreateInbound(d, &db.Inbound{
+		ServerID: srv.ID, Name: "a", Profile: "vless-reality", Protocol: "vless",
+		Network: "tcp", Security: "reality", Core: "xray", Listen: "0.0.0.0",
+		Port: 443, Enabled: true, Settings: "{}", LineKind: "direct",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := db.CreateUser(d, "root", "h", "admin", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := db.CreateUser(d, "bob", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	emAdmin := db.EmailFor(admin.ID, in.ID)
+	emBob := db.EmailFor(bob.ID, in.ID)
+	if err := db.UpsertClient(d, &db.Client{InboundID: in.ID, UserID: admin.ID, Email: emAdmin, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertClient(d, &db.Client{InboundID: in.ID, UserID: bob.ID, Email: emBob, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(d)
+	h.applyStats(srv.ID, []wsproto.Sample{
+		{Email: emAdmin, Up: 10000, Down: 20000},
+		{Email: emBob, Up: 5000, Down: 5000},
+	})
+	up, down := h.AllUserLive()
+	if up != 3000 || down != 5000 {
+		t.Fatalf("all live up=%d down=%d", up, down)
+	}
+	aUp, aDown, ok := h.UserLive(admin.ID)
+	if !ok || aUp != 2000 || aDown != 4000 {
+		t.Fatalf("admin live up=%d down=%d ok=%v", aUp, aDown, ok)
+	}
+}
