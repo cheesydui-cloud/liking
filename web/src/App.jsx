@@ -34,7 +34,7 @@ function AuthLayout() {
   if (user === null) return <Navigate to="/login" replace />
   return (
     <Layout>
-      <ErrorBoundary resetKey={loc.pathname}>
+      <ErrorBoundary key={loc.pathname}>
         <Outlet />
       </ErrorBoundary>
     </Layout>

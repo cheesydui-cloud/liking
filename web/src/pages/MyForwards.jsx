@@ -61,8 +61,8 @@ const emptyForm = {
 export default function MyForwards({ embedded = false } = {}) {
   const toast = useToast()
   const dialog = useDialog()
-  const [servers, setServers] = useState(() => peekList('servers') ?? [])
-  const [list, setList] = useState(() => peekList('inbounds') ?? [])
+  const [servers, setServers] = useState(() => asArray(peekList('servers')))
+  const [list, setList] = useState(() => asArray(peekList('inbounds')))
   const [ready, setReady] = useState(() => peekList('inbounds') !== undefined)
   const [f, setF] = useState(emptyForm)
   const [editId, setEditId] = useState(0)

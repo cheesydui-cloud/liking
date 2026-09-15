@@ -45,9 +45,8 @@ export default function MyNodes() {
     } catch (e) {
       if (isAbort(e)) return
       setError(e.message || '加载失败')
-    } finally {
-      setReady(true)
     }
+    setReady(true)
   }
   useEffect(() => startPoll(async (signal) => {
     try {
@@ -64,10 +63,10 @@ export default function MyNodes() {
     } catch (e) {
       if (isAbort(e)) return
       setError(e.message || '加载失败')
-      throw e
-    } finally {
       setReady(true)
+      throw e
     }
+    setReady(true)
   }, 5000), [])
 
   const nodes = asArray(payload.nodes)

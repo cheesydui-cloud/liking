@@ -7,12 +7,6 @@ export class ErrorBoundary extends Component {
     return { err }
   }
 
-  componentDidUpdate(prev) {
-    if (this.props.resetKey !== prev.props.resetKey && this.state.err) {
-      this.setState({ err: null })
-    }
-  }
-
   render() {
     if (!this.state.err) return this.props.children
     const msg = this.state.err.message || '未知错误'

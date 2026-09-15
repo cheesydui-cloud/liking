@@ -53,10 +53,10 @@ export default function My() {
     } catch (e) {
       if (isAbort(e)) return
       setError(e.message || '加载失败')
-      throw e
-    } finally {
       setReady(true)
+      throw e
     }
+    setReady(true)
   }, 5000), [])
 
   const used = billedBytes(user)

@@ -173,12 +173,16 @@ export function Layout({ children }) {
   const userView = loc.pathname === '/my' || loc.pathname.startsWith('/my/')
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
   const mainRef = useRef(null)
+  const scrollRef = useRef(null)
   const pageTitle = pageTitleOf(loc.pathname)
   const announceText = (announce || '').trim()
   const announceLong = announceText.length > 80
 
   useEffect(() => {
     setOpen(false)
+    // Layout stays mounted across routes; the content pane keeps its scrollTop otherwise.
+    if (scrollRef.current) scrollRef.current.scrollTop = 0
+    window.scrollTo(0, 0)
     mainRef.current?.focus({ preventScroll: true })
   }, [loc.pathname])
 
@@ -310,7 +314,7 @@ export function Layout({ children }) {
             <Icon name={dark ? 'sun' : 'moon'} size={15} />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 sm:py-5 pb-24 sm:pb-5">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 sm:py-5 pb-24 sm:pb-5">
           <div className="max-w-[1280px]">
             {announceLong ? <div className="notice mb-4">{announceText}</div> : null}
             {children}

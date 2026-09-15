@@ -79,8 +79,8 @@ function withGhProxyFlag(cmd, on, url) {
 export default function Servers() {
   const toast = useToast()
   const dialog = useDialog()
-  const [list, setList] = useState(() => peekList('servers') ?? [])
-  const [ins, setIns] = useState(() => peekList('inbounds') ?? [])
+  const [list, setList] = useState(() => asArray(peekList('servers')))
+  const [ins, setIns] = useState(() => asArray(peekList('inbounds')))
   const [ready, setReady] = useState(() => peekList('servers') !== undefined)
   const [name, setName] = useState('')
   const [host, setHost] = useState('')
