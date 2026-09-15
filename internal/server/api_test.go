@@ -1039,8 +1039,8 @@ func TestUserPasswordAndExtend(t *testing.T) {
 		}
 		if u.ID == created.User.ID {
 			sawBob = true
-			if u.Password != created.Password {
-				t.Fatalf("card password %q want %q", u.Password, created.Password)
+			if u.Password != "" {
+				t.Fatalf("list still has password %q", u.Password)
 			}
 		}
 	}
@@ -1131,8 +1131,8 @@ func TestUserPasswordAndExtend(t *testing.T) {
 	if edited.User.Username != "robert" || edited.User.Remark != "vip" || edited.User.TrafficLimit == nil || *edited.User.TrafficLimit != 5*1024*1024*1024 || edited.User.SpeedLimit != 50 {
 		t.Fatalf("edit %+v", edited.User)
 	}
-	if edited.User.Password != "newpass12" {
-		t.Fatalf("edit card password %q", edited.User.Password)
+	if edited.User.Password != "" {
+		t.Fatalf("edit still returned stored password %q", edited.User.Password)
 	}
 	if edited.User.UsedUp != 111 || edited.User.UsedDown != 222 {
 		t.Fatalf("same package wiped traffic %+v", edited.User)

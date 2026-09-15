@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
-import { clearLists, putList } from '../lib/listCache'
+import { cacheGen, clearLists, putList } from '../lib/listCache'
 import { BrandMark, Icon, Modal } from './ui'
 
 const UserCtx = createContext(null)
@@ -29,8 +29,9 @@ export function UserProvider({ children }) {
       setSub(data?.sub || null)
       if (data?.announce != null) setAnnounce(data.announce)
       return data
-    } catch {
-      setUser(null)
+    } catch (e) {
+      if (e?.message === '登录已过期') setUser(null)
+      else setUser(prev => (prev === undefined ? null : prev))
       return null
     }
   }, [])
@@ -179,14 +180,15 @@ export function Layout({ children }) {
 
   useEffect(() => {
     if (!isAdmin) return
-    api.get('/servers').then(a => putList('servers', a.servers || [])).catch(() => {})
-    api.get('/inbounds').then(a => putList('inbounds', a.inbounds || [])).catch(() => {})
+    const g = cacheGen()
+    api.get('/servers').then(a => putList('servers', a.servers || [], g)).catch(() => {})
+    api.get('/inbounds').then(a => putList('inbounds', a.inbounds || [], g)).catch(() => {})
     api.get('/me/nodes').then(d => putList('me-nodes', {
       nodes: d.nodes || [],
       hidden: d.hidden || [],
       starred: d.starred || [],
       announce: d.announce || '',
-    })).catch(() => {})
+    }, g)).catch(() => {})
   }, [isAdmin])
 
   const logout = async () => {

@@ -80,10 +80,7 @@ func writeSubInfo(w http.ResponseWriter, u *db.User) {
 		return
 	}
 	w.Header().Set("Profile-Update-Interval", "24")
-	expire := u.ExpiresAt
-	if u.PkgExpires > expire {
-		expire = u.PkgExpires
-	}
+	expire := soonerUnix(u.ExpiresAt, u.PkgExpires)
 	info := "upload=0; download=" + strconv.FormatInt(u.BilledBytes, 10)
 	if u.TrafficCap > 0 {
 		info += "; total=" + strconv.FormatInt(u.TrafficCap, 10)
@@ -92,6 +89,19 @@ func writeSubInfo(w http.ResponseWriter, u *db.User) {
 		info += "; expire=" + strconv.FormatInt(expire, 10)
 	}
 	w.Header().Set("Subscription-Userinfo", info)
+}
+
+func soonerUnix(a, b int64) int64 {
+	switch {
+	case a <= 0:
+		return b
+	case b <= 0:
+		return a
+	case a < b:
+		return a
+	default:
+		return b
+	}
 }
 
 func inboundLive(d *sql.DB, in *db.Inbound, over map[int64]bool) bool {

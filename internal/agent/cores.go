@@ -111,6 +111,7 @@ func (c *Cores) Remove(name string) {
 }
 
 func (c *Cores) Apply(cfg wsproto.ApplyConfig) error {
+	ensureApplyBins(cfg)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.xrayAPI = cfg.XrayAPI
@@ -132,6 +133,27 @@ func (c *Cores) Apply(cfg wsproto.ApplyConfig) error {
 	return nil
 }
 
+func ensureApplyBins(cfg wsproto.ApplyConfig) {
+	type need struct {
+		name string
+		raw  json.RawMessage
+		bins []string
+	}
+	for _, n := range []need{
+		{"xray", cfg.Xray, []string{"xray"}},
+		{"singbox", cfg.Singbox, []string{"sing-box", "singbox"}},
+		{"mita", cfg.Mita, []string{"mita"}},
+	} {
+		if !hasCfg(n.raw) {
+			continue
+		}
+		if lookBin(n.bins...) != "" {
+			continue
+		}
+		_, _ = ensureCore(n.name)
+	}
+}
+
 func hasCfg(raw json.RawMessage) bool {
 	return len(raw) > 0 && string(raw) != "null"
 }
@@ -148,11 +170,7 @@ func (c *Cores) applyJSON(name, file string, raw json.RawMessage, bin string, pr
 		return nil
 	}
 	if bin == "" {
-		got, err := ensureCore(name)
-		if err != nil {
-			return fmt.Errorf("%s 未安装：%v", name, err)
-		}
-		bin = got
+		return fmt.Errorf("%s 未安装", name)
 	}
 	if name == "xray" {
 		c.xrayBin = bin
@@ -162,6 +180,15 @@ func (c *Cores) applyJSON(name, file string, raw json.RawMessage, bin string, pr
 	}
 	c.stopLocked(name)
 	filtered, skipped := dropOccupiedListen(raw)
+	if len(skipped) > 0 {
+		c.rollbackJSON(name, file, prev, bin, prefix)
+		if !hasCfg(prev) {
+			delete(c.lastReq, name)
+		} else {
+			c.lastReq[name] = prevReq
+		}
+		return fmt.Errorf("已跳过占用端口: %s", joinPorts(skipped))
+	}
 	if err := os.WriteFile(path, filtered, 0o640); err != nil {
 		c.rollbackJSON(name, file, prev, bin, prefix)
 		c.lastReq[name] = prevReq
@@ -188,9 +215,6 @@ func (c *Cores) applyJSON(name, file string, raw json.RawMessage, bin string, pr
 	}
 	c.last[name] = append(json.RawMessage(nil), filtered...)
 	c.lastReq[name] = append(json.RawMessage(nil), raw...)
-	if len(skipped) > 0 {
-		return fmt.Errorf("已跳过占用端口: %s", joinPorts(skipped))
-	}
 	return nil
 }
 
@@ -228,11 +252,7 @@ func (c *Cores) applyMita(raw json.RawMessage) error {
 		return nil
 	}
 	if bin == "" {
-		got, err := ensureCore("mita")
-		if err != nil {
-			return fmt.Errorf("mita 未安装：%v", err)
-		}
-		bin = got
+		return fmt.Errorf("mita 未安装")
 	}
 	// Skip without probing the live port. A raw TCP dial is not a mieru
 	// handshake; doing it on every periodic apply just opens junk sessions.
@@ -466,7 +486,10 @@ func (c *Cores) stopLocked(name string) {
 	case <-p.done:
 	case <-time.After(3 * time.Second):
 		_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
-		<-p.done
+		select {
+		case <-p.done:
+		case <-time.After(2 * time.Second):
+		}
 	}
 }
 
@@ -569,7 +592,9 @@ func (c *Cores) noteCrash(name string, now time.Time) {
 }
 
 func (c *Cores) ListenPorts() []int {
-	c.mu.Lock()
+	if !c.mu.TryLock() {
+		return nil
+	}
 	defer c.mu.Unlock()
 	seen := map[int]struct{}{}
 	var out []int
@@ -598,7 +623,9 @@ func (c *Cores) ListenPorts() []int {
 }
 
 func (c *Cores) Running() []string {
-	c.mu.Lock()
+	if !c.mu.TryLock() {
+		return nil
+	}
 	defer c.mu.Unlock()
 	var out []string
 	for name, p := range c.procs {

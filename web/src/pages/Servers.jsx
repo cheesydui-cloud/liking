@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { peekList, putList } from '../lib/listCache'
+import { startPoll } from '../lib/poll'
 import { copyText } from '../lib/copy'
 import { isDirectNode, serverStatus } from '../lib/status'
 import { useToast, useDialog } from '../components/Layout'
@@ -114,10 +115,9 @@ export default function Servers() {
   }
   useEffect(() => {
     load()
-    const t = setInterval(() => {
+    return startPoll(() => {
       api.get('/servers').then(a => setList(putList('servers', a.servers || []))).catch(() => {})
-    }, 5000)
-    return () => clearInterval(t)
+    }, 5000, { immediate: false })
   }, [])
 
   const coreSrvId = coreSrv?.id

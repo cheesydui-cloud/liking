@@ -102,6 +102,15 @@ func clampMonthDay(y int, m time.Month, day int, loc *time.Location) time.Time {
 	return time.Date(y, m, day, 0, 0, 0, 0, loc)
 }
 
+// ResetDayOn is the calendar day in now's month that a 1–31 reset actually
+// fires. Day 31 in February becomes the last day of that month.
+func ResetDayOn(now time.Time, day int) int {
+	if day < 1 || day > 31 {
+		return 0
+	}
+	return clampMonthDay(now.Year(), now.Month(), day, now.Location()).Day()
+}
+
 func ServerCycleStartDay(s *Server, now time.Time) string {
 	if s == nil || s.TrafficResetDay < 1 {
 		return ""

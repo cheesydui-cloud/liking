@@ -172,7 +172,7 @@ func (h *Hub) reconcileOnConnect(serverID int64, lastRev string) {
 	if err != nil {
 		return
 	}
-	if lastRev != "" && s.ConfigRev != "" && lastRev == s.ConfigRev {
+	if lastRev != "" && s.ConfigRev != "" && lastRev == s.ConfigRev && strings.TrimSpace(s.LastError) == "" {
 		return
 	}
 	go h.Redispatch([]int64{serverID})
@@ -190,15 +190,17 @@ func (h *Hub) registerConn(ac *agentConn) {
 
 func (h *Hub) unregisterConn(ac *agentConn) {
 	h.mu.Lock()
-	if cur, ok := h.conns[ac.serverID]; ok && cur == ac {
+	cur, ok := h.conns[ac.serverID]
+	gone := ok && cur == ac
+	if gone {
 		delete(h.conns, ac.serverID)
-		h.mu.Unlock()
-		h.clearUserLive(ac.serverID)
-	} else {
-		h.mu.Unlock()
 	}
+	h.mu.Unlock()
 	ac.signalClose()
-	_ = db.MarkServerOffline(h.DB, ac.serverID)
+	if gone {
+		h.clearUserLive(ac.serverID)
+		_ = db.MarkServerOffline(h.DB, ac.serverID)
+	}
 }
 
 func (h *Hub) DropAll() {
@@ -258,6 +260,7 @@ func (h *Hub) writerLoop(ac *agentConn) {
 			cancel()
 			if err != nil {
 				ac.ws.Close(websocket.StatusInternalError, "write error")
+				ac.signalClose()
 				return
 			}
 		}
@@ -300,14 +303,20 @@ func (h *Hub) readerLoop(parent context.Context, ac *agentConn) {
 	}
 }
 
-func (ac *agentConn) enqueueWrite(env wsproto.Envelope) {
+func (ac *agentConn) enqueueWrite(env wsproto.Envelope) bool {
 	b, err := json.Marshal(env)
 	if err != nil {
-		return
+		return false
 	}
+	timer := time.NewTimer(hubWriteTimeout)
+	defer timer.Stop()
 	select {
 	case ac.writeCh <- b:
+		return true
 	case <-ac.closed:
+		return false
+	case <-timer.C:
+		return false
 	}
 }
 
@@ -348,12 +357,16 @@ func (h *Hub) SendRPC(serverID int64, typ string, payload any, timeout time.Dura
 	if err != nil {
 		return nil, err
 	}
-	ac.enqueueWrite(wsproto.Envelope{Type: typ, ID: id, Payload: raw})
+	if !ac.enqueueWrite(wsproto.Envelope{Type: typ, ID: id, Payload: raw}) {
+		return nil, errors.New("连接在回复前断开")
+	}
 
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case ack := <-ch:
 		return ack, nil
-	case <-time.After(timeout):
+	case <-timer.C:
 		return nil, errors.New("等待 Agent 回复超时")
 	case <-ac.closed:
 		return nil, errors.New("连接在回复前断开")
@@ -465,9 +478,7 @@ func (h *Hub) noteLive(ac *agentConn, st wsproto.Stats) {
 	ac.memTotal = st.MemTotal
 	ac.loadMilli = st.LoadMilli
 	ac.conns = st.Conns
-	if len(st.CoresRunning) > 0 {
-		ac.coresRunning = strings.Join(st.CoresRunning, ",")
-	}
+	ac.coresRunning = strings.Join(st.CoresRunning, ",")
 	if st.HasNet {
 		ac.upBps = st.NetUp
 		ac.downBps = st.NetDown
@@ -501,25 +512,28 @@ func (h *Hub) applyStats(serverID int64, samples []wsproto.Sample) {
 			continue
 		}
 		c, err := db.ClientByIdentity(h.DB, s.Email)
-		if err != nil {
+		if err != nil || c == nil {
 			continue
 		}
 		up, down := s.Up, s.Down
+		if up < 0 || down < 0 {
+			continue
+		}
 		if up == 0 && down == 0 {
+			continue
+		}
+		in, err := db.GetInbound(h.DB, c.InboundID)
+		if err != nil || in == nil || in.ServerID != serverID {
+			continue
+		}
+		u, err := db.GetUser(h.DB, c.UserID)
+		if err != nil || u == nil {
 			continue
 		}
 		a := live[c.UserID]
 		a.up += up
 		a.down += down
 		live[c.UserID] = a
-		in, err := db.GetInbound(h.DB, c.InboundID)
-		if err != nil {
-			continue
-		}
-		u, err := db.GetUser(h.DB, c.UserID)
-		if err != nil {
-			continue
-		}
 		mult := 1.0
 		if u.PackageID != nil {
 			if p, err := db.GetPackage(h.DB, *u.PackageID); err == nil {

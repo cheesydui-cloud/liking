@@ -30,6 +30,10 @@ func randomPassword(n int) (string, error) {
 // adminUserView exposes the stored login password to admin APIs for 名片 copy.
 // Session /me never uses this wrapper.
 func adminUserView(u *db.User) any {
+	return adminUserViewPW(u, "")
+}
+
+func adminUserViewPW(u *db.User, loginPW string) any {
 	if u == nil {
 		return nil
 	}
@@ -39,13 +43,9 @@ func adminUserView(u *db.User) any {
 	}
 	pw := ""
 	if u.Role != "admin" {
-		pw = u.PasswordPlain
+		pw = loginPW
 	}
 	return view{User: u, Password: pw}
-}
-
-func rememberLoginPassword(d *sql.DB, id int64, pw string) {
-	_ = db.SetUserPasswordPlain(d, id, pw)
 }
 
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +118,6 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusConflict, "用户名已存在")
 		return
 	}
-	rememberLoginPassword(s.DB, u.ID, req.Password)
 	exp := req.ExpiresAt
 	if req.Days > 0 {
 		exp = time.Now().Add(time.Duration(req.Days) * 24 * time.Hour).Unix()
@@ -132,15 +131,21 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		u.ExpiresAt = exp
 		_ = db.UpdateUser(s.DB, u)
 	}
-	u, _ = db.GetUser(s.DB, u.ID)
+	if fresh, err := db.GetUser(s.DB, u.ID); err == nil && fresh != nil {
+		u = fresh
+	}
 	s.provisionAndSyncUser(u)
 	admin := userFromCtx(r.Context())
-	db.AddAudit(s.DB, &admin.ID, "user.create", u.Username)
-	out := map[string]any{"user": adminUserView(u)}
+	if admin != nil {
+		db.AddAudit(s.DB, &admin.ID, "user.create", u.Username)
+	}
+	pw := req.Password
 	if generated != "" {
-		out["password"] = generated
-	} else if req.Password != "" {
-		out["password"] = req.Password
+		pw = generated
+	}
+	out := map[string]any{"user": adminUserViewPW(u, pw)}
+	if pw != "" {
+		out["password"] = pw
 	}
 	jsonOK(w, out)
 }
@@ -152,7 +157,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, err := db.GetUser(s.DB, id)
-	if err != nil {
+	if err != nil || u == nil {
 		jsonErr(w, http.StatusNotFound, "用户不存在")
 		return
 	}
@@ -274,7 +279,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-			rememberLoginPassword(s.DB, u.ID, pw)
+			_ = db.ClearUserPasswordPlain(s.DB, u.ID)
 			_ = db.DeleteSessionsForUser(s.DB, u.ID)
 		}
 	}
@@ -302,7 +307,9 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	u, _ = db.GetUser(s.DB, u.ID)
+	if fresh, err := db.GetUser(s.DB, u.ID); err == nil && fresh != nil {
+		u = fresh
+	}
 	s.provisionAndSyncUser(u)
 	jsonOK(w, map[string]any{"user": adminUserView(u)})
 }
@@ -314,6 +321,10 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := userFromCtx(r.Context())
+	if u == nil {
+		jsonErr(w, http.StatusUnauthorized, "未登录")
+		return
+	}
 	if u.ID == id {
 		jsonErr(w, http.StatusBadRequest, "不能删除当前登录账号")
 		return
@@ -336,7 +347,11 @@ func (s *Server) handleResetTraffic(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	u, _ := db.GetUser(s.DB, id)
+	u, err := db.GetUser(s.DB, id)
+	if err != nil || u == nil {
+		jsonErr(w, http.StatusNotFound, "用户不存在")
+		return
+	}
 	s.provisionAndSyncUser(u)
 	jsonOK(w, map[string]any{"ok": true, "user": adminUserView(u)})
 }
@@ -391,7 +406,7 @@ func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	rememberLoginPassword(s.DB, id, req.Password)
+	_ = db.ClearUserPasswordPlain(s.DB, id)
 	_ = db.DeleteSessionsForUser(s.DB, id)
 	out := map[string]any{"ok": true, "password": req.Password}
 	if generated != "" {
@@ -407,7 +422,7 @@ func (s *Server) handleForgetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, err := db.GetUser(s.DB, id)
-	if err != nil {
+	if err != nil || u == nil {
 		jsonErr(w, http.StatusNotFound, "用户不存在")
 		return
 	}

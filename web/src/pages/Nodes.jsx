@@ -7,6 +7,7 @@ import { isDirectNode, nodeStatus, serverHasCore } from '../lib/status'
 import { useToast, useDialog } from '../components/Layout'
 import { coreLabel } from '../lib/display'
 import { peekList, putList } from '../lib/listCache'
+import { startPoll } from '../lib/poll'
 import { Badge, Empty, Field, FilterTabs, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, StatusWord, fmtBytes, fmtDateShort } from '../components/ui'
 
 const DEST_PRESETS = [
@@ -213,10 +214,9 @@ export default function Nodes() {
   }
   useEffect(() => {
     load()
-    const t = setInterval(() => {
+    return startPoll(() => {
       api.get('/servers').then(a => setServers(putList('servers', a.servers || []))).catch(() => {})
-    }, 5000)
-    return () => clearInterval(t)
+    }, 5000, { immediate: false })
   }, [])
 
   const meta = profiles.find(p => p.id === f.profile)

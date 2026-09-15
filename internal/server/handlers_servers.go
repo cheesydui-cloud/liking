@@ -388,7 +388,29 @@ func normalizeArch(a string) string {
 	}
 }
 
+func allowedAgentOS(goos string) bool {
+	return goos == "linux"
+}
+
+func allowedAgentArch(arch string) bool {
+	return arch == "amd64" || arch == "arm64"
+}
+
 func findAgentBinary(goos, arch string) string {
+	goos = strings.ToLower(strings.TrimSpace(goos))
+	arch = strings.ToLower(strings.TrimSpace(arch))
+	if goos == "" || arch == "" {
+		return ""
+	}
+	if strings.ContainsAny(goos, `/\`) || strings.ContainsAny(arch, `/\`) {
+		return ""
+	}
+	if strings.Contains(goos, "..") || strings.Contains(arch, "..") {
+		return ""
+	}
+	if !allowedAgentOS(goos) || !allowedAgentArch(arch) {
+		return ""
+	}
 	name := "liking-agent-" + goos + "-" + arch
 	candidates := []string{}
 	if exe, err := os.Executable(); err == nil {

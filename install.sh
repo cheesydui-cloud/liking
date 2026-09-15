@@ -13,7 +13,7 @@ DATA_DIR="/var/lib/liking"
 SCRIPT_PATH="$INSTALL_DIR/liking-upgrade"
 GH_PROXY_FILE="$ETC_DIR/gh-proxy"
 GH_PROXY="${LIKING_GH_PROXY:-}"
-PANEL_ADDR="${LIKING_ADDR:-:8899}"
+PANEL_ADDR="${LIKING_ADDR:-127.0.0.1:8899}"
 BOOTSTRAP_PW="${LIKING_ADMIN_PASSWORD:-}"
 
 die() { echo "错误: $*" >&2; exit 1; }
@@ -46,7 +46,7 @@ liking 一键安装 / 升级 / 卸载（面板 liking-server）
   reset-password   重置面板 admin 密码
 
 选项:
-  --addr ADDR                 监听地址，默认 :8899
+  --addr ADDR                 监听地址，默认 127.0.0.1:8899
   --release VER               GitHub release tag，默认 latest
   --from-dir DIR              从本地目录安装（需 SHA256SUMS 与二进制）
   --gh-proxy PFX              GitHub 镜像前缀，如 https://gh-proxy.com/
@@ -331,7 +331,7 @@ download_named() {
 }
 
 write_server_unit() {
-  local addr="${1:-:8899}"
+  local addr="${1:-127.0.0.1:8899}"
   mkdir -p "$SYSTEMD_DIR"
   cat >"$SYSTEMD_DIR/liking-server.service" <<EOF
 [Unit]

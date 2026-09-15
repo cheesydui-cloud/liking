@@ -187,9 +187,21 @@ func (a *Agent) session(ctx context.Context) error {
 				}(env)
 				continue
 			}
-			if env.Type == wsproto.TypeUpgrade || env.Type == wsproto.TypeUninstall {
+			if env.Type == wsproto.TypeUpgrade {
+				go func(env wsproto.Envelope) {
+					if err := a.handleUpgrade(ctx, ws, env); err != nil {
+						if errors.Is(err, errSelfRestart) {
+							a.exit(0)
+							return
+						}
+						log.Printf("agent upgrade: %v", err)
+					}
+				}(env)
+				continue
+			}
+			if env.Type == wsproto.TypeUninstall {
 				if err := a.handle(ctx, ws, env); err != nil {
-					if errors.Is(err, errSelfRestart) || errors.Is(err, errUninstalled) {
+					if errors.Is(err, errUninstalled) {
 						return err
 					}
 					log.Printf("agent handle: %v", err)
@@ -257,7 +269,7 @@ func (a *Agent) handleUpgrade(ctx context.Context, ws *websocket.Conn, env wspro
 		return a.ackUpgrade(ctx, ws, env.ID, false, err.Error())
 	}
 	if err := a.ackUpgrade(ctx, ws, env.ID, true, ""); err != nil {
-		return err
+		log.Printf("agent upgrade ack: %v", err)
 	}
 	return errSelfRestart
 }

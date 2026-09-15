@@ -20,8 +20,8 @@ export function serverInstalled(s) {
 
 export function serverStatus(s) {
   if (!serverInstalled(s)) return '未安装'
-  if (s.last_error) return '故障'
   if (s.online) return '在线'
+  if (s.last_error) return '故障'
   return '离线'
 }
 
@@ -29,7 +29,6 @@ export function nodeStatus(inb, server, opts = {}) {
   if (!inb || inb.enabled === false) return '停用'
   if (!serverInstalled(server)) return '未安装'
   if (!server.online) return '离线'
-  if (server.last_error) return '故障'
   if (!opts.skipLanding && inb.line_kind === 'chain' && !inb.exit_uri) {
     const id = Number(inb.exit_inbound_id)
     if (!id) return '故障'

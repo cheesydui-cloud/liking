@@ -58,14 +58,16 @@ export function BrandMark({ size = 28, className = '' }) {
 
 export function machineTone(s) {
   if (!s) return 'is-off'
-  if (s.last_error || s.over_quota) return 'is-fault'
+  if (s.over_quota) return 'is-fault'
   if (s.online) return 'is-live'
+  if (s.last_error) return 'is-fault'
   return 'is-off'
 }
 
 export function StatusWord({ online, fault }) {
+  if (online) return <span className="status-word is-live">在线</span>
   if (fault) return <span className="status-word is-fault">故障</span>
-  return <span className={`status-word ${online ? 'is-live' : 'is-off'}`}>{online ? '在线' : '离线'}</span>
+  return <span className="status-word is-off">离线</span>
 }
 
 export function LineStatus({ status }) {
@@ -146,6 +148,12 @@ export function billedBytes(u) {
   if (!u) return 0
   if (u.billed_bytes != null) return Number(u.billed_bytes) || 0
   return (Number(u.used_up) || 0) + (Number(u.used_down) || 0)
+}
+
+export function remainingBytes(u) {
+  const cap = Number(u?.traffic_cap) || 0
+  if (cap <= 0) return null
+  return Math.max(0, cap - billedBytes(u))
 }
 
 function hourLabel(hour) {

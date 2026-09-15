@@ -29,7 +29,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/cheesydui-cloud/liking/main/
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/cheesydui-cloud/liking/main/install.sh) \
-  server --addr :8899 --bootstrap-admin-password '改成你的密码'
+  server --addr 127.0.0.1:8899 --bootstrap-admin-password '改成你的密码'
 ```
 
 离线 / 内网把 Release 文件放到同一目录后：
@@ -56,7 +56,7 @@ liking-upgrade
 指定版本：
 
 ```bash
-liking-upgrade --release v0.2.5
+liking-upgrade --release v0.2.6
 ```
 
 只更新安装脚本本身：

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { peekList, putList } from '../lib/listCache'
+import { startPoll } from '../lib/poll'
 import { peekProbe, putProbe } from '../lib/probeCache'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
@@ -81,10 +82,9 @@ export default function MyForwards({ embedded = false } = {}) {
   }
   useEffect(() => {
     load()
-    const t = setInterval(() => {
+    return startPoll(() => {
       api.get('/servers').then(a => setServers(putList('servers', a.servers || []))).catch(() => {})
-    }, 5000)
-    return () => clearInterval(t)
+    }, 5000, { immediate: false })
   }, [])
 
   const byID = useMemo(() => {

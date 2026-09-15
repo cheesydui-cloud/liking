@@ -45,7 +45,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Username = strings.TrimSpace(req.Username)
 	u, err := db.GetUserByName(s.DB, req.Username)
-	if err != nil || !checkPassword(u.PasswordHash, req.Password) {
+	if err != nil || u == nil || !checkPassword(u.PasswordHash, req.Password) {
 		s.loginLimiter.Fail(ip)
 		jsonErr(w, http.StatusUnauthorized, "用户名或密码错误")
 		return
@@ -61,6 +61,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if u.TOTPEnabled {
 		code := totp.ParseCode(req.TOTP)
 		if code == "" {
+			s.loginLimiter.Fail(ip)
 			jsonErrExtra(w, http.StatusUnauthorized, "需要两步验证码", map[string]any{"need_totp": true})
 			return
 		}
@@ -108,6 +109,10 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 	u := userFromCtx(r.Context())
+	if u == nil {
+		jsonErr(w, http.StatusUnauthorized, "未登录")
+		return
+	}
 	var req struct {
 		Old string `json:"old"`
 		New string `json:"new"`
@@ -136,8 +141,12 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 	ctxUser := userFromCtx(r.Context())
+	if ctxUser == nil {
+		jsonErr(w, http.StatusUnauthorized, "登录已过期")
+		return
+	}
 	u, err := db.GetUser(s.DB, ctxUser.ID)
-	if err != nil {
+	if err != nil || u == nil {
 		jsonErr(w, http.StatusUnauthorized, "登录已过期")
 		return
 	}
@@ -209,7 +218,9 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "没有要保存的更改")
 		return
 	}
-	u, _ = db.GetUser(s.DB, u.ID)
+	if fresh, err := db.GetUser(s.DB, u.ID); err == nil && fresh != nil {
+		u = fresh
+	}
 	db.AddAudit(s.DB, &u.ID, "profile.update", u.Username)
 	jsonOK(w, s.sessionPayload(u, r))
 }

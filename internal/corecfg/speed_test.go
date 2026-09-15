@@ -14,6 +14,12 @@ func TestSpeedMark(t *testing.T) {
 	if SpeedMark(1) != SpeedMarkBase|1 {
 		t.Fatalf("got %x", SpeedMark(1))
 	}
+	if SpeedMark(65537) == SpeedMark(1) {
+		t.Fatal("16-bit collision")
+	}
+	if SpeedMark(0x01000000) != 0 {
+		t.Fatal("overflow")
+	}
 }
 
 func TestBuildDirectSpeedLimit(t *testing.T) {

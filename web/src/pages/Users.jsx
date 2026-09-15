@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { peekList, putList } from '../lib/listCache'
+import { startPoll } from '../lib/poll'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, DayBars, Empty, Field, FilterTabs, Icon, Meter, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, billedBytes, fmtBps, fmtBytes, fmtDateShort } from '../components/ui'
@@ -170,10 +171,9 @@ export default function Users() {
   }
   useEffect(() => {
     load()
-    const t = setInterval(() => {
+    return startPoll(() => {
       api.get('/users').then(a => setList(putList('users', a.users || []))).catch(() => {})
-    }, 5000)
-    return () => clearInterval(t)
+    }, 5000, { immediate: false })
   }, [])
 
   const closeForm = () => {
@@ -499,6 +499,7 @@ export default function Users() {
                 </div>
                 <div className="machine-meter">
                   <Meter value={used} max={cap} />
+                  {cap > 0 ? <div className="text-[12px] text-ink-mut mt-1">剩余 {fmtBytes(Math.max(0, cap - used))}</div> : null}
                 </div>
                 <div className="machine-foot">
                   <button type="button" className="machine-ports" onClick={() => setSubUser(u)}>订阅</button>

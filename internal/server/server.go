@@ -29,6 +29,7 @@ type Server struct {
 	kickRun      map[int64]bool
 	acmeMu       sync.Mutex
 	backupMu     sync.Mutex
+	certCache    panelCertCache
 	CFAPI        string // test override for Cloudflare API base URL
 }
 
@@ -49,6 +50,7 @@ func New(d *sql.DB) (*Server, error) {
 	if tz, _ := db.GetSetting(d, "timezone"); strings.TrimSpace(tz) == "" {
 		_ = db.SetSetting(d, "timezone", db.DefaultTimezone)
 	}
+	_, _ = d.Exec(`UPDATE users SET password_plain='' WHERE COALESCE(password_plain,'') != ''`)
 	hub.OnTrafficUpdate = func(userID int64) {
 		u, err := db.GetUser(d, userID)
 		if err != nil {
@@ -75,8 +77,8 @@ func (s *Server) Close() {
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
-	r.Use(secureHeaders)
 	r.Use(trustedForwarded)
+	r.Use(secureHeaders)
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]any{"ok": true, "version": version.Version})
@@ -87,7 +89,7 @@ func (s *Server) Router() http.Handler {
 	r.Head("/v1/agent-bin", s.handleAgentBin)
 
 	r.Get("/api/branding", s.handleBranding)
-	r.Post("/api/login", s.handleLogin)
+	r.With(s.csrf).Post("/api/login", s.handleLogin)
 	r.Get("/api/sub/{token}", s.handleSub)
 	r.Get("/api/sub/{token}/{fmt}", s.handleSub)
 

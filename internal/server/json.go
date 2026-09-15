@@ -2,9 +2,12 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -32,6 +35,11 @@ func jsonErrExtra(w http.ResponseWriter, code int, msg string, extra map[string]
 
 func decodeJSON(r *http.Request, v any) error {
 	defer r.Body.Close()
+	ct := r.Header.Get("Content-Type")
+	media, _, err := mime.ParseMediaType(ct)
+	if err != nil || !strings.EqualFold(media, "application/json") {
+		return fmt.Errorf("需要 JSON")
+	}
 	return json.NewDecoder(io.LimitReader(r.Body, maxJSONBody)).Decode(v)
 }
 

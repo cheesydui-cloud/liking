@@ -54,9 +54,36 @@ func (a *Agent) resolveURL(raw string) (string, error) {
 	return base.ResolveReference(u).String(), nil
 }
 
+func (a *Agent) checkUpgradeURL(src string) error {
+	u, err := url.Parse(src)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("下载地址无效")
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+	case "http":
+		if !a.cfg.Insecure {
+			return fmt.Errorf("明文下载需要 --insecure")
+		}
+	default:
+		return fmt.Errorf("不支持的下载协议")
+	}
+	base, err := url.Parse(a.cfg.ConnectURL)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(u.Hostname(), base.Hostname()) {
+		return fmt.Errorf("下载地址与面板不一致")
+	}
+	return nil
+}
+
 func (a *Agent) replaceSelf(ctx context.Context, req wsproto.Upgrade) error {
 	src, err := a.resolveURL(req.URL)
 	if err != nil {
+		return err
+	}
+	if err := a.checkUpgradeURL(src); err != nil {
 		return err
 	}
 	exe, err := os.Executable()

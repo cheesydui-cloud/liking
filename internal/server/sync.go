@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,12 +31,33 @@ func (s *Server) pushServer(id int64) error {
 		_ = db.SetServerRev(s.DB, id, b.Rev)
 		return nil
 	}
-	if err := s.Hub.SendApply(id, b.Apply); err != nil {
-		_ = db.SetServerApplyError(s.DB, id, err)
-		return err
+	var applyErr error
+	for i := 0; i < 3; i++ {
+		applyErr = s.Hub.SendApply(id, b.Apply)
+		if applyErr == nil {
+			break
+		}
+		if !transientApplyErr(applyErr) {
+			break
+		}
+		time.Sleep(time.Duration(i+1) * 400 * time.Millisecond)
+	}
+	if applyErr != nil {
+		_ = db.SetServerApplyError(s.DB, id, applyErr)
+		return applyErr
 	}
 	_ = db.SetServerApplyError(s.DB, id, nil)
 	return db.SetServerRev(s.DB, id, b.Rev)
+}
+
+func transientApplyErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "连接在回复前断开") ||
+		strings.Contains(msg, "等待 Agent 回复超时") ||
+		strings.Contains(msg, "not connected")
 }
 
 func (s *Server) syncServers(ids ...int64) {
@@ -100,24 +122,13 @@ func (s *Server) syncAll() {
 }
 
 func (s *Server) provisionAndSyncUser(u *db.User) {
+	if u == nil {
+		return
+	}
 	ids, err := corecfg.ProvisionUser(s.DB, u)
 	if err != nil {
 		log.Printf("provision user %d: %v", u.ID, err)
 		return
-	}
-	if u != nil {
-		if clients, err := db.ListClientsByUser(s.DB, u.ID); err == nil {
-			for _, c := range clients {
-				if c == nil {
-					continue
-				}
-				in, err := db.GetInbound(s.DB, c.InboundID)
-				if err != nil || in == nil {
-					continue
-				}
-				ids = append(ids, in.ServerID)
-			}
-		}
 	}
 	s.syncServers(ids...)
 }
@@ -232,7 +243,7 @@ func shouldResetAt(u *db.User, pkg *db.Package, t time.Time) bool {
 		day = u.TrafficResetDay
 	}
 	if day > 0 {
-		if t.Day() != day {
+		if t.Day() != db.ResetDayOn(t, day) {
 			return false
 		}
 		if u.CycleStart == 0 {

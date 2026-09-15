@@ -26,7 +26,11 @@ func (l *loginLimiter) Allow(ip string) bool {
 			kept = append(kept, t)
 		}
 	}
-	l.fails[ip] = kept
+	if len(kept) == 0 {
+		delete(l.fails, ip)
+	} else {
+		l.fails[ip] = kept
+	}
 	return len(kept) < 8
 }
 

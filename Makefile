@@ -1,6 +1,6 @@
 .PHONY: web bin dist run test tidy
 
-VERSION ?= 0.2.5
+VERSION ?= 0.2.6
 LDFLAGS := -s -w -X liking/internal/version.Version=$(VERSION)
 export GOCACHE := $(CURDIR)/.gocache
 export GOMODCACHE := $(CURDIR)/.gomod
@@ -20,7 +20,7 @@ dist: bin
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/liking-server-linux-arm64 ./cmd/server
 
 run: bin
-	./bin/liking-server --addr :8899 --db ./data/panel.db
+	./bin/liking-server --addr 127.0.0.1:8899 --db ./data/panel.db
 
 test:
 	go test ./...

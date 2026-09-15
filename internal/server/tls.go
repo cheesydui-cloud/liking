@@ -6,9 +6,18 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 
 	"liking/internal/db"
 )
+
+type panelCertCache struct {
+	mu   sync.Mutex
+	id   int64
+	pem  string
+	key  string
+	cert *tls.Certificate
+}
 
 func (s *Server) WrapListener(ln net.Listener) net.Listener {
 	cfg := s.panelTLSConfig()
@@ -48,9 +57,18 @@ func (s *Server) loadPanelCert() (*tls.Certificate, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.certCache.mu.Lock()
+	defer s.certCache.mu.Unlock()
+	if s.certCache.cert != nil && s.certCache.id == id && s.certCache.pem == c.CertPEM && s.certCache.key == c.KeyPEM {
+		return s.certCache.cert, nil
+	}
 	cert, err := tls.X509KeyPair([]byte(c.CertPEM), []byte(c.KeyPEM))
 	if err != nil {
 		return nil, err
 	}
-	return &cert, nil
+	s.certCache.id = id
+	s.certCache.pem = c.CertPEM
+	s.certCache.key = c.KeyPEM
+	s.certCache.cert = &cert
+	return s.certCache.cert, nil
 }

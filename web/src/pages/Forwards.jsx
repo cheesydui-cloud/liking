@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { peekList, putList } from '../lib/listCache'
+import { startPoll } from '../lib/poll'
 import { useToast, useDialog } from '../components/Layout'
 import { formatPortRange } from '../lib/ports'
 import { hopStatus, nodeStatus } from '../lib/status'
@@ -169,10 +170,9 @@ function ForwardsPanel() {
   }
   useEffect(() => {
     load()
-    const t = setInterval(() => {
+    return startPoll(() => {
       api.get('/servers').then(a => setServers(putList('servers', a.servers || []))).catch(() => {})
-    }, 5000)
-    return () => clearInterval(t)
+    }, 5000, { immediate: false })
   }, [])
 
   const byID = useMemo(() => {

@@ -31,4 +31,11 @@ func TestMonthResetStart(t *testing.T) {
 	if ServerCycleStartDay(&Server{ID: 2}, now) != "" {
 		t.Fatal("no reset day")
 	}
+	feb := time.Date(2026, 2, 28, 12, 0, 0, 0, loc)
+	if ResetDayOn(feb, 31) != 28 {
+		t.Fatalf("feb clamp day %d", ResetDayOn(feb, 31))
+	}
+	if ResetDayOn(now, 15) != 15 {
+		t.Fatal("same day")
+	}
 }

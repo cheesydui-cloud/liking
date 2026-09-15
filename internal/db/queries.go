@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -155,12 +156,24 @@ func applyUserBilling(u *User, pkg *Package) {
 	}
 	u.TrafficCap = UserLimitBytes(u, pkg)
 	u.BilledBytes = UserBilledBytes(u, pkg)
-	if u.TrafficCap > 0 {
-		u.QuotaRatio = int(u.BilledBytes * 100 / u.TrafficCap)
-		if u.QuotaRatio > 100 {
-			u.QuotaRatio = 100
-		}
+	u.QuotaRatio = quotaPercent(u.BilledBytes, u.TrafficCap)
+}
+
+func quotaPercent(used, cap int64) int {
+	if cap <= 0 || used <= 0 {
+		return 0
 	}
+	if used >= cap {
+		return 100
+	}
+	if used > math.MaxInt64/100 {
+		return 99
+	}
+	n := int(used * 100 / cap)
+	if n > 100 {
+		return 100
+	}
+	return n
 }
 
 func queryIDs(d *sql.DB, q string, args ...any) ([]int64, error) {
@@ -1296,6 +1309,9 @@ func UserBilledBytes(u *User, pkg *Package) int64 {
 }
 
 func UserLimitBytes(u *User, pkg *Package) int64 {
+	if u == nil {
+		return 0
+	}
 	if u.TrafficLimit != nil {
 		return *u.TrafficLimit
 	}

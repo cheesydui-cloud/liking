@@ -1,6 +1,7 @@
 package db
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -632,6 +633,15 @@ func TestUserBilledOnewayAndTwoway(t *testing.T) {
 	}
 	if n := UserBilledBytes(nil, &Package{Direction: "twoway"}); n != 0 {
 		t.Fatalf("nil user %d", n)
+	}
+	if n := UserLimitBytes(nil, &Package{TrafficBytes: 10}); n != 0 {
+		t.Fatal("nil user limit")
+	}
+	if quotaPercent(0, 100) != 0 || quotaPercent(50, 100) != 50 || quotaPercent(100, 100) != 100 {
+		t.Fatal("quota percent")
+	}
+	if quotaPercent(math.MaxInt64, math.MaxInt64) != 100 {
+		t.Fatal("quota max")
 	}
 }
 

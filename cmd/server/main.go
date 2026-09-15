@@ -28,7 +28,7 @@ func run(args []string) int {
 		resetAdminPw, resetAdminUser string
 	)
 	fs := flag.NewFlagSet("liking-server", flag.ExitOnError)
-	fs.StringVar(&addr, "addr", ":8899", "panel HTTP address")
+	fs.StringVar(&addr, "addr", "127.0.0.1:8899", "panel HTTP address")
 	fs.StringVar(&dbPath, "db", "data/panel.db", "SQLite database path")
 	fs.StringVar(&bootstrapPw, "bootstrap-admin-password", "", "set admin password on first boot")
 	fs.StringVar(&resetAdminPw, "reset-admin-password", "", "reset admin password and exit")
@@ -104,7 +104,7 @@ func bootstrap(d *sql.DB, pw string) error {
 		return nil
 	}
 	if pw == "" {
-		pw, err = db.RandomHex(4)
+		pw, err = db.RandomHex(16)
 		if err != nil {
 			return err
 		}

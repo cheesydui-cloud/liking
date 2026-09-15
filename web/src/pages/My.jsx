@@ -4,7 +4,7 @@ import { useUser, useToast } from '../components/Layout'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { peekList, putList } from '../lib/listCache'
-import { DayBars, Empty, Icon, Meter, Modal, PageHead, SkeletonRows, billedBytes, fmtBytes, fmtDate } from '../components/ui'
+import { DayBars, Empty, Icon, Meter, Modal, PageHead, SkeletonRows, billedBytes, fmtBytes, fmtDate, remainingBytes } from '../components/ui'
 import { SubPanel } from '../components/SubPanel'
 
 function sumDays(days) {
@@ -107,6 +107,9 @@ export default function My() {
             <div>
               <div className="kicker">流量{user?.direction === 'twoway' ? ' / 双向' : ''}</div>
               <Meter className="mt-2" value={used} max={user?.traffic_cap || 0} />
+              {user?.traffic_cap > 0 ? (
+                <div className="text-[12px] text-ink-mut mt-1.5">剩余 {fmtBytes(remainingBytes(user))}</div>
+              ) : null}
               {ratio >= 80 ? (
                 <div className="text-[12px] mt-1.5" style={{ color: ratio >= 100 ? 'var(--color-danger)' : 'var(--color-warn)' }}>
                   {ratio >= 100 ? '已用尽，节点已从订阅摘掉' : `已用 ${ratio}%`}

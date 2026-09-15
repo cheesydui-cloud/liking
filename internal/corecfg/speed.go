@@ -9,14 +9,14 @@ import (
 	"liking/internal/wsproto"
 )
 
-// SpeedMarkBase is 'LK' in the high 16 bits. Low 16 bits are user id.
-const SpeedMarkBase uint32 = 0x4C4B0000
+// SpeedMarkBase is 'L' in the high 8 bits. Low 24 bits are user id.
+const SpeedMarkBase uint32 = 0x4C000000
 
 func SpeedMark(userID int64) uint32 {
-	if userID < 1 {
+	if userID < 1 || userID > 0x00FFFFFF {
 		return 0
 	}
-	return SpeedMarkBase | uint32(userID&0xFFFF)
+	return SpeedMarkBase | uint32(userID)
 }
 
 func limitTag(mark uint32) string {

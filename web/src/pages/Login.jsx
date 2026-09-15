@@ -20,7 +20,7 @@ export default function Login() {
   const { user, applySession } = useUser()
 
   useEffect(() => {
-    if (user) navigate('/', { replace: true })
+    if (user) navigate(user.role === 'admin' ? '/' : '/my', { replace: true })
   }, [user, navigate])
 
   useEffect(() => {
@@ -42,7 +42,7 @@ export default function Login() {
       const data = await api.post('/login', body)
       try { localStorage.setItem('lk-remember', remember ? '1' : '0') } catch {}
       applySession(data)
-      navigate('/', { replace: true })
+      navigate(data?.user?.role === 'admin' ? '/' : '/my', { replace: true })
     } catch (err) {
       if (err.need_totp) {
         setNeedTotp(true)

@@ -23,7 +23,10 @@ const (
 
 type ctxKey int
 
-const userKey ctxKey = iota
+const (
+	userKey ctxKey = iota
+	secureReqKey
+)
 
 func userFromCtx(ctx context.Context) *db.User {
 	v, _ := ctx.Value(userKey).(*db.User)
@@ -57,6 +60,13 @@ func isLoopbackRequest(r *http.Request) bool {
 }
 
 func isSecureRequest(r *http.Request) bool {
+	if v, ok := r.Context().Value(secureReqKey).(bool); ok {
+		return v
+	}
+	return detectSecureRequest(r)
+}
+
+func detectSecureRequest(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
@@ -70,8 +80,11 @@ func isSecureRequest(r *http.Request) bool {
 
 // trustedForwarded copies X-Real-IP / X-Forwarded-For into RemoteAddr only when
 // the immediate peer is loopback (nginx on this machine). Public :8899 ignores spoofed headers.
+// Secure-cookie / HSTS use the peer address from before this rewrite.
 func trustedForwarded(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secure := detectSecureRequest(r)
+		r = r.WithContext(context.WithValue(r.Context(), secureReqKey, secure))
 		if isLoopbackRequest(r) {
 			if ip := forwardedClientIP(r); ip != "" {
 				_, port, err := net.SplitHostPort(r.RemoteAddr)
@@ -112,6 +125,9 @@ func secureHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "same-origin")
 		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+		if isSecureRequest(r) {
+			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -201,20 +217,20 @@ func (s *Server) csrf(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		site := r.Header.Get("Sec-Fetch-Site")
-		switch strings.ToLower(site) {
-		case "same-origin", "same-site", "":
-			if site == "" {
-				if origin := r.Header.Get("Origin"); origin != "" && !originOK(r, origin) {
-					jsonErr(w, http.StatusForbidden, "CSRF")
-					return
-				}
-			}
+		site := strings.ToLower(r.Header.Get("Sec-Fetch-Site"))
+		switch site {
+		case "same-origin":
 			next.ServeHTTP(w, r)
 			return
-		default:
+		case "same-site", "cross-site", "none":
 			jsonErr(w, http.StatusForbidden, "CSRF")
 			return
+		default:
+			if origin := r.Header.Get("Origin"); origin != "" && !originOK(r, origin) {
+				jsonErr(w, http.StatusForbidden, "CSRF")
+				return
+			}
+			next.ServeHTTP(w, r)
 		}
 	})
 }

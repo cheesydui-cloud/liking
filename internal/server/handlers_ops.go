@@ -79,7 +79,6 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 			out = append(out, rec)
 			continue
 		}
-		rememberLoginPassword(s.DB, u.ID, pw)
 		exp := int64(0)
 		if item.Days > 0 {
 			exp = time.Now().Add(time.Duration(item.Days) * 24 * time.Hour).Unix()
@@ -94,7 +93,9 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 			u.ExpiresAt = exp
 			_ = db.UpdateUser(s.DB, u)
 		}
-		u, _ = db.GetUser(s.DB, u.ID)
+		if fresh, err := db.GetUser(s.DB, u.ID); err == nil && fresh != nil {
+			u = fresh
+		}
 		s.provisionAndSyncUser(u)
 		rec.OK = true
 		rec.Password = pw
@@ -137,9 +138,6 @@ func (s *Server) handleMeNodes(w http.ResponseWriter, r *http.Request) {
 	if u == nil {
 		jsonErr(w, http.StatusUnauthorized, "未登录")
 		return
-	}
-	if u.Role == "admin" {
-		s.provisionAndSyncUser(u)
 	}
 	ids, err := db.InboundIDsForUser(s.DB, u)
 	if err != nil {

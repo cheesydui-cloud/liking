@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { peekList, putList } from '../lib/listCache'
+import { startPoll } from '../lib/poll'
 import { serverStatus } from '../lib/status'
 import { Badge, DayBars, Empty, HourArea, Icon, LineStatus, PageHead, SkeletonRows, fmtAgo, fmtBps, fmtBytes, machineTone } from '../components/ui'
 
@@ -13,17 +14,13 @@ function alertItemsOf(d) {
 export default function Dashboard() {
   const [d, setD] = useState(() => peekList('dashboard') ?? null)
   const [err, setErr] = useState('')
-  useEffect(() => {
-    const pull = () => api.get('/dashboard').then(data => {
-      putList('dashboard', data)
-      if (Array.isArray(data.server_list)) putList('servers', data.server_list)
-      setD(data)
-    }).catch(e => setErr(e.message))
-    pull()
-    const t = setInterval(pull, 5000)
-    return () => clearInterval(t)
-  }, [])
-  if (err) return <div className="alert-row is-fault">{err}</div>
+  useEffect(() => startPoll(() => api.get('/dashboard').then(data => {
+    putList('dashboard', data)
+    if (Array.isArray(data.server_list)) putList('servers', data.server_list)
+    setD(data)
+    setErr('')
+  }).catch(e => setErr(e.message)), 5000), [])
+  if (!d && err) return <div className="alert-row is-fault">{err}</div>
   if (!d) return <div className="card"><SkeletonRows /></div>
 
   const alerts = alertItemsOf(d)
@@ -44,6 +41,7 @@ export default function Dashboard() {
   return (
     <div>
       <PageHead title="总览" />
+      {err ? <div className="alert-row is-fault mb-4">{err}</div> : null}
       <div className="dash-stats">
         <Link to="/traffic" className="dash-stat">
           <div className="dash-stat-k">计费</div>
