@@ -2,18 +2,20 @@ import { useEffect, useMemo, useState } from 'react'
 import { useToast } from '../components/Layout'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
-import { peekList, putList } from '../lib/listCache'
+import { cacheGen, peekList, putList } from '../lib/listCache'
+import { startPoll } from '../lib/poll'
+import { asArray, isAbort } from '../lib/safe'
 import {
   Empty, FilterTabs, Icon, Modal, PageHead, SearchInput, SkeletonRows, StatusWord, fmtBytes,
 } from '../components/ui'
 
 function hiddenSummary(hidden) {
   const n = { '停用': 0, '实例已满': 0, '缺核心': 0 }
-  for (const h of hidden) {
+  for (const h of asArray(hidden)) {
     if (n[h.reason] != null) n[h.reason] += 1
   }
   const parts = Object.entries(n).filter(([, c]) => c).map(([k, c]) => `${k} ${c}`)
-  return parts.length ? parts.join(' / ') : hidden.map(h => h.reason).filter(Boolean).join(' / ')
+  return parts.length ? parts.join(' / ') : asArray(hidden).map(h => h.reason).filter(Boolean).join(' / ')
 }
 
 export default function MyNodes() {
@@ -31,25 +33,46 @@ export default function MyNodes() {
   const load = async () => {
     try {
       const d = await api.get('/me/nodes')
+      const g = cacheGen()
       const next = {
-        nodes: d.nodes || [],
-        hidden: d.hidden || [],
-        starred: d.starred || [],
+        nodes: asArray(d.nodes),
+        hidden: asArray(d.hidden),
+        starred: asArray(d.starred),
         announce: d.announce || '',
       }
-      setPayload(putList('me-nodes', next))
+      setPayload(putList('me-nodes', next, g))
       setError('')
     } catch (e) {
+      if (isAbort(e)) return
       setError(e.message || '加载失败')
     } finally {
       setReady(true)
     }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => startPoll(async (signal) => {
+    try {
+      const d = await api.get('/me/nodes', signal)
+      const g = cacheGen()
+      const next = {
+        nodes: asArray(d.nodes),
+        hidden: asArray(d.hidden),
+        starred: asArray(d.starred),
+        announce: d.announce || '',
+      }
+      setPayload(putList('me-nodes', next, g))
+      setError('')
+    } catch (e) {
+      if (isAbort(e)) return
+      setError(e.message || '加载失败')
+      throw e
+    } finally {
+      setReady(true)
+    }
+  }, 5000), [])
 
-  const nodes = payload.nodes || []
-  const hidden = payload.hidden || []
-  const starred = payload.starred || []
+  const nodes = asArray(payload.nodes)
+  const hidden = asArray(payload.hidden)
+  const starred = asArray(payload.starred)
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -105,7 +128,7 @@ export default function MyNodes() {
         starred: next,
         nodes: (prev.nodes || []).map(x => Number(x.id) === id ? { ...x, starred: !on } : x),
       }
-      putList('me-nodes', updated)
+      putList('me-nodes', updated, cacheGen())
       return updated
     })
     setStarBusy(true)
@@ -166,8 +189,8 @@ export default function MyNodes() {
                         <th>名称</th>
                         <th>地址</th>
                         <th>协议</th>
-                        <th>近 14 日</th>
-                        <th>累计</th>
+                        <th>近 14 日（原始）</th>
+                        <th>累计（原始）</th>
                         <th></th>
                       </tr>
                     </thead>

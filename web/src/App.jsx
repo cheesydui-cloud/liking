@@ -1,5 +1,6 @@
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { UserProvider, useUser, Layout } from './components/Layout'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Nodes from './pages/Nodes'
@@ -28,11 +29,14 @@ function Loading() {
 
 function AuthLayout() {
   const { user } = useUser()
+  const loc = useLocation()
   if (user === undefined) return <Loading />
   if (user === null) return <Navigate to="/login" replace />
   return (
     <Layout>
-      <Outlet />
+      <ErrorBoundary resetKey={loc.pathname}>
+        <Outlet />
+      </ErrorBoundary>
     </Layout>
   )
 }

@@ -28,6 +28,7 @@ export function serverStatus(s) {
 export function nodeStatus(inb, server, opts = {}) {
   if (!inb || inb.enabled === false) return '停用'
   if (!serverInstalled(server)) return '未安装'
+  if (server?.over_quota) return '流量已满'
   if (!server.online) return '离线'
   if (!opts.skipLanding && inb.line_kind === 'chain' && !inb.exit_uri) {
     const id = Number(inb.exit_inbound_id)
@@ -53,6 +54,7 @@ export function statusClass(status) {
     case '在线':
       return 'is-live'
     case '故障':
+    case '流量已满':
       return 'is-fault'
     case '未安装':
       return 'is-warn'

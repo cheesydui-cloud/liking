@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { cacheGen, clearLists, putList } from '../lib/listCache'
+import { asArray } from '../lib/safe'
 import { BrandMark, Icon, Modal } from './ui'
 
 const UserCtx = createContext(null)
@@ -30,7 +31,7 @@ export function UserProvider({ children }) {
       if (data?.announce != null) setAnnounce(data.announce)
       return data
     } catch (e) {
-      if (e?.message === '登录已过期') setUser(null)
+      if (e?.status === 401) setUser(null)
       else setUser(prev => (prev === undefined ? null : prev))
       return null
     }
@@ -57,11 +58,14 @@ export function UserProvider({ children }) {
     return () => window.removeEventListener('lk-unauthorized', h)
   }, [])
 
+  const toastTimers = useRef([])
   const toast = useCallback((msg, type) => {
     const id = Date.now() + Math.random()
     setToasts(t => [...t.slice(-3), { id, msg, type: type || 'ok' }])
-    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), type === 'error' ? 6400 : 3200)
+    const h = setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), type === 'error' ? 6400 : 3200)
+    toastTimers.current.push(h)
   }, [])
+  useEffect(() => () => toastTimers.current.forEach(clearTimeout), [])
 
   const applySession = useCallback((data) => {
     if (data?.user !== undefined) setUser(data.user)
@@ -181,14 +185,16 @@ export function Layout({ children }) {
   useEffect(() => {
     if (!isAdmin) return
     const g = cacheGen()
-    api.get('/servers').then(a => putList('servers', a.servers || [], g)).catch(() => {})
-    api.get('/inbounds').then(a => putList('inbounds', a.inbounds || [], g)).catch(() => {})
-    api.get('/me/nodes').then(d => putList('me-nodes', {
-      nodes: d.nodes || [],
-      hidden: d.hidden || [],
-      starred: d.starred || [],
+    const ac = new AbortController()
+    api.get('/servers', ac.signal).then(a => putList('servers', asArray(a.servers), g)).catch(() => {})
+    api.get('/inbounds', ac.signal).then(a => putList('inbounds', asArray(a.inbounds), g)).catch(() => {})
+    api.get('/me/nodes', ac.signal).then(d => putList('me-nodes', {
+      nodes: asArray(d.nodes),
+      hidden: asArray(d.hidden),
+      starred: asArray(d.starred),
       announce: d.announce || '',
     }, g)).catch(() => {})
+    return () => ac.abort()
   }, [isAdmin])
 
   const logout = async () => {

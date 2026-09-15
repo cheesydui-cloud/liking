@@ -79,6 +79,7 @@ export function LineStatus({ status }) {
     '未安装': 'is-warn',
     '停用': 'is-mute',
     '离线': 'is-off',
+    '流量已满': 'is-fault',
   }[status] || 'is-off'
   return <span className={`status-word ${cls}`}>{status}</span>
 }
@@ -108,11 +109,12 @@ export function FilterTabs({ value, onChange, items }) {
 }
 
 export function fmtBytes(n) {
-  if (!n) return '0 B'
-  const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  let i = 0, x = Number(n)
-  while (x >= 1024 && i < u.length - 1) { x /= 1024; i++ }
-  return (i ? x.toFixed(1) : String(Math.round(x))) + ' ' + u[i]
+  const x = Number(n)
+  if (!Number.isFinite(x) || x <= 0) return '0 B'
+  const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']
+  let i = 0, v = x
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
+  return (i ? v.toFixed(1) : String(Math.round(v))) + ' ' + u[i]
 }
 
 export function fmtBps(n) {
@@ -146,8 +148,10 @@ export function fmtAgo(ts) {
 
 export function billedBytes(u) {
   if (!u) return 0
-  if (u.billed_bytes != null) return Number(u.billed_bytes) || 0
-  return (Number(u.used_up) || 0) + (Number(u.used_down) || 0)
+  if (u.billed_bytes != null && u.billed_bytes !== '') return Number(u.billed_bytes) || 0
+  const up = Number(u.used_up) || 0
+  const down = Number(u.used_down) || 0
+  return u.direction === 'oneway' ? down : up + down
 }
 
 export function remainingBytes(u) {
@@ -172,9 +176,13 @@ function hourTitle(hour) {
   return s
 }
 
-function catmullRomPath(pts) {
+function catmullRomPath(pts, minY, maxY) {
   if (!pts.length) return ''
   if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y}`
+  const clampY = (y) => {
+    if (minY == null || maxY == null) return y
+    return Math.min(maxY, Math.max(minY, y))
+  }
   let d = `M ${pts[0].x} ${pts[0].y}`
   for (let i = 0; i < pts.length - 1; i++) {
     const p0 = pts[Math.max(0, i - 1)]
@@ -182,9 +190,9 @@ function catmullRomPath(pts) {
     const p2 = pts[i + 1]
     const p3 = pts[Math.min(pts.length - 1, i + 2)]
     const c1x = p1.x + (p2.x - p0.x) / 6
-    const c1y = p1.y + (p2.y - p0.y) / 6
+    const c1y = clampY(p1.y + (p2.y - p0.y) / 6)
     const c2x = p2.x - (p3.x - p1.x) / 6
-    const c2y = p2.y - (p3.y - p1.y) / 6
+    const c2y = clampY(p2.y - (p3.y - p1.y) / 6)
     d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`
   }
   return d
@@ -222,7 +230,7 @@ export function HourArea({ hours = [], className = '' }) {
     v,
     row: rows[i],
   }))
-  const line = catmullRomPath(pts)
+  const line = catmullRomPath(pts, padT, padT + plotH)
   const last = pts[pts.length - 1]
   const area = line ? `${line} L ${last.x} ${padT + plotH} L ${pts[0].x} ${padT + plotH} Z` : ''
   const yTicks = max <= 0
@@ -241,7 +249,7 @@ export function HourArea({ hours = [], className = '' }) {
       const d = Math.abs(pts[i].x - x)
       if (d < bestD) { bestD = d; best = i }
     }
-    setHi(best)
+    setHi(h => (h === best ? h : best))
   }
   const hover = hi >= 0 ? pts[hi] : null
   const hideOddX = W < 880
@@ -348,8 +356,8 @@ export function DayBars({ days = [], className = '', legend = true, label = '' }
                     <div className="traffic-bar-fill is-empty" />
                   ) : (
                     <>
-                      {up > 0 ? <div className="traffic-bar-fill is-up" style={{ flex: up }} /> : null}
-                      {down > 0 ? <div className="traffic-bar-fill is-down" style={{ flex: down }} /> : null}
+                      {up > 0 ? <div className="traffic-bar-fill is-up" style={{ flex: Math.max(1, Math.round((up / tot) * 1000)) }} /> : null}
+                      {down > 0 ? <div className="traffic-bar-fill is-down" style={{ flex: Math.max(1, Math.round((down / tot) * 1000)) }} /> : null}
                     </>
                   )}
                 </div>

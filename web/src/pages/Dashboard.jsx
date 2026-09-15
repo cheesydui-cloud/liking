@@ -1,25 +1,34 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
-import { peekList, putList } from '../lib/listCache'
+import { cacheGen, peekList, putList } from '../lib/listCache'
 import { startPoll } from '../lib/poll'
+import { asArray, isAbort } from '../lib/safe'
 import { serverStatus } from '../lib/status'
 import { Badge, DayBars, Empty, HourArea, Icon, LineStatus, PageHead, SkeletonRows, fmtAgo, fmtBps, fmtBytes, machineTone } from '../components/ui'
 
 function alertItemsOf(d) {
   if (Array.isArray(d.alert_items) && d.alert_items.length) return d.alert_items
-  return (d.alerts || []).map(text => ({ text, to: '/servers', kind: 'warn' }))
+  return asArray(d.alerts).map(text => ({ text, to: '/servers', kind: 'warn' }))
 }
 
 export default function Dashboard() {
   const [d, setD] = useState(() => peekList('dashboard') ?? null)
   const [err, setErr] = useState('')
-  useEffect(() => startPoll(() => api.get('/dashboard').then(data => {
-    putList('dashboard', data)
-    if (Array.isArray(data.server_list)) putList('servers', data.server_list)
-    setD(data)
-    setErr('')
-  }).catch(e => setErr(e.message)), 5000), [])
+  useEffect(() => startPoll(async (signal) => {
+    try {
+      const data = await api.get('/dashboard', signal)
+      const g = cacheGen()
+      putList('dashboard', data, g)
+      if (data.server_list != null) putList('servers', asArray(data.server_list), g)
+      setD(data)
+      setErr('')
+    } catch (e) {
+      if (isAbort(e)) return
+      setErr(e.message)
+      throw e
+    }
+  }, 5000), [])
   if (!d && err) return <div className="alert-row is-fault">{err}</div>
   if (!d) return <div className="card"><SkeletonRows /></div>
 
@@ -34,8 +43,9 @@ export default function Dashboard() {
   ]
   const next = steps.find(s => !s.done)
   const showSetup = (d.members || 0) === 0
-  const hours = d.hours || []
-  const hasDayBars = (d.days || []).some(x => (x.up || 0) + (x.down || 0) > 0)
+  const hours = asArray(d.hours)
+  const hasHours = hours.some(x => (x.up || 0) + (x.down || 0) > 0)
+  const hasDayBars = asArray(d.days).some(x => (x.up || 0) + (x.down || 0) > 0)
   const showServers = (d.servers || 0) > 0 || !showSetup
 
   return (
@@ -88,7 +98,7 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-      {hours.length > 0 && (
+      {hasHours && (
         <div className="mt-5">
           <HourArea hours={hours} />
         </div>
@@ -126,14 +136,14 @@ export default function Dashboard() {
           <div>实例</div>
           <Link to="/servers" className="btn-ghost h-8">管理</Link>
         </div>
-        {(d.server_list || []).length === 0 ? (
+        {asArray(d.server_list).length === 0 ? (
           <Empty title="还没有实例" hint="添加一台实例，复制一键安装命令，在机器上以 root 执行。" action={<Link to="/servers" className="btn-primary">去添加</Link>} />
         ) : (
           <div className="table-wrap">
             <table className="data">
               <thead><tr><th>名称</th><th>地址</th><th>状态</th><th>上行</th><th>下行</th><th>已用</th><th>心跳</th></tr></thead>
               <tbody>
-                {(d.server_list || []).map(s => (
+                {asArray(d.server_list).map(s => (
                   <tr key={s.id} className={machineTone(s)}>
                     <td className="font-medium">{s.name}</td>
                     <td className="copy-text">{s.public_host || '—'}</td>

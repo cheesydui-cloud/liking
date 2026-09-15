@@ -3,18 +3,19 @@ import { Link } from 'react-router-dom'
 import { useUser, useToast } from '../components/Layout'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
-import { peekList, putList } from '../lib/listCache'
+import { cacheGen, peekList, putList } from '../lib/listCache'
+import { startPoll } from '../lib/poll'
+import { asArray, isAbort } from '../lib/safe'
 import { DayBars, Empty, Icon, Meter, Modal, PageHead, SkeletonRows, billedBytes, fmtBytes, fmtDate, remainingBytes } from '../components/ui'
 import { SubPanel } from '../components/SubPanel'
 
 function sumDays(days) {
-  if (!Array.isArray(days)) return 0
-  return days.reduce((n, d) => n + (Number(d.up) || 0) + (Number(d.down) || 0), 0)
+  return asArray(days).reduce((n, d) => n + (Number(d.up) || 0) + (Number(d.down) || 0), 0)
 }
 
 function hiddenSummary(hidden) {
   const n = { '停用': 0, '实例已满': 0, '缺核心': 0 }
-  for (const h of hidden || []) {
+  for (const h of asArray(hidden)) {
     if (n[h.reason] != null) n[h.reason] += 1
   }
   const parts = Object.entries(n).filter(([, c]) => c).map(([k, c]) => `${k} ${c}`)
@@ -33,28 +34,38 @@ export default function My() {
   const isAdmin = user?.role === 'admin'
 
   useEffect(() => { refreshUser() }, [refreshUser])
-  useEffect(() => {
-    api.get('/me/traffic?days=14').then(setTraffic).catch(() => setTraffic(null))
-    api.get('/me/nodes').then(d => {
+  useEffect(() => startPoll(async (signal) => {
+    try {
+      const [t, d] = await Promise.all([
+        api.get('/me/traffic?days=14', signal),
+        api.get('/me/nodes', signal),
+      ])
+      setTraffic(t)
+      const g = cacheGen()
       const next = {
-        nodes: d.nodes || [],
-        hidden: d.hidden || [],
-        starred: d.starred || [],
+        nodes: asArray(d.nodes),
+        hidden: asArray(d.hidden),
+        starred: asArray(d.starred),
         announce: d.announce || '',
       }
-      setPayload(putList('me-nodes', next))
+      setPayload(putList('me-nodes', next, g))
       setError('')
-    }).catch(e => {
+    } catch (e) {
+      if (isAbort(e)) return
       setError(e.message || '加载失败')
-    }).finally(() => setReady(true))
-  }, [])
+      throw e
+    } finally {
+      setReady(true)
+    }
+  }, 5000), [])
 
   const used = billedBytes(user)
   const cap = user?.traffic_cap || 0
   const ratio = cap > 0 ? Math.min(100, Math.round(used * 100 / cap)) : 0
-  const nodes = payload.nodes || []
-  const hidden = payload.hidden || []
+  const nodes = asArray(payload.nodes)
+  const hidden = asArray(payload.hidden)
   const period = sumDays(traffic?.days)
+  const rawUsed = (Number(user?.used_up) || 0) + (Number(user?.used_down) || 0)
 
   const copyNode = async (n) => {
     if (!n?.uri) {
@@ -87,14 +98,14 @@ export default function My() {
               <div className="text-[12px] text-ink-mut mt-1">进订阅的节点</div>
             </div>
             <div>
-              <div className="kicker">近 14 日（本人）</div>
+              <div className="kicker">近 14 日（原始）</div>
               <span className="stat-val">{fmtBytes(period)}</span>
               <div className="text-[12px] text-ink-mut mt-1">不含其他用户</div>
             </div>
             <div>
-              <div className="kicker">累计（本人）</div>
+              <div className="kicker">累计（计费）</div>
               <span className="stat-val">{fmtBytes(used)}</span>
-              <div className="text-[12px] text-ink-mut mt-1">不占用用户额度</div>
+              <div className="text-[12px] text-ink-mut mt-1">原始 {fmtBytes(rawUsed)} · 不占用用户额度</div>
             </div>
           </>
         ) : (
@@ -157,8 +168,8 @@ export default function My() {
                   <th>名称</th>
                   <th>地址</th>
                   <th>协议</th>
-                  <th>近 14 日</th>
-                  <th>累计</th>
+                  <th>近 14 日（原始）</th>
+                  <th>累计（原始）</th>
                   <th></th>
                 </tr>
               </thead>
@@ -193,10 +204,10 @@ export default function My() {
         </div>
       ) : null}
 
-      {traffic?.days?.length ? (
+      {asArray(traffic?.days).length ? (
         <div className="mb-4">
-          <div className="text-[14px] font-semibold mb-3">近 14 日（本人）</div>
-          <DayBars days={traffic.days} />
+          <div className="text-[14px] font-semibold mb-3">近 14 日（原始）</div>
+          <DayBars days={asArray(traffic.days)} />
         </div>
       ) : null}
 

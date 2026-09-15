@@ -1,4 +1,5 @@
 import { Empty, SkeletonRows } from './ui'
+import { asArray } from '../lib/safe'
 
 export function NodePreviewList({ data, error, loading }) {
   if (loading) {
@@ -7,8 +8,8 @@ export function NodePreviewList({ data, error, loading }) {
   if (error) {
     return <div className="alert-row is-warn">{error}</div>
   }
-  const nodes = data?.nodes || []
-  const hidden = data?.hidden || []
+  const nodes = asArray(data?.nodes)
+  const hidden = asArray(data?.hidden)
   if (!nodes.length && !hidden.length) {
     return <Empty title="没有节点" hint="套餐还没勾选节点，或节点都不在订阅里。" />
   }

@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
-import { peekList, putList } from '../lib/listCache'
+import { cacheGen, peekList, putList } from '../lib/listCache'
 import { startPoll } from '../lib/poll'
+import { createOpLock } from '../lib/opLock'
+import { asArray, isAbort } from '../lib/safe'
 import { copyText } from '../lib/copy'
 import { isDirectNode, serverStatus } from '../lib/status'
 import { useToast, useDialog } from '../components/Layout'
@@ -87,6 +89,10 @@ export default function Servers() {
   const [ghProxy, setGhProxy] = useState(() => loadGhProxyPref().url)
   const [formOpen, setFormOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [busyId, setBusyId] = useState(0)
+  const [pollErr, setPollErr] = useState('')
+  const ops = useRef(createOpLock())
+  const reloadTimer = useRef(0)
   const [cfOpen, setCfOpen] = useState(false)
   const [cfServer, setCfServer] = useState(null)
   const [cfDomains, setCfDomains] = useState([])
@@ -107,18 +113,30 @@ export default function Servers() {
 
   const load = async () => {
     try {
+      const g = cacheGen()
       const [a, b] = await Promise.all([api.get('/servers'), api.get('/inbounds')])
-      setList(putList('servers', a.servers || []))
-      setIns(putList('inbounds', b.inbounds || []))
+      setList(putList('servers', asArray(a.servers), g))
+      setIns(putList('inbounds', asArray(b.inbounds), g))
     } catch (e) { toast(e.message, 'error') }
     finally { setReady(true) }
   }
   useEffect(() => {
     load()
-    return startPoll(() => {
-      api.get('/servers').then(a => setList(putList('servers', a.servers || []))).catch(() => {})
+    return startPoll(async (signal) => {
+      const g = cacheGen()
+      try {
+        const [a, b] = await Promise.all([api.get('/servers', signal), api.get('/inbounds', signal)])
+        setList(putList('servers', asArray(a.servers), g))
+        setIns(putList('inbounds', asArray(b.inbounds), g))
+        setPollErr('')
+      } catch (e) {
+        if (isAbort(e)) return
+        setPollErr('实时刷新失败，显示的是上次成功数据')
+        throw e
+      }
     }, 5000, { immediate: false })
   }, [])
+  useEffect(() => () => { if (reloadTimer.current) clearTimeout(reloadTimer.current) }, [])
 
   const coreSrvId = coreSrv?.id
   useEffect(() => {
@@ -274,14 +292,18 @@ export default function Servers() {
   }
 
   const sync = async (id) => {
-    try { await api.post(`/servers/${id}/sync`); toast('已下发'); load() }
-    catch (e) { toast(e.message, 'error'); load() }
+    await ops.current.run(`sync-${id}`, async () => {
+      try { await api.post(`/servers/${id}/sync`); toast('已下发'); await load() }
+      catch (e) { toast(e.message, 'error'); await load() }
+    })
   }
 
   const del = async (id) => {
     if (!(await dialog.confirm({ title: '删除实例', message: '这台机器上的节点也会一并删除，且无法恢复。', danger: true, okText: '删除' }))) return
-    try { await api.del(`/servers/${id}`); load(); toast('已删除') }
-    catch (e) { toast(e.message, 'error') }
+    await ops.current.run(`del-${id}`, async () => {
+      try { await api.del(`/servers/${id}`); await load(); toast('已删除') }
+      catch (e) { toast(e.message, 'error') }
+    })
   }
 
   const saveHost = async (s) => {
@@ -371,15 +393,16 @@ export default function Servers() {
       message: `将 ${s.name} 的 Agent 升到面板版本。机器必须在线，大约几十秒。升级后会自动重启 Agent。`,
       okText: '升级',
     }))) return
-    setBusy(true)
+    setBusyId(s.id)
     try {
       const d = await api.post(`/servers/${s.id}/upgrade-agent`)
       toast(`已升级到 ${d.version || '当前版本'}，Agent 正在重启`)
-      setTimeout(load, 2500)
+      if (reloadTimer.current) clearTimeout(reloadTimer.current)
+      reloadTimer.current = setTimeout(load, 2500)
     } catch (e) {
       toast(e.message, 'error')
       if (e.code === 'agent_too_old') showInstall(s.id)
-    } finally { setBusy(false) }
+    } finally { setBusyId(0) }
   }
 
   const uninstallAgent = async (s) => {
@@ -393,13 +416,13 @@ export default function Servers() {
       danger: true,
       okText: '卸载',
     }))) return
-    setBusy(true)
+    setBusyId(s.id)
     try {
       await api.post(`/servers/${s.id}/uninstall-agent`, { confirm: true })
       toast('已卸载 Agent')
       load()
     } catch (e) { toast(e.message, 'error') }
-    finally { setBusy(false) }
+    finally { setBusyId(0) }
   }
 
   const rotateToken = async (s) => {
@@ -444,6 +467,7 @@ export default function Servers() {
           </button>
         }
       />
+      {pollErr ? <div className="alert-row is-warn mb-4">{pollErr}</div> : null}
       {list.length > 0 && (
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
           <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索实例 / 地址" />
@@ -513,12 +537,12 @@ export default function Servers() {
                       {
                         label: '一键升级',
                         hint: s.needs_reinstall ? '版本太旧，将打开安装命令' : (s.online ? '升到面板版本并重启' : '需在线'),
-                        disabled: !s.online || busy,
+                        disabled: !s.online || busyId === s.id,
                         onSelect: () => upgradeAgent(s),
                       },
                       { label: '轮换令牌', onSelect: () => rotateToken(s) },
                       { sep: true },
-                      { label: '一键卸载', danger: true, disabled: !s.online || busy, hint: s.needs_reinstall ? '版本太旧，无法远程卸载' : '同机不删面板', onSelect: () => uninstallAgent(s) },
+                      { label: '一键卸载', danger: true, disabled: !s.online || busyId === s.id, hint: s.needs_reinstall ? '版本太旧，无法远程卸载' : '同机不删面板', onSelect: () => uninstallAgent(s) },
                       { label: '删除实例', danger: true, onSelect: () => del(s.id) },
                     ]} />
                   </div>

@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
-import { peekList, putList } from '../lib/listCache'
+import { cacheGen, peekList, putList } from '../lib/listCache'
 import { startPoll } from '../lib/poll'
+import { createOpLock } from '../lib/opLock'
+import { asArray, isAbort } from '../lib/safe'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, DayBars, Empty, Field, FilterTabs, Icon, Meter, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, billedBytes, fmtBps, fmtBytes, fmtDateShort } from '../components/ui'
@@ -138,9 +140,12 @@ function Metric({ label, value, danger, plain, tone }) {
 export default function Users() {
   const toast = useToast()
   const dialog = useDialog()
-  const [list, setList] = useState(() => peekList('users') ?? [])
-  const [pkgs, setPkgs] = useState(() => peekList('packages') ?? [])
+  const [list, setList] = useState(() => asArray(peekList('users')))
+  const [pkgs, setPkgs] = useState(() => asArray(peekList('packages')))
   const [ready, setReady] = useState(() => peekList('users') !== undefined)
+  const [pollErr, setPollErr] = useState('')
+  const ops = useRef(createOpLock())
+  const trafficSeq = useRef(0)
   const [f, setF] = useState(emptyForm)
   const [busy, setBusy] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
@@ -163,16 +168,26 @@ export default function Users() {
 
   const load = async () => {
     try {
+      const g = cacheGen()
       const [a, b] = await Promise.all([api.get('/users'), api.get('/packages')])
-      setList(putList('users', a.users || []))
-      setPkgs(putList('packages', b.packages || []))
+      setList(putList('users', asArray(a.users), g))
+      setPkgs(putList('packages', asArray(b.packages), g))
     } catch (e) { toast(e.message, 'error') }
     finally { setReady(true) }
   }
   useEffect(() => {
     load()
-    return startPoll(() => {
-      api.get('/users').then(a => setList(putList('users', a.users || []))).catch(() => {})
+    return startPoll(async (signal) => {
+      const g = cacheGen()
+      try {
+        const a = await api.get('/users', signal)
+        setList(putList('users', asArray(a.users), g))
+        setPollErr('')
+      } catch (e) {
+        if (isAbort(e)) return
+        setPollErr('实时刷新失败，显示的是上次成功数据')
+        throw e
+      }
     }, 5000, { immediate: false })
   }, [])
 
@@ -223,6 +238,14 @@ export default function Users() {
       return
     }
     if (editUser) {
+      if (editUser.enabled !== false && f.enabled === false) {
+        if (!(await dialog.confirm({
+          title: '停用用户',
+          message: `将停用 ${editUser.username}，该用户立刻无法登录，订阅节点会从客户端消失。`,
+          danger: true,
+          okText: '停用',
+        }))) return
+      }
       const prev = Number(editUser.package_id || 0)
       const next = Number(f.package_id || 0)
       if (prev && next && prev !== next) {
@@ -296,8 +319,23 @@ export default function Users() {
     finally { setBusy(false) }
   }
 
-  const act = async (fn) => {
-    try { await fn(); load() } catch (e) { toast(e.message, 'error') }
+  const act = async (key, fn) => {
+    await ops.current.run(key, async () => {
+      try { await fn(); await load() } catch (e) { toast(e.message, 'error') }
+    })
+  }
+
+  const toggleEnabled = async (u) => {
+    const next = !u.enabled
+    if (!next) {
+      if (!(await dialog.confirm({
+        title: '停用用户',
+        message: `将停用 ${u.username}，该用户立刻无法登录，订阅节点会从客户端消失。`,
+        danger: true,
+        okText: '停用',
+      }))) return
+    }
+    await act(`tog-${u.id}`, () => api.put(`/users/${u.id}`, { enabled: next }))
   }
 
   const resetTraffic = async () => {
@@ -314,15 +352,21 @@ export default function Users() {
 
   const remove = async (u) => {
     if (!(await dialog.confirm({ title: '删除用户', message: `将删除 ${u.username} 及其订阅。`, danger: true }))) return
-    await act(() => api.del(`/users/${u.id}`))
+    await act(`del-${u.id}`, () => api.del(`/users/${u.id}`))
   }
 
   const openTraffic = async (u) => {
+    const seq = ++trafficSeq.current
     setTrafficUser(u)
     setTrafficDetail(null)
     try {
-      setTrafficDetail(await api.get(`/users/${u.id}/traffic?days=14`))
-    } catch (e) { toast(e.message, 'error') }
+      const d = await api.get(`/users/${u.id}/traffic?days=14`)
+      if (seq !== trafficSeq.current) return
+      setTrafficDetail(d)
+    } catch (e) {
+      if (seq !== trafficSeq.current) return
+      toast(e.message, 'error')
+    }
   }
 
   const copyCard = async (u) => {
@@ -421,6 +465,7 @@ export default function Users() {
           </div>
         }
       />
+      {pollErr ? <div className="alert-row is-warn mb-4">{pollErr}</div> : null}
       <div className="flex flex-col sm:flex-row gap-2 mb-3">
         <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索用户名 / 备注 / 套餐" />
         <select className="input-field toolbar-select" value={pkgFilter} onChange={e => setPkgFilter(e.target.value)}>
@@ -483,7 +528,7 @@ export default function Users() {
                       { label: '重置密码', onSelect: () => resetPassword(u) },
                       { sep: true },
                       { label: '流量', onSelect: () => openTraffic(u) },
-                      { label: u.enabled ? '停用' : '启用', onSelect: () => act(() => api.put(`/users/${u.id}`, { enabled: !u.enabled })) },
+                      { label: u.enabled ? '停用' : '启用', onSelect: () => toggleEnabled(u) },
                       { sep: true },
                       { label: '删除', danger: true, onSelect: () => remove(u) },
                     ]} />
@@ -603,8 +648,8 @@ export default function Users() {
         <p className="text-[12px] text-ink-mut mb-3">只读预览，不是管理员自己的订阅。不含该用户的分享链接。</p>
         <NodePreviewList data={previewData} error={previewErr} loading={previewLoading} />
       </Modal>
-      <Modal open={!!trafficUser} title={trafficUser ? `${trafficUser.username} 的流量` : '流量'} onClose={() => { setTrafficUser(null); setTrafficDetail(null) }} size="lg" footer={
-        <button type="button" className="btn-ghost" onClick={() => { setTrafficUser(null); setTrafficDetail(null) }}>关闭</button>
+      <Modal open={!!trafficUser} title={trafficUser ? `${trafficUser.username} 的流量` : '流量'} onClose={() => { trafficSeq.current += 1; setTrafficUser(null); setTrafficDetail(null) }} size="lg" footer={
+        <button type="button" className="btn-ghost" onClick={() => { trafficSeq.current += 1; setTrafficUser(null); setTrafficDetail(null) }}>关闭</button>
       }>
         {trafficUser && (
           <div>
@@ -617,13 +662,13 @@ export default function Users() {
             {trafficDetail ? (
               <>
                 <div className="text-[13px] font-medium mb-2">近 14 日（原始）</div>
-                <DayBars days={trafficDetail.days} />
-                {(trafficDetail.inbounds || []).length > 0 && (
+                <DayBars days={asArray(trafficDetail.days)} />
+                {asArray(trafficDetail.inbounds).length > 0 && (
                   <div className="table-wrap mt-4">
                     <table className="data">
                       <thead><tr><th>节点</th><th>上行</th><th>下行</th></tr></thead>
                       <tbody>
-                        {trafficDetail.inbounds.map(inb => (
+                        {asArray(trafficDetail.inbounds).map(inb => (
                           <tr key={inb.id}>
                             <td>{inb.name}</td>
                             <td className="tabular-nums">{fmtBytes(inb.up)}</td>

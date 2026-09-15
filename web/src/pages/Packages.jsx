@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
-import { peekList, putList } from '../lib/listCache'
+import { cacheGen, peekList, putList } from '../lib/listCache'
+import { asArray } from '../lib/safe'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, StatusWord } from '../components/ui'
 import { NodePreviewList } from '../components/NodePreview'
@@ -93,11 +94,12 @@ export default function Packages() {
 
   const load = async () => {
     try {
+      const g = cacheGen()
       const [a, b, c, d] = await Promise.all([api.get('/packages'), api.get('/servers'), api.get('/inbounds'), api.get('/users')])
-      setList(putList('packages', a.packages || []))
-      setServers(putList('servers', b.servers || []))
-      setIns(putList('inbounds', c.inbounds || []))
-      setUsers(putList('users', d.users || []))
+      setList(putList('packages', asArray(a.packages), g))
+      setServers(putList('servers', asArray(b.servers), g))
+      setIns(putList('inbounds', asArray(c.inbounds), g))
+      setUsers(putList('users', asArray(d.users), g))
     } catch (e) { toast(e.message, 'error') }
     finally { setReady(true) }
   }

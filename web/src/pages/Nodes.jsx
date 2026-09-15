@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
@@ -6,9 +6,11 @@ import { formatPortRange, serverPortRange } from '../lib/ports'
 import { isDirectNode, nodeStatus, serverHasCore } from '../lib/status'
 import { useToast, useDialog } from '../components/Layout'
 import { coreLabel } from '../lib/display'
-import { peekList, putList } from '../lib/listCache'
+import { cacheGen, peekList, putList } from '../lib/listCache'
 import { startPoll } from '../lib/poll'
-import { Badge, Empty, Field, FilterTabs, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, StatusWord, fmtBytes, fmtDateShort } from '../components/ui'
+import { createOpLock } from '../lib/opLock'
+import { asArray, isAbort } from '../lib/safe'
+import { Badge, Empty, Field, FilterTabs, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, StatusWord, fmtBps, fmtBytes, fmtDateShort } from '../components/ui'
 
 const DEST_PRESETS = [
   'www.cloudflare.com:443',
@@ -134,7 +136,7 @@ function coreId(core) {
 
 function nodeTone(st) {
   if (st === '正常') return 'is-live'
-  if (st === '故障') return 'is-fault'
+  if (st === '故障' || st === '流量已满') return 'is-fault'
   return 'is-off'
 }
 
@@ -199,23 +201,39 @@ export default function Nodes() {
   const [showAdv, setShowAdv] = useState(false)
   const [q, setQ] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [pollErr, setPollErr] = useState('')
+  const ops = useRef(createOpLock())
 
   const load = async () => {
     try {
+      const g = cacheGen()
       const [a, b, c, d] = await Promise.all([
         api.get('/servers'), api.get('/inbounds'), api.get('/certs'), api.get('/profiles'),
       ])
-      setServers(putList('servers', a.servers || []))
-      setList(putList('inbounds', b.inbounds || []))
-      setCerts(putList('certs', c.certs || []))
-      setProfiles(putList('profiles', d.profiles || []))
+      setServers(putList('servers', asArray(a.servers), g))
+      setList(putList('inbounds', asArray(b.inbounds), g))
+      setCerts(putList('certs', asArray(c.certs), g))
+      setProfiles(putList('profiles', asArray(d.profiles), g))
     } catch (e) { toast(e.message, 'error') }
     finally { setReady(true) }
   }
   useEffect(() => {
     load()
-    return startPoll(() => {
-      api.get('/servers').then(a => setServers(putList('servers', a.servers || []))).catch(() => {})
+    return startPoll(async (signal) => {
+      const g = cacheGen()
+      try {
+        const [a, b] = await Promise.all([
+          api.get('/servers', signal),
+          api.get('/inbounds', signal),
+        ])
+        setServers(putList('servers', asArray(a.servers), g))
+        setList(putList('inbounds', asArray(b.inbounds), g))
+        setPollErr('')
+      } catch (e) {
+        if (isAbort(e)) return
+        setPollErr('实时刷新失败，显示的是上次成功数据')
+        throw e
+      }
     }, 5000, { immediate: false })
   }, [])
 
@@ -322,6 +340,17 @@ export default function Nodes() {
       return
     }
     const wasEdit = !!editId
+    if (wasEdit) {
+      const prev = list.find(x => Number(x.id) === Number(editId))
+      if (prev && Number(f.port) !== Number(prev.port)) {
+        if (!(await dialog.confirm({
+          title: '修改端口',
+          message: `端口将从 ${prev.port} 改为 ${f.port}，现有连接会断开。`,
+          danger: true,
+          okText: '改端口',
+        }))) return
+      }
+    }
     setBusy(true)
     try {
       const d = wasEdit ? await api.put(`/inbounds/${editId}`, bodyFromForm()) : await api.post('/inbounds', bodyFromForm())
@@ -335,19 +364,32 @@ export default function Nodes() {
 
   const delLine = async (id) => {
     if (!(await dialog.confirm({ title: '删除节点', message: '订阅里对应的节点会立刻消失。', danger: true }))) return
-    try { await api.del(`/inbounds/${id}`); if (editId === id) closeLine(); load() }
-    catch (e) { toast(e.message, 'error') }
+    await ops.current.run(`del-${id}`, async () => {
+      try { await api.del(`/inbounds/${id}`); if (editId === id) closeLine(); await load() }
+      catch (e) { toast(e.message, 'error') }
+    })
   }
 
   const toggle = async (inb) => {
-    try {
-      const d = await api.put(`/inbounds/${inb.id}`, {
-        enabled: !inb.enabled, name: inb.name, port: inb.port, listen: inb.listen,
-        settings: inb.settings, line_kind: inb.line_kind, exit_inbound_id: inb.exit_inbound_id, exit_uri: inb.exit_uri || '', cert_id: inb.cert_id,
-      })
-      if (d.apply_error) toast(d.apply_error, 'error')
-      load()
-    } catch (e) { toast(e.message, 'error') }
+    const next = !inb.enabled
+    if (!next) {
+      if (!(await dialog.confirm({
+        title: '停用节点',
+        message: `将停掉「${inb.name}」的入口端口，在线用户会立刻断开。`,
+        danger: true,
+        okText: '停用',
+      }))) return
+    }
+    await ops.current.run(`tog-${inb.id}`, async () => {
+      try {
+        const d = await api.put(`/inbounds/${inb.id}`, {
+          enabled: next, name: inb.name, port: inb.port, listen: inb.listen,
+          settings: inb.settings, line_kind: inb.line_kind, exit_inbound_id: inb.exit_inbound_id, exit_uri: inb.exit_uri || '', cert_id: inb.cert_id,
+        })
+        if (d.apply_error) toast(d.apply_error, 'error')
+        await load()
+      } catch (e) { toast(e.message, 'error') }
+    })
   }
 
   const copyParams = async (inb) => {
@@ -363,6 +405,10 @@ export default function Nodes() {
   const copyShare = async (inb) => {
     try {
       const d = await api.get(`/inbounds/${inb.id}/share`)
+      if (!d?.uri) {
+        toast('这个节点还没有分享链接', 'error')
+        return
+      }
       try {
         await copyText(d.uri)
         toast('已复制当前账号的节点链接')
@@ -383,7 +429,8 @@ export default function Nodes() {
     for (const s of servers) {
       if (sid && Number(s.id) !== sid) continue
       let nodes = direct.filter(x => Number(x.server_id) === Number(s.id))
-      if (statusFilter) nodes = nodes.filter(x => nodeStatus(x, s) === statusFilter)
+      if (statusFilter === '故障') nodes = nodes.filter(x => { const st = nodeStatus(x, s); return st === '故障' || st === '流量已满' })
+      else if (statusFilter) nodes = nodes.filter(x => nodeStatus(x, s) === statusFilter)
       if (needle) {
         nodes = nodes.filter(x => [x.name, x.profile, protoShort(x.profile), x.port, s.name, s.public_host]
           .some(v => String(v || '').toLowerCase().includes(needle)))
@@ -409,13 +456,14 @@ export default function Nodes() {
           ) : null
         }
       />
+      {pollErr ? <div className="alert-row is-warn mb-4">{pollErr}</div> : null}
       {servers.length > 0 && (
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
           <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索节点 / 协议 / 端口" />
           <FilterTabs
             value={statusFilter}
             onChange={setStatusFilter}
-            items={[['','全部'],['正常','正常'],['停用','停用'],['离线','离线'],['故障','故障']]}
+            items={[['','全部'],['正常','正常'],['停用','停用'],['离线','离线'],['故障','故障'],['流量已满','流量已满']]}
           />
           {filteredServer ? (
             <button type="button" className="row-act sm:ml-auto" onClick={() => setParams({})}>
@@ -500,8 +548,10 @@ export default function Nodes() {
                           <Metric label="协议" value={protoShort(inb.profile)} plain />
                           <Metric label="端口" value={String(inb.port || '')} />
                           <Metric label="全站" value={fmtBytes(used)} />
-                          <Metric label="核心" value={coreLabel(coreId(inb.core))} plain />
+                          <Metric label="实时" value={s.online ? `${fmtBps(s.net_up_bps)} / ${fmtBps(s.net_down_bps)}` : '—'} />
                         </div>
+                        {st === '离线' ? <div className="text-[12px] text-ink-mut px-3 pb-1">实例离线，累计是上次在线时的数字</div> : null}
+                        {st === '流量已满' ? <div className="text-[12px] px-3 pb-1" style={{ color: 'var(--color-danger)' }}>实例流量已满，节点已停用</div> : null}
                         <div className="machine-foot">
                           <button type="button" className="machine-ports" onClick={() => setParamInb(inb)}>参数</button>
                           <button type="button" className="row-act" onClick={() => copyShare(inb)}>复制</button>

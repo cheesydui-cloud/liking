@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
-import { peekList, putList } from '../lib/listCache'
+import { cacheGen, peekList, putList } from '../lib/listCache'
 import { startPoll } from '../lib/poll'
+import { createOpLock } from '../lib/opLock'
+import { asArray, isAbort } from '../lib/safe'
 import { peekProbe, putProbe } from '../lib/probeCache'
 import { copyText } from '../lib/copy'
 import { useToast, useDialog } from '../components/Layout'
@@ -33,7 +35,7 @@ function cloneEntrySettings(inb) {
 function cardTone(inb, entrySrv) {
   if (inb.enabled === false) return 'is-off'
   const st = nodeStatus(inb, entrySrv, { skipLanding: true })
-  if (st === '故障') return 'is-fault'
+  if (st === '故障' || st === '流量已满') return 'is-fault'
   if (st === '正常') return 'is-live'
   return 'is-off'
 }
@@ -70,20 +72,36 @@ export default function MyForwards({ embedded = false } = {}) {
   const [probe, setProbe] = useState({})
   const [probing, setProbing] = useState({})
   const [shareText, setShareText] = useState('')
+  const [pollErr, setPollErr] = useState('')
   const probedOnce = useRef(new Set())
+  const ops = useRef(createOpLock())
 
   const load = async () => {
     try {
+      const g = cacheGen()
       const [a, b] = await Promise.all([api.get('/servers'), api.get('/inbounds')])
-      setServers(putList('servers', a.servers || []))
-      setList(putList('inbounds', b.inbounds || []))
+      setServers(putList('servers', asArray(a.servers), g))
+      setList(putList('inbounds', asArray(b.inbounds), g))
     } catch (e) { toast(e.message, 'error') }
     finally { setReady(true) }
   }
   useEffect(() => {
     load()
-    return startPoll(() => {
-      api.get('/servers').then(a => setServers(putList('servers', a.servers || []))).catch(() => {})
+    return startPoll(async (signal) => {
+      const g = cacheGen()
+      try {
+        const [a, b] = await Promise.all([
+          api.get('/servers', signal),
+          api.get('/inbounds', signal),
+        ])
+        setServers(putList('servers', asArray(a.servers), g))
+        setList(putList('inbounds', asArray(b.inbounds), g))
+        setPollErr('')
+      } catch (e) {
+        if (isAbort(e)) return
+        setPollErr('实时刷新失败，显示的是上次成功数据')
+        throw e
+      }
     }, 5000, { immediate: false })
   }, [])
 
@@ -208,6 +226,17 @@ export default function MyForwards({ embedded = false } = {}) {
     const body = bodyFromForm()
     if (!body) { toast('请选择入口节点', 'error'); return }
     const wasEdit = !!editId
+    if (wasEdit) {
+      const prev = byID.get(Number(editId))
+      if (prev && Number(f.port) !== Number(prev.port)) {
+        if (!(await dialog.confirm({
+          title: '修改端口',
+          message: `入口端口将从 ${prev.port} 改为 ${f.port}，现有连接会断开。`,
+          danger: true,
+          okText: '改端口',
+        }))) return
+      }
+    }
     setBusy(true)
     try {
       const d = wasEdit ? await api.put(`/inbounds/${editId}`, body) : await api.post('/inbounds', body)
@@ -220,30 +249,43 @@ export default function MyForwards({ embedded = false } = {}) {
   }
 
   const toggle = async (inb) => {
-    try {
-      const d = await api.put(`/inbounds/${inb.id}`, {
-        enabled: !inb.enabled,
-        name: inb.name,
-        port: inb.port,
-        listen: inb.listen,
-        settings: inb.settings,
-        line_kind: inb.line_kind,
-        exit_inbound_id: inb.exit_inbound_id || 0,
-        exit_uri: inb.exit_uri || '',
-        cert_id: inb.cert_id,
-      })
-      if (d.apply_error) toast(d.apply_error, 'error')
-      load()
-    } catch (err) { toast(err.message, 'error') }
+    const next = !inb.enabled
+    if (!next) {
+      if (!(await dialog.confirm({
+        title: '停用中转',
+        message: `将停掉「${inb.name || inb.port}」的入口端口，在线用户会立刻断开。`,
+        danger: true,
+        okText: '停用',
+      }))) return
+    }
+    await ops.current.run(`tog-${inb.id}`, async () => {
+      try {
+        const d = await api.put(`/inbounds/${inb.id}`, {
+          enabled: next,
+          name: inb.name,
+          port: inb.port,
+          listen: inb.listen,
+          settings: inb.settings,
+          line_kind: inb.line_kind,
+          exit_inbound_id: inb.exit_inbound_id || 0,
+          exit_uri: inb.exit_uri || '',
+          cert_id: inb.cert_id,
+        })
+        if (d.apply_error) toast(d.apply_error, 'error')
+        await load()
+      } catch (err) { toast(err.message, 'error') }
+    })
   }
 
   const del = async (inb) => {
     if (!(await dialog.confirm({ title: '删除中转', message: '入口会立刻停掉。链式入口会从订阅里消失。原来的节点不受影响。', danger: true }))) return
-    try {
-      await api.del(`/inbounds/${inb.id}`)
-      if (editId === inb.id) closeForm()
-      load()
-    } catch (err) { toast(err.message, 'error') }
+    await ops.current.run(`del-${inb.id}`, async () => {
+      try {
+        await api.del(`/inbounds/${inb.id}`)
+        if (editId === inb.id) closeForm()
+        await load()
+      } catch (err) { toast(err.message, 'error') }
+    })
   }
 
   const applyProbe = (id, rec) => {
@@ -345,6 +387,7 @@ export default function MyForwards({ embedded = false } = {}) {
 
   return (
     <div>
+      {pollErr ? <div className="alert-row is-warn mb-4">{pollErr}</div> : null}
       {embedded ? null : (
         <PageHead
           title="中转"

@@ -9,8 +9,27 @@ function httpErrorMessage(status) {
   return `请求失败（${status}）`
 }
 
-async function request(method, path, body) {
-  const opts = { method, headers: {}, credentials: 'same-origin' }
+function readSignal(x) {
+  if (!x) return undefined
+  if (typeof AbortSignal !== 'undefined' && x instanceof AbortSignal) return x
+  if (x.signal) return x.signal
+  return undefined
+}
+
+function fail(status, message, extra) {
+  const err = new Error(message)
+  err.status = status
+  if (extra && extra.need_totp) err.need_totp = true
+  if (extra && extra.code) err.code = extra.code
+  return err
+}
+
+function isAbort(e) {
+  return e?.name === 'AbortError' || e?.code === 20
+}
+
+async function request(method, path, body, signal) {
+  const opts = { method, headers: {}, credentials: 'same-origin', signal }
   if (body) {
     opts.headers['Content-Type'] = 'application/json'
     opts.body = JSON.stringify(body)
@@ -18,7 +37,8 @@ async function request(method, path, body) {
   let res
   try {
     res = await fetch(BASE + path, opts)
-  } catch {
+  } catch (e) {
+    if (isAbort(e)) throw e
     throw new Error('网络错误')
   }
   const ct = res.headers.get('content-type') || ''
@@ -29,15 +49,11 @@ async function request(method, path, body) {
   if (res.status === 401) {
     const isLogin = path === '/login'
     if (!isLogin) window.dispatchEvent(new CustomEvent('lk-unauthorized'))
-    const err = new Error((data && data.error) || (isLogin ? '用户名或密码错误' : '登录已过期'))
-    if (data && data.need_totp) err.need_totp = true
-    throw err
+    throw fail(401, (data && data.error) || (isLogin ? '用户名或密码错误' : '登录已过期'), data)
   }
   if (res.status === 204) return null
   if (!res.ok) {
-    const err = new Error((data && data.error) || httpErrorMessage(res.status))
-    if (data && data.code) err.code = data.code
-    throw err
+    throw fail(res.status, (data && data.error) || httpErrorMessage(res.status), data)
   }
   return data
 }
@@ -55,85 +71,73 @@ async function parseError(res) {
   return httpErrorMessage(res.status)
 }
 
+async function fetchOrThrow(path, opts) {
+  let res
+  try {
+    res = await fetch(BASE + path, opts)
+  } catch (e) {
+    if (isAbort(e)) throw e
+    throw new Error('网络错误')
+  }
+  return res
+}
+
 export const api = {
-  get: (path) => request('GET', path),
-  post: (path, body) => request('POST', path, body),
-  put: (path, body) => request('PUT', path, body),
-  del: (path) => request('DELETE', path),
+  get: (path, opt) => request('GET', path, null, readSignal(opt)),
+  post: (path, body, opt) => request('POST', path, body, readSignal(opt)),
+  put: (path, body, opt) => request('PUT', path, body, readSignal(opt)),
+  del: (path, opt) => request('DELETE', path, null, readSignal(opt)),
   postForm: async (path, formData) => {
-    let res
-    try {
-      res = await fetch(BASE + path, { method: 'POST', body: formData, credentials: 'same-origin' })
-    } catch {
-      throw new Error('网络错误')
-    }
+    const res = await fetchOrThrow(path, { method: 'POST', body: formData, credentials: 'same-origin' })
     if (res.status === 401) {
       window.dispatchEvent(new CustomEvent('lk-unauthorized'))
-      throw new Error('登录已过期')
+      throw fail(401, '登录已过期')
     }
     const ct = res.headers.get('content-type') || ''
     let data = null
     if (ct.includes('application/json')) {
       try { data = await res.json() } catch { data = null }
     }
-    if (!res.ok) throw new Error((data && data.error) || httpErrorMessage(res.status))
+    if (!res.ok) throw fail(res.status, (data && data.error) || httpErrorMessage(res.status), data)
     return data
   },
   download: async (path, fallbackName) => {
-    let res
-    try {
-      res = await fetch(BASE + path, { credentials: 'same-origin' })
-    } catch {
-      throw new Error('网络错误')
-    }
+    const res = await fetchOrThrow(path, { credentials: 'same-origin' })
     if (res.status === 401) {
       window.dispatchEvent(new CustomEvent('lk-unauthorized'))
-      throw new Error('登录已过期')
+      throw fail(401, '登录已过期')
     }
-    if (!res.ok) throw new Error(await parseError(res))
-    const blob = await res.blob()
-    let name = fallbackName || 'download'
-    const cd = res.headers.get('Content-Disposition') || ''
-    const m = cd.match(/filename="([^"]+)"/)
-    if (m) name = m[1]
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = name
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
+    if (!res.ok) throw fail(res.status, await parseError(res))
+    await saveBlob(res, fallbackName)
   },
   downloadPost: async (path, body, fallbackName) => {
-    let res
-    try {
-      res = await fetch(BASE + path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body || {}),
-        credentials: 'same-origin',
-      })
-    } catch {
-      throw new Error('网络错误')
-    }
+    const res = await fetchOrThrow(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+      credentials: 'same-origin',
+    })
     if (res.status === 401) {
       window.dispatchEvent(new CustomEvent('lk-unauthorized'))
-      throw new Error('登录已过期')
+      throw fail(401, '登录已过期')
     }
-    if (!res.ok) throw new Error(await parseError(res))
-    const blob = await res.blob()
-    let name = fallbackName || 'download'
-    const cd = res.headers.get('Content-Disposition') || ''
-    const m = cd.match(/filename="([^"]+)"/)
-    if (m) name = m[1]
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = name
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
+    if (!res.ok) throw fail(res.status, await parseError(res))
+    await saveBlob(res, fallbackName)
   },
+}
+
+async function saveBlob(res, fallbackName) {
+  const blob = await res.blob()
+  let name = fallbackName || 'download'
+  const cd = res.headers.get('Content-Disposition') || ''
+  const m = cd.match(/filename="([^"]+)"/)
+  if (m) name = m[1]
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }
