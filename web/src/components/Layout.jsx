@@ -187,6 +187,20 @@ export function Layout({ children }) {
   }, [loc.pathname])
 
   useEffect(() => {
+    const on = loc.pathname === '/' || loc.pathname === '/servers'
+    document.documentElement.classList.toggle('page-aliyun', on)
+    return () => document.documentElement.classList.remove('page-aliyun')
+  }, [loc.pathname])
+
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="theme-color"]')
+    if (!meta) return
+    const on = loc.pathname === '/' || loc.pathname === '/servers'
+    if (on) meta.setAttribute('content', dark ? '#141414' : '#F7F8FA')
+    else meta.setAttribute('content', dark ? '#18181B' : '#F6F6F4')
+  }, [loc.pathname, dark])
+
+  useEffect(() => {
     if (!open) return
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -273,7 +287,6 @@ export function Layout({ children }) {
           <BrandMark size={28} />
           <div className="min-w-0">
             <div className="sidebar-brand truncate">{panelName || 'liking'}</div>
-            <div className="sidebar-ver mt-0.5">{isAdmin && userView ? '用户页' : isAdmin ? '管理' : '用户'}{version ? ` v${version}` : ''}</div>
           </div>
         </div>
         <nav className="flex-1 px-2.5 overflow-y-auto">
@@ -301,6 +314,7 @@ export function Layout({ children }) {
           <button type="button" onClick={logout} className="btn-ghost w-full h-9 mt-2.5 text-[14px]" aria-label="退出">
             <Icon name="logout" size={16} /> 退出
           </button>
+          {isAdmin && version ? <div className="sidebar-ver mt-2 px-1">v{version}</div> : null}
         </div>
       </aside>
       <main id="main" ref={mainRef} tabIndex={-1} className="flex-1 min-w-0 flex flex-col bg-app outline-none">

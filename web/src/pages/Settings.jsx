@@ -134,6 +134,7 @@ function TotpBox() {
 function AccountForm() {
   const toast = useToast()
   const { user, applySession, refreshUser } = useUser()
+  const isAdmin = user?.role === 'admin'
   const [username, setUsername] = useState(user?.username || '')
   const [oldP, setOld] = useState('')
   const [n, setN] = useState('')
@@ -145,11 +146,13 @@ function AccountForm() {
   const submit = async (e) => {
     e.preventDefault()
     if (!oldP) { toast('请填写当前密码', 'error'); return }
+    if (!isAdmin && !n) { toast('请填写新密码', 'error'); return }
     if (n && n.length < 6) { toast('新密码至少 6 位', 'error'); return }
     if (n && n !== n2) { toast('两次新密码不一致', 'error'); return }
     setBusy(true)
     try {
-      const body = { username: username.trim(), old_password: oldP }
+      const body = { old_password: oldP }
+      if (isAdmin) body.username = username.trim()
       if (n) body.new_password = n
       const data = await api.put('/me', body)
       if (data) applySession(data)
@@ -163,17 +166,23 @@ function AccountForm() {
   return (
     <div className="space-y-5">
       <form onSubmit={submit} className="card p-5 max-w-md space-y-4">
-        <Field label="用户名">
-          <input className="input-field" value={username} onChange={e => setUsername(e.target.value)} required autoComplete="username" />
-        </Field>
-        <Field label="当前密码" hint="改用户名或密码都要填写。改完后当前会话仍然有效。">
+        {isAdmin ? (
+          <Field label="用户名">
+            <input className="input-field" value={username} onChange={e => setUsername(e.target.value)} required autoComplete="username" />
+          </Field>
+        ) : (
+          <Field label="用户名">
+            <div className="text-[14px] font-medium py-1">{user?.username}</div>
+          </Field>
+        )}
+        <Field label="当前密码" hint={isAdmin ? '改用户名或密码都要填写。改完后当前会话仍然有效。' : '改密码需要填写当前密码。改完后当前会话仍然有效。'}>
           <input className="input-field" type="password" value={oldP} onChange={e => setOld(e.target.value)} required autoComplete="current-password" />
         </Field>
-        <Field label="新密码" hint="留空表示不改密码。至少 6 位。">
-          <input className="input-field" type="password" value={n} onChange={e => setN(e.target.value)} autoComplete="new-password" />
+        <Field label="新密码" hint={isAdmin ? '留空表示不改密码。至少 6 位。' : '至少 6 位。'}>
+          <input className="input-field" type="password" value={n} onChange={e => setN(e.target.value)} autoComplete="new-password" required={!isAdmin} />
         </Field>
         <Field label="确认新密码">
-          <input className="input-field" type="password" value={n2} onChange={e => setN2(e.target.value)} autoComplete="new-password" disabled={!n} />
+          <input className="input-field" type="password" value={n2} onChange={e => setN2(e.target.value)} autoComplete="new-password" disabled={!n} required={!isAdmin} />
         </Field>
         <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
       </form>

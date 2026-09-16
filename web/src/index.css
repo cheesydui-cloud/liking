@@ -49,6 +49,7 @@
   --color-ink-soft: #3f3f3f;
   --color-ink-mut: #6e6e6e;
   --color-accent: #ff6a00;
+  --color-accent-hover: #e55f00;
   --color-accent-soft: color-mix(in srgb, #ff6a00 10%, #ffffff);
   --color-on-accent: #ffffff;
   --color-gold: #ff6a00;
@@ -90,6 +91,7 @@
   --color-ink-soft: #d4d4d8;
   --color-ink-mut: #a1a1aa;
   --color-accent: #ff8533;
+  --color-accent-hover: #ff9a4d;
   --color-accent-soft: rgba(255, 133, 51, 0.22);
   --color-on-accent: #ffffff;
   --color-gold: #ff8533;
@@ -102,6 +104,55 @@
   --color-warn-soft: rgba(251, 191, 36, 0.14);
   --color-danger: #f87171;
   --color-danger-soft: rgba(248, 113, 113, 0.16);
+}
+
+/* Preview: 总览 / 实例 only. Confirm before applying globally. */
+html.page-aliyun {
+  --ink-50: #f7f8fa;
+  --warn-700: #fa8c16;
+  --app-from: #f7f8fa;
+  --color-app: #f7f8fa;
+  --color-surface: #ffffff;
+  --color-raised: #ffffff;
+  --color-fill: #f2f3f5;
+  --color-hit: #e8eaed;
+  --color-line: #e8eaed;
+  --color-line-soft: #f0f0f0;
+  --color-ink: #1d1d1d;
+  --color-ink-soft: #4e5969;
+  --color-ink-mut: #86909c;
+  --color-accent: #ff6a00;
+  --color-accent-hover: #e55f00;
+  --color-accent-fill: #ff9a4d;
+  --color-accent-soft: color-mix(in srgb, #ff6a00 8%, #ffffff);
+  --color-on-accent: #ffffff;
+  --color-gold: #ff6a00;
+  --color-warn: #fa8c16;
+  --color-warn-soft: color-mix(in srgb, #fa8c16 12%, #ffffff);
+}
+
+html.dark.page-aliyun {
+  --ink-50: #1f1f1f;
+  --warn-700: #ffa940;
+  --app-from: #141414;
+  --color-app: #141414;
+  --color-surface: #1f1f1f;
+  --color-raised: #262626;
+  --color-fill: #2a2a2a;
+  --color-hit: #333333;
+  --color-line: #3a3a3a;
+  --color-line-soft: #2e2e2e;
+  --color-ink: #f2f3f5;
+  --color-ink-soft: #c9cdd4;
+  --color-ink-mut: #86909c;
+  --color-accent: #ff6a00;
+  --color-accent-hover: #ff8533;
+  --color-accent-fill: #ff8533;
+  --color-accent-soft: rgba(255, 106, 0, 0.18);
+  --color-on-accent: #ffffff;
+  --color-gold: #ff6a00;
+  --color-warn: #ffa940;
+  --color-warn-soft: rgba(255, 169, 64, 0.16);
 }
 
 html, body, #root { height: 100%; height: 100dvh; }
@@ -283,7 +334,7 @@ textarea.input-field { height: auto; min-height: 7rem; padding-top: 0.55rem; pad
   @apply inline-flex items-center justify-center gap-1.5 h-9 px-3.5 text-[13px] cursor-pointer;
   font-weight: 600;
   border-radius: var(--radius-ctl);
-  transition: opacity var(--duration-fast) ease, background var(--duration-fast) ease;
+  transition: opacity var(--duration-fast) ease, background var(--duration-fast) ease, border-color var(--duration-fast) ease;
   background: var(--color-accent);
   color: var(--color-on-accent);
   border: 1px solid var(--color-accent);
@@ -291,6 +342,18 @@ textarea.input-field { height: auto; min-height: 7rem; padding-top: 0.55rem; pad
 .btn-primary:hover { opacity: 0.9; }
 .btn-primary:active { transform: translateY(0.5px); }
 .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+html.page-aliyun .btn-primary:active:not(:disabled) {
+  opacity: 1;
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+@media (hover: hover) and (pointer: fine) {
+  html.page-aliyun .btn-primary:hover:not(:disabled) {
+    opacity: 1;
+    background: var(--color-accent-hover);
+    border-color: var(--color-accent-hover);
+  }
+}
 
 .btn-ghost {
   @apply inline-flex items-center justify-center gap-1.5 h-9 px-3 text-[13px] border cursor-pointer;
@@ -1144,7 +1207,7 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
 }
 .brand-mark span {
   display: block;
-  background: var(--color-ink);
+  background: var(--color-accent);
 }
 
 .user-mark {
@@ -1403,6 +1466,27 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
 @media (prefers-reduced-motion: reduce) {
   .machine, .machine:hover { transform: none; }
 }
+html.page-aliyun .dash-stats,
+html.page-aliyun .traffic-area-card,
+html.page-aliyun .card {
+  border-radius: 8px;
+}
+html.page-aliyun .machine {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+html.dark.page-aliyun .machine {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+@media (hover: hover) and (pointer: fine) {
+  html.page-aliyun .machine:hover {
+    transform: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  }
+  html.dark.page-aliyun .machine:hover {
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+  }
+}
+
 .machine.is-live { border-left-color: var(--color-ok); }
 .machine.is-fault { border-left-color: var(--color-danger); }
 .machine.is-off { border-left-color: #c8c8c8; }

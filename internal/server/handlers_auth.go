@@ -175,6 +175,10 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if name != u.Username {
+			if u.Role != "admin" {
+				jsonErr(w, http.StatusBadRequest, "不能修改用户名")
+				return
+			}
 			other, err := db.GetUserByName(s.DB, name)
 			if err == nil && other != nil && other.ID != u.ID {
 				jsonErr(w, http.StatusConflict, "用户名已存在")

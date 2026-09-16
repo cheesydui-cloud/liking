@@ -1806,14 +1806,29 @@ func TestSelfProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if res.StatusCode != 400 {
+		t.Fatalf("user rename %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	pwOnly, _ := json.Marshal(map[string]string{"old_password": "bobpass", "new_password": "bobpass2"})
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/me", bytes.NewReader(pwOnly))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = c2.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
 	decodeRes(t, res, &me)
-	if me.User.Username != "bobby" {
-		t.Fatalf("user rename %+v", me.User)
+	if me.User.Username != "bob" {
+		t.Fatalf("user password change renamed %+v", me.User)
 	}
 
 	jar3, _ := cookiejar.New(nil)
 	c3 := &http.Client{Jar: jar3}
-	login3, _ := json.Marshal(map[string]string{"username": "bobby", "password": "bobpass2"})
+	login3, _ := json.Marshal(map[string]string{"username": "bob", "password": "bobpass2"})
 	res, err = c3.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login3))
 	if err != nil {
 		t.Fatal(err)

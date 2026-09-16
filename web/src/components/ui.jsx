@@ -276,7 +276,7 @@ export function HourArea({ hours = [], className = '' }) {
           <svg width={W} height={H} className="traffic-area-svg" role="img" aria-label="24小时流量统计">
             <defs>
               <linearGradient id={`ta-${gid}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--color-accent)" stopOpacity="0.38" />
+                <stop offset="0%" stopColor="var(--color-accent-fill, var(--color-accent))" stopOpacity="0.38" />
                 <stop offset="100%" stopColor="var(--color-accent)" stopOpacity="0.02" />
               </linearGradient>
               <clipPath id={`tc-${gid}`}>
