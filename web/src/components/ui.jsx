@@ -276,8 +276,8 @@ export function HourArea({ hours = [], className = '' }) {
           <svg width={W} height={H} className="traffic-area-svg" role="img" aria-label="24小时流量统计">
             <defs>
               <linearGradient id={`ta-${gid}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#ff7a1a" stopOpacity="0.38" />
-                <stop offset="100%" stopColor="#ff7a1a" stopOpacity="0.02" />
+                <stop offset="0%" stopColor="var(--color-accent)" stopOpacity="0.38" />
+                <stop offset="100%" stopColor="var(--color-accent)" stopOpacity="0.02" />
               </linearGradient>
               <clipPath id={`tc-${gid}`}>
                 <rect x={padL} y={padT} width={plotW} height={plotH} />
@@ -295,7 +295,7 @@ export function HourArea({ hours = [], className = '' }) {
             ))}
             <g clipPath={`url(#tc-${gid})`}>
               {area ? <path d={area} fill={`url(#ta-${gid})`} /> : null}
-              {line ? <path d={line} fill="none" stroke="#ff7a1a" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" /> : null}
+              {line ? <path d={line} fill="none" stroke="var(--color-accent)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" /> : null}
             </g>
             {pts.map((p, i) => (
               <text
@@ -311,7 +311,7 @@ export function HourArea({ hours = [], className = '' }) {
             {hover ? (
               <>
                 <line x1={hover.x} x2={hover.x} y1={padT} y2={padT + plotH} className="traffic-area-cursor" />
-                <circle cx={hover.x} cy={Math.min(Math.max(hover.y, padT), padT + plotH)} r="4.5" fill="#fff" stroke="#ff7a1a" strokeWidth="2" />
+                <circle cx={hover.x} cy={Math.min(Math.max(hover.y, padT), padT + plotH)} r="4.5" fill="var(--color-surface)" stroke="var(--color-accent)" strokeWidth="2" />
               </>
             ) : null}
           </svg>

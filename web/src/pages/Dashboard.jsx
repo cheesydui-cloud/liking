@@ -76,8 +76,8 @@ export default function Dashboard() {
         <div className="dash-stat is-live">
           <div className="dash-stat-k">实时</div>
           <div className="dash-stat-live">
-            <span>↑ {fmtBps(d.nic_up_bps || 0)}</span>
-            <span>↓ {fmtBps(d.nic_down_bps || 0)}</span>
+            <span className="speed-up">↑ {fmtBps(d.nic_up_bps || 0)}</span>
+            <span className="speed-down">↓ {fmtBps(d.nic_down_bps || 0)}</span>
           </div>
           <div className="dash-stat-h">全部用户节点</div>
         </div>
@@ -155,8 +155,8 @@ export default function Dashboard() {
                         : s.needs_upgrade ? <Badge tone="warn" className="ml-2">可升级</Badge> : null}
                       {s.over_quota ? <Badge tone="danger" className="ml-2">流量已满</Badge> : null}
                     </td>
-                    <td className="tabular-nums text-[12px] whitespace-nowrap font-mono">{s.online ? fmtBps(s.net_up_bps) : '—'}</td>
-                    <td className="tabular-nums text-[12px] whitespace-nowrap font-mono">{s.online ? fmtBps(s.net_down_bps) : '—'}</td>
+                    <td className="tabular-nums text-[12px] whitespace-nowrap font-mono speed-up">{s.online ? fmtBps(s.net_up_bps) : '—'}</td>
+                    <td className="tabular-nums text-[12px] whitespace-nowrap font-mono speed-down">{s.online ? fmtBps(s.net_down_bps) : '—'}</td>
                     <td className="tabular-nums text-[12px] whitespace-nowrap font-mono">
                       {fmtBytes((s.used_up || 0) + (s.used_down || 0))}
                       {s.traffic_limit ? ` / ${fmtBytes(s.traffic_limit)}` : ''}
@@ -184,7 +184,11 @@ export default function Dashboard() {
                   </div>
                 </div>
                 <div className="text-[12px] text-ink-mut mt-1.5 font-mono">
-                  ↑ {s.online ? fmtBps(s.net_up_bps) : '—'} · ↓ {s.online ? fmtBps(s.net_down_bps) : '—'} · {fmtBytes((s.used_up || 0) + (s.used_down || 0))}{s.traffic_limit ? ` / ${fmtBytes(s.traffic_limit)}` : ''}
+                  <span className="speed-up">↑ {s.online ? fmtBps(s.net_up_bps) : '—'}</span>
+                  {' · '}
+                  <span className="speed-down">↓ {s.online ? fmtBps(s.net_down_bps) : '—'}</span>
+                  {' · '}
+                  {fmtBytes((s.used_up || 0) + (s.used_down || 0))}{s.traffic_limit ? ` / ${fmtBytes(s.traffic_limit)}` : ''}
                 </div>
                 <div className="text-[12px] text-ink-mut mt-0.5 font-mono">{fmtAgo(s.last_seen)}</div>
               </div>

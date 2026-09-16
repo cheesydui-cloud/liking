@@ -548,7 +548,13 @@ export default function Nodes() {
                           <Metric label="协议" value={protoShort(inb.profile)} plain />
                           <Metric label="端口" value={String(inb.port || '')} />
                           <Metric label="全站" value={fmtBytes(used)} />
-                          <Metric label="实时" value={s.online ? `${fmtBps(s.net_up_bps)} / ${fmtBps(s.net_down_bps)}` : '—'} />
+                          <Metric label="实时" value={s.online ? (
+                            <>
+                              <span className="speed-up">{fmtBps(s.net_up_bps)}</span>
+                              {' / '}
+                              <span className="speed-down">{fmtBps(s.net_down_bps)}</span>
+                            </>
+                          ) : '—'} />
                         </div>
                         {st === '离线' ? <div className="text-[12px] text-ink-mut px-3 pb-1">实例离线，累计是上次在线时的数字</div> : null}
                         {st === '流量已满' ? <div className="text-[12px] px-3 pb-1" style={{ color: 'var(--color-danger)' }}>实例流量已满，节点已停用</div> : null}

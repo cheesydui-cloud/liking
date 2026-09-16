@@ -220,7 +220,7 @@ export function Layout({ children }) {
     document.documentElement.classList.toggle('dark', next)
     localStorage.setItem('lk-theme', next ? 'dark' : 'light')
     const meta = document.querySelector('meta[name="theme-color"]')
-    if (meta) meta.setAttribute('content', next ? '#161618' : '#F3F2EE')
+    if (meta) meta.setAttribute('content', next ? '#18181B' : '#F6F6F4')
   }
 
   const groups = isAdmin && !userView ? [

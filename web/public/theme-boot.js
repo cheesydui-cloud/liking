@@ -3,5 +3,5 @@
   var dark = t === 'dark'
   document.documentElement.classList.toggle('dark', dark)
   var m = document.querySelector('meta[name="theme-color"]')
-  if (m) m.setAttribute('content', dark ? '#161618' : '#F3F2EE')
+  if (m) m.setAttribute('content', dark ? '#18181B' : '#F6F6F4')
 })()

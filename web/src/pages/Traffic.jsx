@@ -111,8 +111,8 @@ export default function Traffic() {
                   {users.map(u => (
                     <tr key={u.id}>
                       <td className="font-medium">{u.name}</td>
-                      <td className="tabular-nums text-[12px]">{fmtBytes(u.up)}</td>
-                      <td className="tabular-nums text-[12px]">{fmtBytes(u.down)}</td>
+                      <td className="tabular-nums text-[12px] speed-up">{fmtBytes(u.up)}</td>
+                      <td className="tabular-nums text-[12px] speed-down">{fmtBytes(u.down)}</td>
                       <td className="tabular-nums text-[12px]">{fmtBytes((u.up || 0) + (u.down || 0))}</td>
                     </tr>
                   ))}
@@ -124,7 +124,11 @@ export default function Traffic() {
                 <div key={u.id} className="px-3.5 py-3">
                   <div className="font-medium">{u.name}</div>
                   <div className="text-[12px] text-ink-mut mt-0.5 font-mono">
-                    ↑ {fmtBytes(u.up)} · ↓ {fmtBytes(u.down)} · {fmtBytes((u.up || 0) + (u.down || 0))}
+                    <span className="speed-up">↑ {fmtBytes(u.up)}</span>
+                    {' · '}
+                    <span className="speed-down">↓ {fmtBytes(u.down)}</span>
+                    {' · '}
+                    {fmtBytes((u.up || 0) + (u.down || 0))}
                   </div>
                 </div>
               ))}
@@ -148,8 +152,8 @@ export default function Traffic() {
                   {inbounds.map(inb => (
                     <tr key={inb.id}>
                       <td className="font-medium">{inb.name || `节点 ${inb.id}`}</td>
-                      <td className="tabular-nums text-[12px]">{fmtBytes(inb.up)}</td>
-                      <td className="tabular-nums text-[12px]">{fmtBytes(inb.down)}</td>
+                      <td className="tabular-nums text-[12px] speed-up">{fmtBytes(inb.up)}</td>
+                      <td className="tabular-nums text-[12px] speed-down">{fmtBytes(inb.down)}</td>
                       <td className="tabular-nums text-[12px]">{fmtBytes((inb.up || 0) + (inb.down || 0))}</td>
                     </tr>
                   ))}
@@ -161,7 +165,11 @@ export default function Traffic() {
                 <div key={inb.id} className="px-3.5 py-3">
                   <div className="font-medium">{inb.name || `节点 ${inb.id}`}</div>
                   <div className="text-[12px] text-ink-mut mt-0.5 font-mono">
-                    ↑ {fmtBytes(inb.up)} · ↓ {fmtBytes(inb.down)} · {fmtBytes((inb.up || 0) + (inb.down || 0))}
+                    <span className="speed-up">↑ {fmtBytes(inb.up)}</span>
+                    {' · '}
+                    <span className="speed-down">↓ {fmtBytes(inb.down)}</span>
+                    {' · '}
+                    {fmtBytes((inb.up || 0) + (inb.down || 0))}
                   </div>
                 </div>
               ))}
