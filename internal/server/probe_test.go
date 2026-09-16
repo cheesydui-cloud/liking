@@ -19,6 +19,27 @@ import (
 	"liking/internal/wsproto"
 )
 
+func TestParseDestAddr(t *testing.T) {
+	host, port, ok := parseDestAddr("azure.microsoft.com")
+	if !ok || host != "azure.microsoft.com" || port != 443 {
+		t.Fatalf("%s %d %v", host, port, ok)
+	}
+	host, port, ok = parseDestAddr("j.6sc.co:443")
+	if !ok || host != "j.6sc.co" || port != 443 {
+		t.Fatalf("%s %d %v", host, port, ok)
+	}
+	host, port, ok = parseDestAddr("https://go.microsoft.com/path")
+	if !ok || host != "go.microsoft.com" || port != 443 {
+		t.Fatalf("%s %d %v", host, port, ok)
+	}
+	if _, _, ok := parseDestAddr(""); ok {
+		t.Fatal("empty")
+	}
+	if _, _, ok := parseDestAddr(":::1"); ok {
+		t.Fatal("bad")
+	}
+}
+
 func TestParseURIAndChainVLESSExit(t *testing.T) {
 	d, err := db.Open(":memory:")
 	if err != nil {
@@ -317,6 +338,33 @@ func TestProbeOK(t *testing.T) {
 	decodeRes(t, res, &outURI)
 	if !outURI.OK || outURI.Host != "9.9.9.9" || outURI.Port != 8443 {
 		t.Fatalf("uri probe %+v", outURI)
+	}
+
+	destBody, _ := json.Marshal(map[string]any{
+		"dests": []string{"azure.microsoft.com", "j.6sc.co:443", "azure.microsoft.com"},
+	})
+	res, err = c.Post(ts.URL+"/api/servers/"+strconv.FormatInt(row.ID, 10)+"/dest-probe", "application/json", bytes.NewReader(destBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var destOut struct {
+		Results []struct {
+			Dest      string `json:"dest"`
+			Host      string `json:"host"`
+			Port      int    `json:"port"`
+			OK        bool   `json:"ok"`
+			LatencyMS int64  `json:"latency_ms"`
+		} `json:"results"`
+	}
+	decodeRes(t, res, &destOut)
+	if len(destOut.Results) != 2 {
+		t.Fatalf("dedupe %+v", destOut.Results)
+	}
+	if destOut.Results[0].Dest != "azure.microsoft.com" || destOut.Results[0].Host != "azure.microsoft.com" || destOut.Results[0].Port != 443 || !destOut.Results[0].OK || destOut.Results[0].LatencyMS != 42 {
+		t.Fatalf("dest0 %+v", destOut.Results[0])
+	}
+	if destOut.Results[1].Dest != "j.6sc.co:443" || destOut.Results[1].Port != 443 || !destOut.Results[1].OK {
+		t.Fatalf("dest1 %+v", destOut.Results[1])
 	}
 
 	in := &db.Inbound{

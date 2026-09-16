@@ -2,6 +2,20 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.2.12 — 2026-09-17
+
+实例可随时开关 IPv6。REALITY 伪装目标改成下拉，从这台 VPS 测延迟，网址后面带 ms。
+
+### 新增
+- 实例菜单「禁止 IPv6 / 允许 IPv6」，编辑里也可勾选。关掉立刻清掉地址并写入 sysctl，重启后仍保持；打开后重新获取
+- 节点伪装目标 dest 改成下拉。从当前实例测延迟，格式与 openssl 筛选相同（`azure.microsoft.com: 44 ms`），按从小到大排，点一下填入。也可手填
+- 预设含 azure.microsoft.com、j.6sc.co、xbox / Microsoft CDN 等，并保留原来的 cloudflare / apple 等
+
+### 升级注意
+- 升面板。同机 Agent 会随 `liking-upgrade` 重启，禁止 IPv6 才能生效
+- 日本线 Agent 不用升也能用伪装目标延迟；要在日本机上禁止 IPv6 再升
+- 回滚：`liking-upgrade --release v0.2.11`
+
 ## v0.2.11 — 2026-09-16
 
 用户页收一档，总览和实例按阿里云控制台试色。Logo 和标签页图标改成阿里橙。

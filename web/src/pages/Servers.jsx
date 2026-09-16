@@ -50,6 +50,7 @@ function ServerMeta({ s }) {
     <div className="machine-meta">
       {s.agent_ver ? <span className="machine-meta-item">Agent {s.agent_ver}</span> : null}
       <span className="machine-meta-item">心跳 {fmtAgo(s.last_seen)}</span>
+      {s.disable_ipv6 ? <span className="machine-meta-item">IPv6 关</span> : null}
       {cores.map(c => (
         <span key={c} className={`core-tag is-${c}`}>{coreLabel(c)}</span>
       ))}
@@ -106,8 +107,9 @@ export default function Servers() {
   const [newPortMax, setNewPortMax] = useState(String(DEFAULT_PORT_MAX))
   const [newExpires, setNewExpires] = useState('')
   const [newResetDay, setNewResetDay] = useState('0')
+  const [newDisableIpv6, setNewDisableIpv6] = useState(false)
   const [editSrv, setEditSrv] = useState(null)
-  const [edit, setEdit] = useState({ name: '', host: '', min: '', max: '', gb: '', expires: '', resetDay: '0' })
+  const [edit, setEdit] = useState({ name: '', host: '', min: '', max: '', gb: '', expires: '', resetDay: '0', disableIpv6: false })
   const [coreSrv, setCoreSrv] = useState(null)
   const [corePick, setCorePick] = useState('xray')
 
@@ -161,6 +163,7 @@ export default function Servers() {
     setNewPortMax(String(DEFAULT_PORT_MAX))
     setNewExpires('')
     setNewResetDay('0')
+    setNewDisableIpv6(false)
     setFormOpen(true)
   }
 
@@ -190,6 +193,7 @@ export default function Servers() {
         ...range,
         expires_at: ymdToUnix(newExpires),
         traffic_reset_day: Number(newResetDay) || 0,
+        disable_ipv6: newDisableIpv6,
       })
       setName(''); setHost('')
       setFormOpen(false)
@@ -210,6 +214,7 @@ export default function Servers() {
       gb: gbFromLimit(s.traffic_limit),
       expires: ymd(s.expires_at),
       resetDay: String(s.traffic_reset_day || 0),
+      disableIpv6: !!s.disable_ipv6,
     })
   }
 
@@ -237,6 +242,7 @@ export default function Servers() {
         traffic_limit: bytes,
         expires_at: ymdToUnix(edit.expires),
         traffic_reset_day: reset,
+        disable_ipv6: !!edit.disableIpv6,
         ...range,
       })
       setEditSrv(null)
@@ -378,6 +384,24 @@ export default function Servers() {
     }
     try {
       await api.put(`/servers/${s.id}`, { traffic_limit: bytes })
+      load()
+    } catch (e) { toast(e.message, 'error') }
+  }
+
+  const toggleIPv6 = async (s) => {
+    const next = !s.disable_ipv6
+    if (!(await dialog.confirm({
+      title: next ? '禁止 IPv6' : '允许 IPv6',
+      message: next
+        ? `关掉 ${s.name} 的 IPv6，立刻清掉地址，重启后也没有。随时可以再打开。节点走 IPv4。`
+        : `打开 ${s.name} 的 IPv6，重新获取地址。随时可以再关掉。`,
+      okText: next ? '禁止' : '允许',
+    }))) return
+    try {
+      await api.put(`/servers/${s.id}`, { disable_ipv6: next })
+      if (s.needs_reinstall || s.needs_upgrade) toast('已保存。当前 Agent 还不支持，请先一键升级再同步。')
+      else if (!s.online) toast('已保存，上线后会下发')
+      else toast(next ? '已禁止 IPv6' : '已允许 IPv6')
       load()
     } catch (e) { toast(e.message, 'error') }
   }
@@ -530,9 +554,14 @@ export default function Servers() {
                       { label: '安装命令', onSelect: () => showInstall(s.id) },
                       { label: '从 CF 同步', onSelect: () => openCF(s) },
                       { label: '改公开地址', onSelect: () => saveHost(s) },
-                      { label: '编辑', hint: '名称、端口区间、到期、流量', onSelect: () => openEdit(s) },
+                      { label: '编辑', hint: '名称、端口区间、到期、流量、IPv6', onSelect: () => openEdit(s) },
                       { label: '推送核心', hint: s.can_push_cores ? '安装或卸载 Xray / sing-box / Mita' : (s.online ? '需先升级 Agent' : '需在线'), onSelect: () => openCores(s) },
                       { label: '流量上限', onSelect: () => saveLimit(s) },
+                      {
+                        label: s.disable_ipv6 ? '允许 IPv6' : '禁止 IPv6',
+                        hint: s.disable_ipv6 ? '重新获取 IPv6 地址' : '立刻清掉 IPv6 地址，随时可再打开',
+                        onSelect: () => toggleIPv6(s),
+                      },
                       { sep: true },
                       {
                         label: '一键升级',
@@ -612,6 +641,13 @@ export default function Servers() {
               <input className="input-field font-mono" type="number" min="0" max="31" value={newResetDay} onChange={e => setNewResetDay(e.target.value)} />
             </Field>
           </div>
+          <label className="flex items-start gap-2 text-[13px] text-ink-soft select-none">
+            <input type="checkbox" className="mt-0.5" checked={newDisableIpv6} onChange={e => setNewDisableIpv6(e.target.checked)} />
+            <span>
+              <span className="font-medium text-ink">禁止 IPv6</span>
+              <span className="block text-[12px] text-ink-mut mt-0.5">装上 Agent 后关掉 IPv6 地址。随时可在菜单里打开或关闭。</span>
+            </span>
+          </label>
           <button type="button" className="row-act" onClick={() => openCF(null)}>从 CF 同步</button>
         </form>
       </Modal>
@@ -647,6 +683,13 @@ export default function Servers() {
               <input className="input-field font-mono" type="number" min="0" max="31" value={edit.resetDay} onChange={e => setEdit({ ...edit, resetDay: e.target.value })} />
             </Field>
           </div>
+          <label className="flex items-start gap-2 text-[13px] text-ink-soft select-none">
+            <input type="checkbox" className="mt-0.5" checked={!!edit.disableIpv6} onChange={e => setEdit({ ...edit, disableIpv6: e.target.checked })} />
+            <span>
+              <span className="font-medium text-ink">禁止 IPv6</span>
+              <span className="block text-[12px] text-ink-mut mt-0.5">关掉后没有 IPv6 地址；取消勾选会重新获取。随时可改。</span>
+            </span>
+          </label>
         </form>
       </Modal>
 

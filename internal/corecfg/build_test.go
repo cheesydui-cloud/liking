@@ -7,6 +7,50 @@ import (
 	"liking/internal/db"
 )
 
+func TestBuildDisableIPv6(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	srv, err := db.CreateServer(d, "n1", "10.0.0.1", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b1, err := Build(d, srv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b1.Apply.DisableIPv6 {
+		t.Fatal("default")
+	}
+	srv.DisableIPv6 = true
+	if err := db.UpdateServer(d, srv); err != nil {
+		t.Fatal(err)
+	}
+	b2, err := Build(d, srv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !b2.Apply.DisableIPv6 {
+		t.Fatal("flag")
+	}
+	if b1.Rev == b2.Rev {
+		t.Fatalf("rev should change %s", b1.Rev)
+	}
+	srv.DisableIPv6 = false
+	if err := db.UpdateServer(d, srv); err != nil {
+		t.Fatal(err)
+	}
+	b3, err := Build(d, srv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b3.Apply.DisableIPv6 || b3.Rev != b1.Rev {
+		t.Fatalf("re-enable %+v rev %s want %s", b3.Apply.DisableIPv6, b3.Rev, b1.Rev)
+	}
+}
+
 func TestBuildXrayAndMita(t *testing.T) {
 	d, err := db.Open(":memory:")
 	if err != nil {

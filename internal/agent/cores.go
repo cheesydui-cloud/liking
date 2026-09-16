@@ -112,6 +112,7 @@ func (c *Cores) Remove(name string) {
 
 func (c *Cores) Apply(cfg wsproto.ApplyConfig) error {
 	ensureApplyBins(cfg)
+	applyDisableIPv6(cfg.DisableIPv6)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.xrayAPI = cfg.XrayAPI

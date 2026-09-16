@@ -135,6 +135,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		PortMax         *int   `json:"port_max"`
 		ExpiresAt       *int64 `json:"expires_at"`
 		TrafficResetDay *int   `json:"traffic_reset_day"`
+		DisableIPv6     *bool  `json:"disable_ipv6"`
 	}
 	if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
 		jsonErr(w, http.StatusBadRequest, "需要名称")
@@ -159,10 +160,14 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	need := srv.PortMin != dummy.PortMin || srv.PortMax != dummy.PortMax || srv.ExpiresAt != dummy.ExpiresAt || srv.TrafficResetDay != dummy.TrafficResetDay
+	if req.DisableIPv6 != nil {
+		dummy.DisableIPv6 = *req.DisableIPv6
+	}
+	need := srv.PortMin != dummy.PortMin || srv.PortMax != dummy.PortMax || srv.ExpiresAt != dummy.ExpiresAt || srv.TrafficResetDay != dummy.TrafficResetDay || dummy.DisableIPv6
 	if need {
 		srv.PortMin, srv.PortMax = dummy.PortMin, dummy.PortMax
 		srv.ExpiresAt, srv.TrafficResetDay = dummy.ExpiresAt, dummy.TrafficResetDay
+		srv.DisableIPv6 = dummy.DisableIPv6
 		if err := db.UpdateServer(s.DB, srv); err != nil {
 			jsonErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -192,6 +197,7 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		PortMax         *int    `json:"port_max"`
 		ExpiresAt       *int64  `json:"expires_at"`
 		TrafficResetDay *int    `json:"traffic_reset_day"`
+		DisableIPv6     *bool   `json:"disable_ipv6"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -217,6 +223,9 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	if err := applyServerExpiry(srv, req.ExpiresAt, req.TrafficResetDay); err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if req.DisableIPv6 != nil {
+		srv.DisableIPv6 = *req.DisableIPv6
 	}
 	if err := db.UpdateServer(s.DB, srv); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())

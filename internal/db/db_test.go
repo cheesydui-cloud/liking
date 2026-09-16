@@ -34,14 +34,29 @@ func TestOpenMigrateAndCRUD(t *testing.T) {
 	if s.ExpiresAt != 0 || s.TrafficResetDay != 0 {
 		t.Fatalf("expiry %+v", s)
 	}
+	if s.DisableIPv6 {
+		t.Fatal("disable_ipv6 default")
+	}
 	s.ExpiresAt = 1700000000
 	s.TrafficResetDay = 1
+	s.DisableIPv6 = true
 	if err := UpdateServer(d, s); err != nil {
 		t.Fatal(err)
 	}
 	s, _ = GetServer(d, s.ID)
 	if s.ExpiresAt != 1700000000 || s.TrafficResetDay != 1 {
 		t.Fatalf("expiry saved %+v", s)
+	}
+	if !s.DisableIPv6 {
+		t.Fatal("disable_ipv6 not saved")
+	}
+	s.DisableIPv6 = false
+	if err := UpdateServer(d, s); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = GetServer(d, s.ID)
+	if s.DisableIPv6 {
+		t.Fatal("disable_ipv6 still on")
 	}
 	if s.LastError != "" || s.LastErrorAt != 0 {
 		t.Fatalf("last_error %+v", s)

@@ -13,12 +13,155 @@ import { asArray, isAbort } from '../lib/safe'
 import { Badge, Empty, Field, FilterTabs, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, StatusWord, fmtBps, fmtBytes, fmtDateShort } from '../components/ui'
 
 const DEST_PRESETS = [
+  'azure.microsoft.com:443',
+  'j.6sc.co:443',
+  'logx.optimizely.com:443',
+  'assets-www.xbox.com:443',
+  'devblogs.microsoft.com:443',
+  'go.microsoft.com:443',
+  'visualstudio.microsoft.com:443',
+  'cdn.userway.org:443',
+  'gray-wowt-prod.gtv-cdn.com:443',
+  'vscjava.gallerycdn.vsassets.io:443',
   'www.cloudflare.com:443',
   'www.microsoft.com:443',
   'dl.google.com:443',
   'www.samsung.com:443',
   'www.apple.com:443',
 ]
+
+function formatDest(s) {
+  const t = String(s || '').trim()
+  if (!t) return ''
+  if (t.startsWith('[')) return t
+  const cut = t.lastIndexOf(':')
+  if (cut > 0 && /^\d+$/.test(t.slice(cut + 1))) return t
+  return `${t}:443`
+}
+
+function destHostOf(s) {
+  const t = formatDest(s)
+  if (!t) return ''
+  const cut = t.lastIndexOf(':')
+  if (cut > 0 && /^\d+$/.test(t.slice(cut + 1))) return t.slice(0, cut)
+  return t
+}
+
+function DestPicker({ value, onChange, server }) {
+  const toast = useToast()
+  const box = useRef(null)
+  const probedKey = useRef('')
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [rows, setRows] = useState({})
+
+  const dests = useMemo(() => {
+    const seen = new Set()
+    const out = []
+    const add = (d) => {
+      const x = formatDest(d)
+      if (!x || seen.has(x)) return
+      seen.add(x)
+      out.push(x)
+    }
+    DEST_PRESETS.forEach(add)
+    add(value)
+    return out
+  }, [value])
+
+  const probe = async (force) => {
+    const sid = Number(server?.id) || 0
+    if (!sid || !server?.online) return
+    const key = String(sid)
+    if (!force && probedKey.current === key) return
+    setBusy(true)
+    try {
+      const d = await api.post(`/servers/${sid}/dest-probe`, { dests })
+      const map = {}
+      for (const r of asArray(d.results)) {
+        map[formatDest(r.dest || r.host)] = r
+      }
+      setRows(map)
+      probedKey.current = key
+    } catch (e) {
+      if (!isAbort(e)) toast(e.message, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    probedKey.current = ''
+    setRows({})
+  }, [server?.id])
+
+  useEffect(() => {
+    if (open && server?.online) probe(false)
+  }, [open, server?.id, server?.online])
+
+  useEffect(() => {
+    const onDoc = (e) => {
+      if (box.current && !box.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+
+  const sorted = useMemo(() => [...dests].sort((a, b) => {
+    const ra = rows[a]
+    const rb = rows[b]
+    const sa = ra?.ok ? Number(ra.latency_ms) : 1e9
+    const sb = rb?.ok ? Number(rb.latency_ms) : 1e9
+    if (sa !== sb) return sa - sb
+    return destHostOf(a).localeCompare(destHostOf(b))
+  }), [dests, rows])
+
+  return (
+    <div className="relative" ref={box}>
+      <input
+        className="input-field font-mono"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        onFocus={() => setOpen(true)}
+        placeholder="azure.microsoft.com:443"
+        autoComplete="off"
+        spellCheck={false}
+      />
+      {open ? (
+        <div className="dest-menu">
+          <div className="dest-menu-bar">
+            <span>
+              {server?.online
+                ? (busy ? '正在从这台实例测延迟…' : '从这台实例测的延迟，选数字最小的')
+                : '实例离线时只列出网址，上线后再测'}
+            </span>
+            <button type="button" className="row-act shrink-0" disabled={!server?.online || busy} onClick={() => probe(true)}>
+              {busy ? '测量中…' : '测延迟'}
+            </button>
+          </div>
+          {sorted.map(d => {
+            const host = destHostOf(d)
+            const r = rows[d]
+            let ms = ''
+            if (busy && !r) ms = '…'
+            else if (r?.ok) ms = `${r.latency_ms} ms`
+            else if (r && !r.ok) ms = 'timeout'
+            return (
+              <button
+                type="button"
+                key={d}
+                className={formatDest(value) === d ? 'is-on' : ''}
+                onClick={() => { onChange(d); setOpen(false) }}
+              >
+                <span className="font-mono truncate">{ms ? `${host}: ${ms}` : host}</span>
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
+    </div>
+  )
+}
 
 const FINGERPRINTS = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'qq', 'random', 'randomized']
 
@@ -641,19 +784,17 @@ export default function Nodes() {
           {isReality(f.profile) && (
             <>
               <div>
-                <Field label="伪装目标 dest" hint="探测时会看到这个网站。必须是别人的站点，不能填本机。">
-                  <input className="input-field" value={f.dest} onChange={e => setF({ ...f, dest: e.target.value })} placeholder="www.cloudflare.com:443" />
+                <Field label="伪装目标 dest" hint="点开下拉，从这台 VPS 测延迟。格式和 openssl 筛选一样：网址后面带 ms，选最小的。也可自己填。">
+                  <DestPicker
+                    value={f.dest}
+                    server={selectedServer}
+                    onChange={dest => {
+                      const prev = destHostName
+                      const sni = String(f.sni || '').trim()
+                      setF({ ...f, dest, sni: (!sni || sni === prev) ? '' : f.sni })
+                    }}
+                  />
                 </Field>
-                <div className="flex flex-wrap gap-1.5 mt-1.5">
-                  {DEST_PRESETS.map(d => (
-                    <button
-                      type="button"
-                      key={d}
-                      className={`chip ${f.dest === d ? 'is-on' : ''}`}
-                      onClick={() => setF({ ...f, dest: d })}
-                    >{d.split(':')[0]}</button>
-                  ))}
-                </div>
               </div>
               <Field label="SNI / serverNames" hint="客户端校验用。留空则用 dest 的域名。可逗号分隔多个。">
                 <input className="input-field" value={f.sni} onChange={e => setF({ ...f, sni: e.target.value })} placeholder={destHostName || 'www.cloudflare.com'} />

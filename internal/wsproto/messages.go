@@ -62,6 +62,7 @@ type ApplyConfig struct {
 	XrayAPI     string          `json:"xray_api,omitempty"`
 	SingboxAPI  string          `json:"singbox_api,omitempty"`
 	SpeedLimits []SpeedLimit    `json:"speed_limits,omitempty"`
+	DisableIPv6 bool            `json:"disable_ipv6"`
 }
 
 type ApplyAck struct {

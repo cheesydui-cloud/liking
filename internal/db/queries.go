@@ -412,11 +412,13 @@ func CreateServer(d *sql.DB, name, publicHost, token string) (*Server, error) {
 
 func GetServer(d *sql.DB, id int64) (*Server, error) {
 	s := &Server{}
-	err := d.QueryRow(`SELECT id,name,public_host,token,online,last_seen,agent_ver,os,arch,connect_ip,config_rev,last_error,last_error_at,cores,created_at,traffic_limit,port_min,port_max,expires_at,traffic_reset_day FROM servers WHERE id=?`, id).
-		Scan(&s.ID, &s.Name, &s.PublicHost, &s.Token, &s.Online, &s.LastSeen, &s.AgentVer, &s.OS, &s.Arch, &s.ConnectIP, &s.ConfigRev, &s.LastError, &s.LastErrorAt, &s.Cores, &s.CreatedAt, &s.TrafficLimit, &s.PortMin, &s.PortMax, &s.ExpiresAt, &s.TrafficResetDay)
+	var dis int
+	err := d.QueryRow(`SELECT id,name,public_host,token,online,last_seen,agent_ver,os,arch,connect_ip,config_rev,last_error,last_error_at,cores,created_at,traffic_limit,port_min,port_max,expires_at,traffic_reset_day,disable_ipv6 FROM servers WHERE id=?`, id).
+		Scan(&s.ID, &s.Name, &s.PublicHost, &s.Token, &s.Online, &s.LastSeen, &s.AgentVer, &s.OS, &s.Arch, &s.ConnectIP, &s.ConfigRev, &s.LastError, &s.LastErrorAt, &s.Cores, &s.CreatedAt, &s.TrafficLimit, &s.PortMin, &s.PortMax, &s.ExpiresAt, &s.TrafficResetDay, &dis)
 	if err != nil {
 		return nil, err
 	}
+	s.DisableIPv6 = dis == 1
 	return s, nil
 }
 
@@ -445,7 +447,11 @@ func ListServers(d *sql.DB) ([]*Server, error) {
 }
 
 func UpdateServer(d *sql.DB, s *Server) error {
-	_, err := d.Exec(`UPDATE servers SET name=?, public_host=?, traffic_limit=?, port_min=?, port_max=?, expires_at=?, traffic_reset_day=? WHERE id=?`, s.Name, s.PublicHost, s.TrafficLimit, s.PortMin, s.PortMax, s.ExpiresAt, s.TrafficResetDay, s.ID)
+	dis := 0
+	if s.DisableIPv6 {
+		dis = 1
+	}
+	_, err := d.Exec(`UPDATE servers SET name=?, public_host=?, traffic_limit=?, port_min=?, port_max=?, expires_at=?, traffic_reset_day=?, disable_ipv6=? WHERE id=?`, s.Name, s.PublicHost, s.TrafficLimit, s.PortMin, s.PortMax, s.ExpiresAt, s.TrafficResetDay, dis, s.ID)
 	return err
 }
 

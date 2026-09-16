@@ -171,6 +171,8 @@ func colocatedPanel() bool {
 
 func (a *Agent) uninstall() error {
 	a.cores.StopAll()
+	applyDisableIPv6(false)
+	_ = os.Remove(ipv6SysctlPath)
 	_ = exec.Command("systemctl", "disable", "--now", "liking-agent.service").Run()
 	_ = os.Remove("/etc/systemd/system/liking-agent.service")
 	_ = exec.Command("systemctl", "daemon-reload").Run()

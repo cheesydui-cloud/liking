@@ -17,7 +17,8 @@ type Bundle struct {
 }
 
 func Build(d *sql.DB, serverID int64) (*Bundle, error) {
-	if _, err := db.GetServer(d, serverID); err != nil {
+	srv, err := db.GetServer(d, serverID)
+	if err != nil {
 		return nil, err
 	}
 	ins, err := db.ListInboundsByServer(d, serverID)
@@ -96,12 +97,18 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 		b.Apply.Mita = raw
 	}
 	b.Apply.SpeedLimits = collectSpeedLimits(ins, clients, speeds)
+	b.Apply.DisableIPv6 = srv.DisableIPv6
 	sum := sha256.New()
 	sum.Write(b.Apply.Xray)
 	sum.Write(b.Apply.Singbox)
 	sum.Write(b.Apply.Mita)
 	if raw, err := json.Marshal(b.Apply.SpeedLimits); err == nil {
 		sum.Write(raw)
+	}
+	if srv.DisableIPv6 {
+		sum.Write([]byte("disable_ipv6=1"))
+	} else {
+		sum.Write([]byte("disable_ipv6=0"))
 	}
 	b.Rev = hex.EncodeToString(sum.Sum(nil))[:16]
 	b.Apply.Rev = b.Rev

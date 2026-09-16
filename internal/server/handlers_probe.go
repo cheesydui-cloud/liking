@@ -3,8 +3,11 @@ package server
 import (
 	"database/sql"
 	"encoding/json"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"liking/internal/corecfg"
@@ -115,6 +118,116 @@ var (
 	errLandingGone   = simpleError("落地节点不存在")
 	errLandingNoHost = simpleError("落地节点没有公开地址")
 )
+
+func parseDestAddr(s string) (string, int, bool) {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "https://")
+	s = strings.TrimPrefix(s, "http://")
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", 0, false
+	}
+	if host, portStr, err := net.SplitHostPort(s); err == nil {
+		port, err := strconv.Atoi(portStr)
+		if err != nil || host == "" || port < 1 || port > 65535 {
+			return "", 0, false
+		}
+		return host, port, true
+	}
+	if strings.Contains(s, ":") {
+		return "", 0, false
+	}
+	return s, 443, true
+}
+
+func (s *Server) handleDestProbe(w http.ResponseWriter, r *http.Request) {
+	id, err := chiID(r, "id")
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	var req struct {
+		Dests []string `json:"dests"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效请求")
+		return
+	}
+	dests := make([]string, 0, len(req.Dests))
+	seen := map[string]struct{}{}
+	for _, raw := range req.Dests {
+		d := strings.TrimSpace(raw)
+		if d == "" {
+			continue
+		}
+		if _, ok := seen[d]; ok {
+			continue
+		}
+		seen[d] = struct{}{}
+		dests = append(dests, d)
+		if len(dests) >= 24 {
+			break
+		}
+	}
+	if len(dests) == 0 {
+		jsonErr(w, http.StatusBadRequest, "请提供伪装目标")
+		return
+	}
+	if !s.Hub.IsOnline(id) {
+		jsonErr(w, http.StatusBadRequest, "入口 Agent 不在线")
+		return
+	}
+	if !s.Hub.HasCap(id, wsproto.CapProbe) {
+		jsonErrExtra(w, http.StatusBadRequest, "该 Agent 还不支持延迟探测。请先一键升级 Agent。", map[string]any{"code": "agent_too_old"})
+		return
+	}
+
+	type row struct {
+		Dest      string `json:"dest"`
+		Host      string `json:"host,omitempty"`
+		Port      int    `json:"port,omitempty"`
+		OK        bool   `json:"ok"`
+		LatencyMS int64  `json:"latency_ms,omitempty"`
+		Error     string `json:"error,omitempty"`
+	}
+	out := make([]row, len(dests))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	for i, dest := range dests {
+		wg.Add(1)
+		go func(i int, dest string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			host, port, ok := parseDestAddr(dest)
+			if !ok {
+				out[i] = row{Dest: dest, Error: "无效"}
+				return
+			}
+			raw, err := s.Hub.SendRPC(id, wsproto.TypeProbe, wsproto.Probe{Host: host, Port: port}, 3*time.Second)
+			if err != nil {
+				out[i] = row{Dest: dest, Host: host, Port: port, Error: err.Error()}
+				return
+			}
+			var ack wsproto.ProbeAck
+			_ = json.Unmarshal(raw, &ack)
+			item := row{Dest: dest, Host: host, Port: port, OK: ack.OK, LatencyMS: ack.LatencyMS}
+			if !ack.OK {
+				msg := strings.TrimSpace(ack.Error)
+				if msg == "" {
+					msg = "timeout"
+				}
+				item.Error = msg
+			}
+			out[i] = item
+		}(i, dest)
+	}
+	wg.Wait()
+	jsonOK(w, map[string]any{"results": out})
+}
 
 func (s *Server) runProbe(w http.ResponseWriter, serverID int64, host string, port int) {
 	host = strings.TrimSpace(host)
