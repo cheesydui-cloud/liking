@@ -449,13 +449,14 @@ export function Empty({ title, hint, action }) {
   )
 }
 
-export function Field({ label, hint, children }) {
+export function Field({ label, hint, children, as }) {
+  const Tag = as === 'div' ? 'div' : 'label'
   return (
-    <label className="block">
+    <Tag className="block">
       <span className="block text-[12px] font-medium text-ink-soft mb-1.5">{label}</span>
       {children}
       {hint && <span className="block text-[11.5px] text-ink-mut mt-1">{hint}</span>}
-    </label>
+    </Tag>
   )
 }
 
