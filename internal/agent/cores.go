@@ -131,6 +131,9 @@ func (c *Cores) Apply(cfg wsproto.ApplyConfig) error {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	applySpeedLimits(cfg.SpeedLimits)
+	if err := applyRejectCN(c.dir, cfg.RejectCN); err != nil {
+		return err
+	}
 	return nil
 }
 

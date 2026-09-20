@@ -32,6 +32,7 @@ func inboundJSON(in *db.Inbound) map[string]any {
 		"line_kind":       in.LineKind,
 		"exit_inbound_id": in.ExitInboundID,
 		"exit_uri":        in.ExitURI,
+		"reject_cn":       in.RejectCN,
 		"user_facing":     corecfg.UserFacing(in.Profile),
 		"created_at":      in.CreatedAt,
 		"server_name":     in.ServerName,
@@ -52,6 +53,7 @@ type inboundReq struct {
 	LineKind      string          `json:"line_kind"`
 	ExitInboundID *int64          `json:"exit_inbound_id"`
 	ExitURI       *string         `json:"exit_uri"`
+	RejectCN      *bool           `json:"reject_cn"`
 }
 
 func (s *Server) handleListInbounds(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +99,9 @@ func (s *Server) handleCreateInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ExitURI != nil {
 		in.ExitURI = strings.TrimSpace(*req.ExitURI)
+	}
+	if req.RejectCN != nil {
+		in.RejectCN = *req.RejectCN
 	}
 	if req.Enabled != nil {
 		in.Enabled = *req.Enabled
@@ -164,6 +169,9 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ExitURI != nil {
 		in.ExitURI = strings.TrimSpace(*req.ExitURI)
+	}
+	if req.RejectCN != nil {
+		in.RejectCN = *req.RejectCN
 	}
 	if err := s.prepareInbound(in); err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())
@@ -320,6 +328,9 @@ func (s *Server) prepareInbound(in *db.Inbound) error {
 	}
 	if err := corecfg.Normalize(in, exit); err != nil {
 		return err
+	}
+	if in.LineKind == "chain" {
+		in.RejectCN = false
 	}
 	if corecfg.NeedTLS(in.Profile) && in.CertID == nil {
 		return errNeedCert

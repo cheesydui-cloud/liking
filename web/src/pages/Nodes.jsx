@@ -140,7 +140,7 @@ const FINGERPRINTS = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', '
 
 const emptyLine = {
   server_id: 0, name: '', profile: 'vless-reality-vision', port: '', listen: '0.0.0.0',
-  line_kind: 'direct', cert_id: 0, enabled: true,
+  line_kind: 'direct', cert_id: 0, enabled: true, reject_cn: false,
   dest: 'www.cloudflare.com:443', sni: '', path: '', host: '', mode: 'auto',
   method: '2022-blake3-aes-256-gcm', transport: 'BOTH',
   fingerprint: 'chrome', short_ids: '', xver: 0, spider_x: '',
@@ -279,6 +279,7 @@ function formFromInbound(inb) {
     line_kind: 'direct',
     cert_id: inb.cert_id || 0,
     enabled: inb.enabled !== false,
+    reject_cn: !!inb.reject_cn,
     dest: st.dest || 'www.cloudflare.com:443',
     sni: names || st.sni || '',
     path: st.path || '',
@@ -432,6 +433,7 @@ export default function Nodes() {
       listen: f.listen || '0.0.0.0',
       line_kind: 'direct',
       enabled: f.enabled !== false,
+      reject_cn: !!f.reject_cn,
       settings,
     }
     if (f.cert_id) body.cert_id = Number(f.cert_id)
@@ -486,6 +488,30 @@ export default function Nodes() {
     })
   }
 
+  const toggleRejectCN = async (inb) => {
+    const next = !inb.reject_cn
+    if (!(await dialog.confirm({
+      title: next ? '拒绝中国 IP' : '允许中国 IP',
+      message: next
+        ? '大陆家里直连这个落地会失败。海外中转仍可打进来。面板中转会放行入口 IP。'
+        : '将允许中国 IP 直连这个落地。',
+      danger: next,
+      okText: next ? '拒绝' : '允许',
+    }))) return
+    await ops.current.run(`cn-${inb.id}`, async () => {
+      try {
+        const d = await api.put(`/inbounds/${inb.id}`, {
+          enabled: inb.enabled !== false, name: inb.name, port: inb.port, listen: inb.listen,
+          settings: inb.settings, line_kind: inb.line_kind, exit_inbound_id: inb.exit_inbound_id, exit_uri: inb.exit_uri || '', cert_id: inb.cert_id,
+          reject_cn: next,
+        })
+        if (d.apply_error) toast(d.apply_error, 'error')
+        else toast(next ? '已拒绝中国 IP' : '已允许中国 IP')
+        await load()
+      } catch (e) { toast(e.message, 'error') }
+    })
+  }
+
   const toggle = async (inb) => {
     const next = !inb.enabled
     if (!next) {
@@ -501,6 +527,7 @@ export default function Nodes() {
         const d = await api.put(`/inbounds/${inb.id}`, {
           enabled: next, name: inb.name, port: inb.port, listen: inb.listen,
           settings: inb.settings, line_kind: inb.line_kind, exit_inbound_id: inb.exit_inbound_id, exit_uri: inb.exit_uri || '', cert_id: inb.cert_id,
+          reject_cn: !!inb.reject_cn,
         })
         if (d.apply_error) toast(d.apply_error, 'error')
         await load()
@@ -654,6 +681,11 @@ export default function Nodes() {
                               <span className="machine-name truncate">{inb.name}</span>
                               <LineStatus status={st} />
                             </div>
+                            {inb.reject_cn ? (
+                              <div className="machine-host">
+                                <span className="text-[12px] text-ink-mut">拒绝中国 IP</span>
+                              </div>
+                            ) : null}
                           </div>
                           <div className="machine-toolbar">
                             <button type="button" className="icon-btn" onClick={() => startEdit(inb)} aria-label="编辑节点" title="编辑">
@@ -665,6 +697,7 @@ export default function Nodes() {
                               { label: '参数', onSelect: () => setParamInb(inb) },
                               { label: '探测端口', onSelect: () => probeListen(inb) },
                               { sep: true },
+                              { label: inb.reject_cn ? '允许中国 IP' : '拒绝中国 IP', onSelect: () => toggleRejectCN(inb) },
                               { label: inb.enabled ? '停用' : '启用', onSelect: () => toggle(inb) },
                               { sep: true },
                               { label: '删除', danger: true, onSelect: () => delLine(inb.id) },
@@ -758,6 +791,13 @@ export default function Nodes() {
           <Field label="端口" hint={selectedServer ? usedPortsText(selectedServer, list, editId) : '不填则随机，避开已用端口'}>
             <input className="input-field" type="number" min="1" max="65535" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} placeholder={selectedServer ? `随机 ${formatPortRange(selectedServer)}` : '随机'} />
           </Field>
+          <label className="flex items-start gap-2 sm:col-span-2 text-[13px] text-ink-soft select-none">
+            <input type="checkbox" className="mt-0.5" checked={!!f.reject_cn} onChange={e => setF({ ...f, reject_cn: e.target.checked })} />
+            <span>
+              <span className="font-medium text-ink">拒绝中国 IP</span>
+              <span className="block text-[12px] text-ink-mut mt-0.5">大陆家里直连这个落地会失败。海外或香港中转仍可打进来。面板自己的中转会放行入口 IP。认的是 IP，不是账号。大陆机房的自建中转也会失败。需要新 Agent。</span>
+            </span>
+          </label>
           {meta?.need_tls && (
             <Field label="TLS 证书" hint="在设置里签发或上传">
               <select className="input-field" value={f.cert_id} onChange={e => setF({ ...f, cert_id: e.target.value })}>

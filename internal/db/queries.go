@@ -963,10 +963,10 @@ func UnbindUserPackage(d *sql.DB, userID int64) error {
 }
 
 func CreateInbound(d *sql.DB, in *Inbound) (*Inbound, error) {
-	res, err := d.Exec(`INSERT INTO inbounds(server_id,name,profile,protocol,network,security,core,listen,port,enabled,settings,cert_id,line_kind,exit_inbound_id,exit_uri,created_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	res, err := d.Exec(`INSERT INTO inbounds(server_id,name,profile,protocol,network,security,core,listen,port,enabled,settings,cert_id,line_kind,exit_inbound_id,exit_uri,reject_cn,created_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		in.ServerID, in.Name, in.Profile, in.Protocol, in.Network, in.Security, in.Core, in.Listen, in.Port, boolInt(in.Enabled),
-		in.Settings, in.CertID, nz(in.LineKind, "direct"), in.ExitInboundID, in.ExitURI, now())
+		in.Settings, in.CertID, nz(in.LineKind, "direct"), in.ExitInboundID, in.ExitURI, boolInt(in.RejectCN), now())
 	if err != nil {
 		return nil, err
 	}
@@ -976,17 +976,18 @@ func CreateInbound(d *sql.DB, in *Inbound) (*Inbound, error) {
 
 func GetInbound(d *sql.DB, id int64) (*Inbound, error) {
 	in := &Inbound{}
-	var en int
+	var en, rejectCN int
 	var certID, exitID sql.NullInt64
-	err := d.QueryRow(`SELECT i.id,i.server_id,i.name,i.profile,i.protocol,i.network,i.security,i.core,i.listen,i.port,i.enabled,i.settings,i.cert_id,i.line_kind,i.exit_inbound_id,i.exit_uri,i.created_at,
+	err := d.QueryRow(`SELECT i.id,i.server_id,i.name,i.profile,i.protocol,i.network,i.security,i.core,i.listen,i.port,i.enabled,i.settings,i.cert_id,i.line_kind,i.exit_inbound_id,i.exit_uri,i.reject_cn,i.created_at,
 		s.name, s.public_host, s.connect_ip, s.online
 		FROM inbounds i JOIN servers s ON s.id=i.server_id WHERE i.id=?`, id).
-		Scan(&in.ID, &in.ServerID, &in.Name, &in.Profile, &in.Protocol, &in.Network, &in.Security, &in.Core, &in.Listen, &in.Port, &en, &in.Settings, &certID, &in.LineKind, &exitID, &in.ExitURI, &in.CreatedAt,
+		Scan(&in.ID, &in.ServerID, &in.Name, &in.Profile, &in.Protocol, &in.Network, &in.Security, &in.Core, &in.Listen, &in.Port, &en, &in.Settings, &certID, &in.LineKind, &exitID, &in.ExitURI, &rejectCN, &in.CreatedAt,
 			&in.ServerName, &in.ServerHost, &in.ConnectIP, &in.ServerOnline)
 	if err != nil {
 		return nil, err
 	}
 	in.Enabled = en == 1
+	in.RejectCN = rejectCN == 1
 	if certID.Valid {
 		v := certID.Int64
 		in.CertID = &v
@@ -1048,8 +1049,8 @@ func UsedPortsOnServer(d *sql.DB, serverID int64, excludeID int64) (map[int]stru
 }
 
 func UpdateInbound(d *sql.DB, in *Inbound) error {
-	_, err := d.Exec(`UPDATE inbounds SET name=?, port=?, enabled=?, settings=?, cert_id=?, line_kind=?, exit_inbound_id=?, exit_uri=? WHERE id=?`,
-		in.Name, in.Port, boolInt(in.Enabled), in.Settings, in.CertID, nz(in.LineKind, "direct"), in.ExitInboundID, in.ExitURI, in.ID)
+	_, err := d.Exec(`UPDATE inbounds SET name=?, port=?, enabled=?, settings=?, cert_id=?, line_kind=?, exit_inbound_id=?, exit_uri=?, reject_cn=? WHERE id=?`,
+		in.Name, in.Port, boolInt(in.Enabled), in.Settings, in.CertID, nz(in.LineKind, "direct"), in.ExitInboundID, in.ExitURI, boolInt(in.RejectCN), in.ID)
 	return err
 }
 

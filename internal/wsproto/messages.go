@@ -57,6 +57,11 @@ type SpeedLimit struct {
 	Mbps int64  `json:"mbps"`
 }
 
+type RejectCN struct {
+	Ports []int    `json:"ports"`
+	Allow []string `json:"allow,omitempty"`
+}
+
 type ApplyConfig struct {
 	Rev         string          `json:"rev"`
 	Xray        json.RawMessage `json:"xray,omitempty"`
@@ -66,6 +71,7 @@ type ApplyConfig struct {
 	SingboxAPI  string          `json:"singbox_api,omitempty"`
 	SpeedLimits []SpeedLimit    `json:"speed_limits,omitempty"`
 	DisableIPv6 bool            `json:"disable_ipv6"`
+	RejectCN    RejectCN        `json:"reject_cn"`
 }
 
 type ApplyAck struct {

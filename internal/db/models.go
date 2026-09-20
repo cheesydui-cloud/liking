@@ -123,6 +123,7 @@ type Inbound struct {
 	LineKind      string `json:"line_kind"`
 	ExitInboundID *int64 `json:"exit_inbound_id"`
 	ExitURI       string `json:"exit_uri"`
+	RejectCN      bool   `json:"reject_cn"`
 	CreatedAt     int64  `json:"created_at"`
 	ServerName    string `json:"server_name,omitempty"`
 	ServerHost    string `json:"server_host,omitempty"`
