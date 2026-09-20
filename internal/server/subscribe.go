@@ -259,7 +259,7 @@ func subRuleNames(d *sql.DB, u *db.User) []string {
 		userCustom = u.SubRuleCategories
 	}
 	_, names := corecfg.ResolveUserSubRules(userPreset, userCustom, preset, custom)
-	return names
+	return corecfg.ApplySiteFilterToSubRules(names, corecfg.SiteFilterFromUser(u).Mode)
 }
 
 func buildSingboxSub(d *sql.DB, u *db.User, clients []*db.Client, over map[int64]bool) ([]byte, error) {

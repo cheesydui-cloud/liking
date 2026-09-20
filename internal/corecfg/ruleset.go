@@ -159,6 +159,22 @@ func ResolveUserSubRules(userPreset string, userCustom []string, globalPreset st
 	return ResolveSubRules(userPreset, userCustom)
 }
 
+// ApplySiteFilterToSubRules drops 国内直连 when the user is allow-only.
+// Those sites never hit the node, so kernel allow-block cannot apply.
+func ApplySiteFilterToSubRules(names []string, mode string) []string {
+	if mode != SiteFilterAllow {
+		return names
+	}
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if n == "domestic" {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
 func SelectedCategories(names []string) []RuleCategory {
 	names = NormalizeCategoryNames(names)
 	out := make([]RuleCategory, 0, len(names))

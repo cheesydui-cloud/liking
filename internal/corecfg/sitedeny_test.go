@@ -375,6 +375,9 @@ func TestResolveSiteAllowExtras(t *testing.T) {
 	if hasStr(d, "google.com") {
 		t.Fatalf("tiktok allow leaked google %+v", d)
 	}
+	if hasStr(d, "bytedance.com") || hasStr(d, "byteimg.com") || hasStr(d, "douyin.com") {
+		t.Fatalf("tiktok allow leaked bytedance %+v", d)
+	}
 	if !hasStr(ips, "1.1.1.1/32") || !hasStr(ips, "8.8.8.8/32") {
 		t.Fatalf("allow dns %+v", ips)
 	}

@@ -86,10 +86,8 @@ var siteDenyDomains = map[string][]string{
 	"tiktok": {
 		"tiktok.com", "tiktokv.com", "tiktokcdn.com", "tiktokcdn-us.com",
 		"tiktokcdn-eu.com", "tiktokv.us", "tiktokv.eu", "tiktokv.sg",
-		"musical.ly", "muscdn.com", "bytedance.com", "bytedance.net",
-		"byteoversea.com", "ibyteimg.com", "ibytedtos.com", "isnssdk.com",
-		"ttlivecdn.com", "tiktokrow-cdn.com", "byteimg.com", "bytescm.com",
-		"bytednsdoc.com",
+		"musical.ly", "muscdn.com", "byteoversea.com", "ibyteimg.com",
+		"ibytedtos.com", "isnssdk.com", "ttlivecdn.com", "tiktokrow-cdn.com",
 	},
 	"facebook": {
 		"facebook.com", "fb.com", "fbcdn.net", "facebook.net", "messenger.com",
@@ -313,6 +311,10 @@ func NormalizeSiteDeny(cats, custom []string) (SiteDeny, error) {
 		Categories: NormalizeSiteDenyCategories(cats),
 		Domains:    doms,
 	}, nil
+}
+
+func SiteFilterFromUser(u *db.User) SiteDeny {
+	return siteDenyFromUser(u)
 }
 
 func siteDenyFromUser(u *db.User) SiteDeny {

@@ -5,6 +5,42 @@ import (
 	"testing"
 )
 
+func TestApplySiteFilterToSubRulesDropsDomesticOnAllow(t *testing.T) {
+	_, cats := ResolveUserSubRules("", nil, "balanced", nil)
+	if !strings.Contains(strings.Join(cats, ","), "domestic") {
+		t.Fatalf("balanced needs domestic %v", cats)
+	}
+	got := ApplySiteFilterToSubRules(cats, SiteFilterAllow)
+	joined := strings.Join(got, ",")
+	if strings.Contains(joined, "domestic") {
+		t.Fatalf("allow still has domestic %v", got)
+	}
+	if !strings.Contains(joined, "private") || !strings.Contains(joined, "youtube") {
+		t.Fatalf("allow dropped too much %v", got)
+	}
+	same := ApplySiteFilterToSubRules(cats, SiteFilterDeny)
+	if strings.Join(same, ",") != strings.Join(cats, ",") {
+		t.Fatalf("deny should keep %v", same)
+	}
+	doc := ClashDocument([]string{"jp"}, "  - name: \"jp\"\n    type: ss\n", got)
+	if strings.Contains(doc, "国内服务") || strings.Contains(doc, "geolocation-cn") {
+		t.Fatalf("allow clash still domestic\n%s", doc)
+	}
+	if !strings.Contains(doc, "私有网络") {
+		t.Fatalf("allow clash dropped private\n%s", doc)
+	}
+	sb := SingboxClientDocument(nil, []string{"jp"}, got)
+	route, _ := sb["route"].(map[string]any)
+	raw, _ := route["rule_set"].([]any)
+	for _, r := range raw {
+		m, _ := r.(map[string]any)
+		tag, _ := m["tag"].(string)
+		if tag == "geolocation-cn" || tag == "cn-domains" || tag == "cn" {
+			t.Fatalf("allow singbox still domestic %+v", raw)
+		}
+	}
+}
+
 func TestResolveUserSubRulesInheritAndOverride(t *testing.T) {
 	preset, cats := ResolveUserSubRules("", nil, "minimal", nil)
 	if preset != "minimal" || strings.Join(cats, ",") != "private,domestic" {

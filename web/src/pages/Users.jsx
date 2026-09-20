@@ -357,7 +357,7 @@ function UserDenyModal({ user, onClose, onSaved }) {
   }
 
   const hint = mode === 'allow'
-    ? '只放行勾选的网站，其它一律拦截。测活和常用 DNS 会自动放行。Clash、v2rayN、URI 都生效，不用更新订阅。已建立的连接可能要重连。访问限制对 Mieru 无效。'
+    ? '只放行勾选的网站。走节点的流量立刻拦截。只允许时会关掉 Clash / sing-box 的国内直连，否则百度这些根本不到节点，需要重新拉取订阅。v2rayN 请关掉绕过大陆。局域网仍直连。测活和常用 DNS 自动放行。已建立的连接可能要重连。Mieru 无效。'
     : '在节点上拦截，Clash、v2rayN、URI 都生效，不用更新订阅。已建立的连接可能要重连。访问限制对 Mieru 无效。'
 
   return (

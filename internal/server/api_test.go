@@ -3197,6 +3197,7 @@ func TestUserSiteDeny(t *testing.T) {
 	var created struct {
 		User struct {
 			ID                 int64    `json:"id"`
+			SubToken           string   `json:"sub_token"`
 			SiteDenyCategories []string `json:"site_deny_categories"`
 			SiteDenyDomains    []string `json:"site_deny_domains"`
 		} `json:"user"`
@@ -3310,9 +3311,38 @@ func TestUserSiteDeny(t *testing.T) {
 		t.Fatalf("allow cats %+v", edited.User.SiteDenyCategories)
 	}
 
+	getSub := func(fmtName string) string {
+		t.Helper()
+		r, err := http.Get(ts.URL + "/api/sub/" + created.User.SubToken + "/" + fmtName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		if r.StatusCode != 200 {
+			t.Fatalf("%s sub %d %s", fmtName, r.StatusCode, b)
+		}
+		return string(b)
+	}
+	clash := getSub("clash")
+	if strings.Contains(clash, "国内服务") || strings.Contains(clash, "geolocation-cn") {
+		t.Fatalf("allow clash still domestic %s", clash)
+	}
+	if !strings.Contains(clash, "私有网络") {
+		t.Fatalf("allow clash dropped private %s", clash)
+	}
+	sb := getSub("singbox")
+	if strings.Contains(sb, "geolocation-cn") || strings.Contains(sb, "国内服务") {
+		t.Fatalf("allow singbox still domestic %s", sb)
+	}
+
 	res = putJSON(userPath, map[string]any{"site_filter_mode": ""})
 	decodeRes(t, res, &edited)
 	if edited.User.SiteFilterMode != "" || len(edited.User.SiteDenyCategories) != 0 {
 		t.Fatalf("explicit off %+v", edited.User)
+	}
+	clash = getSub("clash")
+	if !strings.Contains(clash, "国内服务") {
+		t.Fatalf("off should restore domestic %s", clash)
 	}
 }
