@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -98,8 +99,9 @@ func GetUser(d *sql.DB, id int64) (*User, error) {
 	var en int
 	var tlim sql.NullInt64
 	var totpEn int
-	err := d.QueryRow(`SELECT id,username,password_hash,role,remark,enabled,expires_at,traffic_limit,used_up,used_down,cycle_start,sub_token,created_at,totp_secret,totp_enabled,traffic_reset_day,password_plain,speed_limit FROM users WHERE id=?`, id).
-		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Remark, &en, &u.ExpiresAt, &tlim, &u.UsedUp, &u.UsedDown, &u.CycleStart, &u.SubToken, &u.CreatedAt, &u.TOTPSecret, &totpEn, &u.TrafficResetDay, &u.PasswordPlain, &u.SpeedLimit)
+	var catsRaw, denyCatsRaw, denyDomsRaw string
+	err := d.QueryRow(`SELECT id,username,password_hash,role,remark,enabled,expires_at,traffic_limit,used_up,used_down,cycle_start,sub_token,created_at,totp_secret,totp_enabled,traffic_reset_day,password_plain,speed_limit,sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains FROM users WHERE id=?`, id).
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Remark, &en, &u.ExpiresAt, &tlim, &u.UsedUp, &u.UsedDown, &u.CycleStart, &u.SubToken, &u.CreatedAt, &u.TOTPSecret, &totpEn, &u.TrafficResetDay, &u.PasswordPlain, &u.SpeedLimit, &u.SubRulePreset, &catsRaw, &denyCatsRaw, &denyDomsRaw)
 	if err != nil {
 		return nil, err
 	}
@@ -109,6 +111,9 @@ func GetUser(d *sql.DB, id int64) (*User, error) {
 		v := tlim.Int64
 		u.TrafficLimit = &v
 	}
+	u.SubRuleCategories = decodeStringSlice(catsRaw)
+	u.SiteDenyCategories = decodeStringSlice(denyCatsRaw)
+	u.SiteDenyDomains = decodeStringSlice(denyDomsRaw)
 	attachPackage(d, u)
 	return u, nil
 }
@@ -217,9 +222,39 @@ func UpdateUser(d *sql.DB, u *User) error {
 	if u.Enabled {
 		en = 1
 	}
-	_, err := d.Exec(`UPDATE users SET username=?, remark=?, enabled=?, expires_at=?, traffic_limit=?, traffic_reset_day=?, speed_limit=? WHERE id=?`,
-		u.Username, u.Remark, en, u.ExpiresAt, u.TrafficLimit, u.TrafficResetDay, u.SpeedLimit, u.ID)
+	_, err := d.Exec(`UPDATE users SET username=?, remark=?, enabled=?, expires_at=?, traffic_limit=?, traffic_reset_day=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=? WHERE id=?`,
+		u.Username, u.Remark, en, u.ExpiresAt, u.TrafficLimit, u.TrafficResetDay, u.SpeedLimit, u.SubRulePreset, encodeStringSlice(u.SubRuleCategories), encodeStringSlice(u.SiteDenyCategories), encodeStringSlice(u.SiteDenyDomains), u.ID)
 	return err
+}
+
+func decodeStringSlice(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return []string{}
+	}
+	var names []string
+	if err := json.Unmarshal([]byte(raw), &names); err != nil {
+		return []string{}
+	}
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		if n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func encodeStringSlice(names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(names)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 func SetUserTOTP(d *sql.DB, id int64, secret string, enabled bool) error {

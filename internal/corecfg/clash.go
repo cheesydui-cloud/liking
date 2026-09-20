@@ -123,7 +123,7 @@ func writeClashGroups(b *strings.Builder, names, selected []string) {
 	b.WriteString("proxy-groups:\n")
 	writeClashGroup(b, GroupSelect, "select", nil, selectProxies)
 	writeClashGroup(b, GroupAuto, "url-test", func(b *strings.Builder) {
-		b.WriteString("    url: https://www.gstatic.com/generate_204\n")
+		fmt.Fprintf(b, "    url: %s\n", ClientHealthCheckURL)
 		b.WriteString("    interval: 300\n")
 		b.WriteString("    lazy: false\n")
 	}, auto)

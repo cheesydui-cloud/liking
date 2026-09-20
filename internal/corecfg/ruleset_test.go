@@ -5,6 +5,43 @@ import (
 	"testing"
 )
 
+func TestResolveUserSubRulesInheritAndOverride(t *testing.T) {
+	preset, cats := ResolveUserSubRules("", nil, "minimal", nil)
+	if preset != "minimal" || strings.Join(cats, ",") != "private,domestic" {
+		t.Fatalf("inherit global %+v %v", preset, cats)
+	}
+	preset, cats = ResolveUserSubRules("inherit", nil, "custom", []string{"ads", "bogus"})
+	if preset != "custom" || strings.Join(cats, ",") != "ads" {
+		t.Fatalf("inherit custom %+v %v", preset, cats)
+	}
+	preset, cats = ResolveUserSubRules("balanced", nil, "minimal", nil)
+	if preset != "balanced" {
+		t.Fatalf("override preset %s", preset)
+	}
+	if strings.Join(cats, ",") != "ai,youtube,google,private,domestic,telegram,github" {
+		t.Fatalf("override cats %v", cats)
+	}
+	preset, cats = ResolveUserSubRules("custom", []string{"ads", "private"}, "balanced", nil)
+	if preset != "custom" || strings.Join(cats, ",") != "ads,private" {
+		t.Fatalf("custom override %+v %v", preset, cats)
+	}
+}
+
+func TestNormalizeUserSubRulePreset(t *testing.T) {
+	if NormalizeUserSubRulePreset("") != "" || NormalizeUserSubRulePreset("inherit") != "" {
+		t.Fatal("inherit should stay empty")
+	}
+	if NormalizeUserSubRulePreset("BALANCED") != "balanced" {
+		t.Fatal("balanced")
+	}
+	if ValidUserSubRulePreset("nope") {
+		t.Fatal("invalid")
+	}
+	if !ValidUserSubRulePreset("inherit") || !ValidUserSubRulePreset("") {
+		t.Fatal("inherit valid")
+	}
+}
+
 func TestResolveSubRulesDefaultBalanced(t *testing.T) {
 	preset, cats := ResolveSubRules("", nil)
 	if preset != "balanced" {

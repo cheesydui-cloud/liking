@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"liking/internal/corecfg"
 	"liking/internal/db"
 )
 
@@ -167,18 +168,22 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		oldPkgID = *u.PackageID
 	}
 	var req struct {
-		Username        *string         `json:"username"`
-		Remark          *string         `json:"remark"`
-		Enabled         *bool           `json:"enabled"`
-		ExpiresAt       *int64          `json:"expires_at"`
-		Days            *int            `json:"days"`
-		PackageID       *int64          `json:"package_id"`
-		Unbind          bool            `json:"unbind_package"`
-		TrafficLimit    json.RawMessage `json:"traffic_limit"`
-		ExtendDays      *int            `json:"extend_days"`
-		Password        *string         `json:"password"`
-		TrafficResetDay *int            `json:"traffic_reset_day"`
-		SpeedLimit      *int64          `json:"speed_limit"`
+		Username          *string         `json:"username"`
+		Remark            *string         `json:"remark"`
+		Enabled           *bool           `json:"enabled"`
+		ExpiresAt         *int64          `json:"expires_at"`
+		Days              *int            `json:"days"`
+		PackageID         *int64          `json:"package_id"`
+		Unbind            bool            `json:"unbind_package"`
+		TrafficLimit      json.RawMessage `json:"traffic_limit"`
+		ExtendDays        *int            `json:"extend_days"`
+		Password          *string         `json:"password"`
+		TrafficResetDay   *int            `json:"traffic_reset_day"`
+		SpeedLimit        *int64          `json:"speed_limit"`
+		SubRulePreset      *string         `json:"sub_rule_preset"`
+		SubRuleCategories  *[]string       `json:"sub_rule_categories"`
+		SiteDenyCategories *[]string       `json:"site_deny_categories"`
+		SiteDenyDomains    *[]string       `json:"site_deny_domains"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -254,6 +259,40 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		u.SpeedLimit = *req.SpeedLimit
+	}
+	if req.SubRulePreset != nil {
+		if !corecfg.ValidUserSubRulePreset(*req.SubRulePreset) {
+			jsonErr(w, http.StatusBadRequest, "规则模式无效")
+			return
+		}
+		u.SubRulePreset = corecfg.NormalizeUserSubRulePreset(*req.SubRulePreset)
+		if u.SubRulePreset == "" {
+			u.SubRuleCategories = []string{}
+		}
+	}
+	if req.SubRuleCategories != nil {
+		if u.SubRulePreset == "" {
+			u.SubRuleCategories = []string{}
+		} else {
+			u.SubRuleCategories = corecfg.NormalizeCategoryNames(*req.SubRuleCategories)
+		}
+	}
+	if req.SiteDenyCategories != nil || req.SiteDenyDomains != nil {
+		cats := u.SiteDenyCategories
+		doms := u.SiteDenyDomains
+		if req.SiteDenyCategories != nil {
+			cats = *req.SiteDenyCategories
+		}
+		if req.SiteDenyDomains != nil {
+			doms = *req.SiteDenyDomains
+		}
+		deny, err := corecfg.NormalizeSiteDeny(cats, doms)
+		if err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		u.SiteDenyCategories = deny.Categories
+		u.SiteDenyDomains = deny.Domains
 	}
 	if err := db.UpdateUser(s.DB, u); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {

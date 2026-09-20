@@ -1,0 +1,2 @@
+ALTER TABLE users ADD COLUMN sub_rule_preset TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN sub_rule_categories TEXT NOT NULL DEFAULT '';

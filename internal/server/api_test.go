@@ -1599,6 +1599,10 @@ func TestCertsAndSettings(t *testing.T) {
 	if st["sub_rule_preset"] != "balanced" {
 		t.Fatalf("sub rules %+v", st["sub_rule_preset"])
 	}
+	denyCat, _ := st["site_deny_catalog"].([]any)
+	if len(denyCat) < 3 {
+		t.Fatalf("site deny catalog %+v", st["site_deny_catalog"])
+	}
 	if _, ok := st["cf_api_token"]; ok {
 		t.Fatal("token leaked")
 	}
@@ -2906,5 +2910,357 @@ func TestEncryptedBackupAndSubUserinfo(t *testing.T) {
 	}
 	if !strings.Contains(info, "upload=0") || !strings.Contains(info, "download=") {
 		t.Fatalf("userinfo %q", info)
+	}
+}
+
+func TestUserSubRulesInheritAndOverride(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	body, _ := json.Marshal(map[string]string{"name": "n1", "public_host": "10.0.0.1"})
+	res, err = c.Post(ts.URL+"/api/servers", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var createdSrv struct {
+		Server struct {
+			ID int64 `json:"id"`
+		} `json:"server"`
+	}
+	decodeRes(t, res, &createdSrv)
+	inBody, _ := json.Marshal(map[string]any{
+		"server_id": createdSrv.Server.ID, "name": "vless-1", "profile": "vless-reality-vision", "port": 8443,
+	})
+	res, err = c.Post(ts.URL+"/api/inbounds", "application/json", bytes.NewReader(inBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+	pkgBody, _ := json.Marshal(map[string]any{
+		"name": "std", "traffic_bytes": 0, "cycle_days": 30, "direction": "oneway",
+		"server_ids": []int64{createdSrv.Server.ID},
+	})
+	res, err = c.Post(ts.URL+"/api/packages", "application/json", bytes.NewReader(pkgBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkg struct {
+		Package struct {
+			ID int64 `json:"id"`
+		} `json:"package"`
+	}
+	decodeRes(t, res, &pkg)
+	uBody, _ := json.Marshal(map[string]any{
+		"username": "alice", "password": "alice12", "package_id": pkg.Package.ID, "days": 30,
+	})
+	res, err = c.Post(ts.URL+"/api/users", "application/json", bytes.NewReader(uBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		User struct {
+			ID                int64    `json:"id"`
+			SubToken          string   `json:"sub_token"`
+			SubRulePreset     string   `json:"sub_rule_preset"`
+			SubRuleCategories []string `json:"sub_rule_categories"`
+		} `json:"user"`
+	}
+	decodeRes(t, res, &created)
+	if created.User.SubRulePreset != "" {
+		t.Fatalf("new user should inherit %+v", created.User)
+	}
+
+	putJSON := func(path string, payload any) *http.Response {
+		t.Helper()
+		raw, _ := json.Marshal(payload)
+		req, err := http.NewRequest(http.MethodPut, ts.URL+path, bytes.NewReader(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		res, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	userPath := "/api/users/" + strconv.FormatInt(created.User.ID, 10)
+	getSub := func(fmtName string) string {
+		t.Helper()
+		res, err := http.Get(ts.URL + "/api/sub/" + created.User.SubToken + "/" + fmtName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != 200 {
+			t.Fatalf("%s sub %d %s", fmtName, res.StatusCode, b)
+		}
+		return string(b)
+	}
+
+	clash := getSub("clash")
+	if !strings.Contains(clash, "RULE-SET,youtube,油管视频") || strings.Contains(clash, "广告拦截") {
+		t.Fatalf("default inherit clash %s", clash)
+	}
+	sb := getSub("singbox")
+	if !strings.Contains(sb, "youtube") || strings.Contains(sb, "category-ads-all") {
+		t.Fatalf("default inherit singbox %s", sb)
+	}
+
+	res = putJSON(userPath, map[string]any{
+		"sub_rule_preset":     "custom",
+		"sub_rule_categories": []string{"ads", "private", "bogus"},
+	})
+	var edited struct {
+		User struct {
+			SubRulePreset     string   `json:"sub_rule_preset"`
+			SubRuleCategories []string `json:"sub_rule_categories"`
+			Username          string   `json:"username"`
+		} `json:"user"`
+	}
+	decodeRes(t, res, &edited)
+	if edited.User.SubRulePreset != "custom" || len(edited.User.SubRuleCategories) != 2 || edited.User.SubRuleCategories[0] != "ads" || edited.User.SubRuleCategories[1] != "private" {
+		t.Fatalf("custom save %+v", edited.User)
+	}
+
+	clash = getSub("clash")
+	if !strings.Contains(clash, "广告拦截") || strings.Contains(clash, "RULE-SET,youtube,油管视频") {
+		t.Fatalf("user custom clash %s", clash)
+	}
+	sb = getSub("singbox")
+	if !strings.Contains(sb, "category-ads-all") || strings.Contains(sb, "youtube") {
+		t.Fatalf("user custom singbox %s", sb)
+	}
+
+	res = putJSON(userPath, map[string]any{"enabled": true})
+	decodeRes(t, res, &edited)
+	if edited.User.SubRulePreset != "custom" || edited.User.Username != "alice" {
+		t.Fatalf("partial wiped rules %+v", edited.User)
+	}
+
+	res = putJSON(userPath, map[string]any{"sub_rule_preset": "nope"})
+	if res.StatusCode == 200 {
+		t.Fatal("invalid preset should fail")
+	}
+	io.ReadAll(res.Body)
+	res.Body.Close()
+
+	res = putJSON(userPath, map[string]any{"sub_rule_preset": "inherit", "sub_rule_categories": []string{"ads"}})
+	decodeRes(t, res, &edited)
+	if edited.User.SubRulePreset != "" || len(edited.User.SubRuleCategories) != 0 {
+		t.Fatalf("inherit should clear %+v", edited.User)
+	}
+	clash = getSub("clash")
+	if !strings.Contains(clash, "RULE-SET,youtube,油管视频") {
+		t.Fatalf("back to global %s", clash)
+	}
+
+	res = putJSON("/api/settings", map[string]any{"sub_rule_preset": "minimal"})
+	decodeRes(t, res, nil)
+	clash = getSub("clash")
+	if strings.Contains(clash, "RULE-SET,youtube,油管视频") || !strings.Contains(clash, "国内服务") {
+		t.Fatalf("global minimal inherit %s", clash)
+	}
+
+	res = putJSON(userPath, map[string]any{"sub_rule_preset": "balanced"})
+	decodeRes(t, res, &edited)
+	if edited.User.SubRulePreset != "balanced" {
+		t.Fatalf("user balanced %+v", edited.User)
+	}
+	clash = getSub("clash")
+	if !strings.Contains(clash, "RULE-SET,youtube,油管视频") {
+		t.Fatalf("user balanced vs global minimal %s", clash)
+	}
+
+	uri, err := http.Get(ts.URL + "/api/sub/" + created.User.SubToken + "/uri")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uriBody, _ := io.ReadAll(uri.Body)
+	uri.Body.Close()
+	if uri.StatusCode != 200 {
+		t.Fatalf("uri %d %s", uri.StatusCode, uriBody)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(string(uriBody))
+	if err != nil {
+		t.Fatalf("uri b64 %v", err)
+	}
+	if !strings.Contains(string(decoded), "vless://") {
+		t.Fatalf("uri still needs nodes %s", decoded)
+	}
+}
+
+func TestUserSiteDeny(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	body, _ := json.Marshal(map[string]string{"name": "n1", "public_host": "10.0.0.1"})
+	res, err = c.Post(ts.URL+"/api/servers", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var createdSrv struct {
+		Server struct {
+			ID int64 `json:"id"`
+		} `json:"server"`
+	}
+	decodeRes(t, res, &createdSrv)
+	inBody, _ := json.Marshal(map[string]any{
+		"server_id": createdSrv.Server.ID, "name": "vless-1", "profile": "vless-reality-vision", "port": 8443,
+	})
+	res, err = c.Post(ts.URL+"/api/inbounds", "application/json", bytes.NewReader(inBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+	pkgBody, _ := json.Marshal(map[string]any{
+		"name": "std", "traffic_bytes": 0, "cycle_days": 30, "direction": "oneway",
+		"server_ids": []int64{createdSrv.Server.ID},
+	})
+	res, err = c.Post(ts.URL+"/api/packages", "application/json", bytes.NewReader(pkgBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkg struct {
+		Package struct {
+			ID int64 `json:"id"`
+		} `json:"package"`
+	}
+	decodeRes(t, res, &pkg)
+	uBody, _ := json.Marshal(map[string]any{
+		"username": "alice", "password": "alice12", "package_id": pkg.Package.ID, "days": 30,
+	})
+	res, err = c.Post(ts.URL+"/api/users", "application/json", bytes.NewReader(uBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		User struct {
+			ID                 int64    `json:"id"`
+			SiteDenyCategories []string `json:"site_deny_categories"`
+			SiteDenyDomains    []string `json:"site_deny_domains"`
+		} `json:"user"`
+	}
+	decodeRes(t, res, &created)
+	if len(created.User.SiteDenyCategories) != 0 || len(created.User.SiteDenyDomains) != 0 {
+		t.Fatalf("new user deny %+v", created.User)
+	}
+
+	putJSON := func(path string, payload any) *http.Response {
+		t.Helper()
+		raw, _ := json.Marshal(payload)
+		req, err := http.NewRequest(http.MethodPut, ts.URL+path, bytes.NewReader(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		res, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	userPath := "/api/users/" + strconv.FormatInt(created.User.ID, 10)
+	var edited struct {
+		User struct {
+			Username           string   `json:"username"`
+			SiteDenyCategories []string `json:"site_deny_categories"`
+			SiteDenyDomains    []string `json:"site_deny_domains"`
+		} `json:"user"`
+	}
+
+	res = putJSON(userPath, map[string]any{
+		"site_deny_categories": []string{"google", "nope"},
+		"site_deny_domains":    []string{"https://WWW.Instagram.com/a", "10.0.0.0/8"},
+	})
+	decodeRes(t, res, &edited)
+	if len(edited.User.SiteDenyCategories) != 1 || edited.User.SiteDenyCategories[0] != "google" {
+		t.Fatalf("cats %+v", edited.User.SiteDenyCategories)
+	}
+	if len(edited.User.SiteDenyDomains) != 2 || edited.User.SiteDenyDomains[0] != "www.instagram.com" || edited.User.SiteDenyDomains[1] != "10.0.0.0/8" {
+		t.Fatalf("domains %+v", edited.User.SiteDenyDomains)
+	}
+
+	res = putJSON(userPath, map[string]any{"enabled": true})
+	decodeRes(t, res, &edited)
+	if edited.User.Username != "alice" || edited.User.SiteDenyCategories[0] != "google" || len(edited.User.SiteDenyDomains) != 2 {
+		t.Fatalf("partial wiped deny %+v", edited.User)
+	}
+
+	res = putJSON(userPath, map[string]any{"site_deny_categories": []string{"youtube", "tiktok"}})
+	decodeRes(t, res, &edited)
+	if len(edited.User.SiteDenyCategories) != 2 || edited.User.SiteDenyCategories[0] != "youtube" || edited.User.SiteDenyCategories[1] != "tiktok" {
+		t.Fatalf("cats only %+v", edited.User.SiteDenyCategories)
+	}
+	if len(edited.User.SiteDenyDomains) != 2 {
+		t.Fatalf("domains should keep %+v", edited.User.SiteDenyDomains)
+	}
+
+	tooMany := make([]string, 51)
+	for i := range tooMany {
+		tooMany[i] = "n" + strconv.Itoa(i) + ".example.com"
+	}
+	res = putJSON(userPath, map[string]any{"site_deny_domains": tooMany})
+	if res.StatusCode == 200 {
+		t.Fatal("51 domains should fail")
+	}
+	io.ReadAll(res.Body)
+	res.Body.Close()
+
+	res = putJSON(userPath, map[string]any{"site_deny_categories": []string{}, "site_deny_domains": []string{}})
+	decodeRes(t, res, &edited)
+	if len(edited.User.SiteDenyCategories) != 0 || len(edited.User.SiteDenyDomains) != 0 {
+		t.Fatalf("clear %+v", edited.User)
 	}
 }

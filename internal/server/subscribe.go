@@ -48,7 +48,7 @@ func (s *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 
 	switch fmtName {
 	case "clash", "meta", "mihomo":
-		body, err := buildClash(s.DB, clients, over)
+		body, err := buildClash(s.DB, u, clients, over)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -57,7 +57,7 @@ func (s *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Profile-Title", "liking")
 		_, _ = w.Write([]byte(body))
 	case "singbox", "sing-box", "sfa":
-		body, err := buildSingboxSub(s.DB, clients, over)
+		body, err := buildSingboxSub(s.DB, u, clients, over)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -219,7 +219,7 @@ func buildURIList(d *sql.DB, clients []*db.Client, over map[int64]bool) (string,
 	return strings.Join(lines, "\n"), nil
 }
 
-func buildClash(d *sql.DB, clients []*db.Client, over map[int64]bool) (string, error) {
+func buildClash(d *sql.DB, u *db.User, clients []*db.Client, over map[int64]bool) (string, error) {
 	var names []string
 	var b strings.Builder
 	for _, c := range clients {
@@ -240,10 +240,10 @@ func buildClash(d *sql.DB, clients []*db.Client, over map[int64]bool) (string, e
 		names = append(names, name)
 		b.WriteString(yaml)
 	}
-	return corecfg.ClashDocument(names, b.String(), subRuleNames(d)), nil
+	return corecfg.ClashDocument(names, b.String(), subRuleNames(d, u)), nil
 }
 
-func subRuleNames(d *sql.DB) []string {
+func subRuleNames(d *sql.DB, u *db.User) []string {
 	preset, _ := db.GetSetting(d, "sub_rule_preset")
 	raw, _ := db.GetSetting(d, "sub_rule_categories")
 	var custom []string
@@ -252,11 +252,17 @@ func subRuleNames(d *sql.DB) []string {
 			custom = nil
 		}
 	}
-	_, names := corecfg.ResolveSubRules(preset, custom)
+	userPreset := ""
+	var userCustom []string
+	if u != nil {
+		userPreset = u.SubRulePreset
+		userCustom = u.SubRuleCategories
+	}
+	_, names := corecfg.ResolveUserSubRules(userPreset, userCustom, preset, custom)
 	return names
 }
 
-func buildSingboxSub(d *sql.DB, clients []*db.Client, over map[int64]bool) ([]byte, error) {
+func buildSingboxSub(d *sql.DB, u *db.User, clients []*db.Client, over map[int64]bool) ([]byte, error) {
 	var tags []string
 	var outs []any
 	for _, c := range clients {
@@ -282,5 +288,5 @@ func buildSingboxSub(d *sql.DB, clients []*db.Client, over map[int64]bool) ([]by
 			tags = append(tags, tag)
 		}
 	}
-	return json.MarshalIndent(corecfg.SingboxClientDocument(outs, tags, subRuleNames(d)), "", "  ")
+	return json.MarshalIndent(corecfg.SingboxClientDocument(outs, tags, subRuleNames(d, u)), "", "  ")
 }

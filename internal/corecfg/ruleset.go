@@ -83,12 +83,30 @@ func ValidSubRulePreset(preset string) bool {
 	}
 }
 
+func ValidUserSubRulePreset(preset string) bool {
+	p := strings.ToLower(strings.TrimSpace(preset))
+	if p == "inherit" {
+		return true
+	}
+	return ValidSubRulePreset(preset)
+}
+
 func NormalizeSubRulePreset(preset string) string {
 	switch strings.ToLower(strings.TrimSpace(preset)) {
 	case "minimal", "balanced", "comprehensive", "custom":
 		return strings.ToLower(strings.TrimSpace(preset))
 	default:
 		return DefaultSubRulePreset
+	}
+}
+
+// NormalizeUserSubRulePreset keeps empty / inherit as "" (follow global).
+func NormalizeUserSubRulePreset(preset string) string {
+	switch strings.ToLower(strings.TrimSpace(preset)) {
+	case "minimal", "balanced", "comprehensive", "custom":
+		return strings.ToLower(strings.TrimSpace(preset))
+	default:
+		return ""
 	}
 }
 
@@ -132,6 +150,13 @@ func ResolveSubRules(preset string, custom []string) (string, []string) {
 		return preset, NormalizeCategoryNames(custom)
 	}
 	return preset, CategoriesForPreset(preset)
+}
+
+func ResolveUserSubRules(userPreset string, userCustom []string, globalPreset string, globalCustom []string) (string, []string) {
+	if NormalizeUserSubRulePreset(userPreset) == "" {
+		return ResolveSubRules(globalPreset, globalCustom)
+	}
+	return ResolveSubRules(userPreset, userCustom)
 }
 
 func SelectedCategories(names []string) []RuleCategory {

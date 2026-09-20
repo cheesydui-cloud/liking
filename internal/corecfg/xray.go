@@ -7,7 +7,7 @@ import (
 	"liking/internal/db"
 )
 
-func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound, apiPort int, speeds map[int64]int64) (map[string]any, error) {
+func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound, apiPort int, speeds map[int64]int64, denies map[int64]SiteDeny) (map[string]any, error) {
 	var ins []any
 	var outs []any
 	var rules []any
@@ -31,6 +31,7 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 
 	used := false
 	limitOuts := map[uint32]struct{}{}
+	var chainRules []any
 	var speedRules []any
 	var directRules []any
 	for _, in := range inbounds {
@@ -55,7 +56,7 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 				return nil, err
 			}
 			outs = append(outs, obs...)
-			rules = append(rules, map[string]any{
+			chainRules = append(chainRules, map[string]any{
 				"type": "field", "inboundTag": []string{tag}, "outboundTag": obTag,
 			})
 			continue
@@ -102,11 +103,13 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 			"settings": map[string]any{"udp": true, "auth": "noauth"},
 		})
 		outs = append(outs, obs...)
-		rules = append(rules, map[string]any{
+		chainRules = append(chainRules, map[string]any{
 			"type": "field", "inboundTag": []string{tag}, "outboundTag": obTag,
 		})
 	}
 
+	rules = append(rules, xraySiteDenyRules(collectSiteDenyGroups(inbounds, clients, denies, CoreXray))...)
+	rules = append(rules, chainRules...)
 	rules = append(rules, speedRules...)
 	rules = append(rules, directRules...)
 
@@ -201,6 +204,7 @@ func xrayInbound(in *db.Inbound, clients []*db.Client, certs map[int64]*db.Certi
 	if stream != nil {
 		obj["streamSettings"] = stream
 	}
+	obj["sniffing"] = xraySniffing()
 	return obj, nil
 }
 

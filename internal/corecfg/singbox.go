@@ -6,7 +6,7 @@ import (
 	"liking/internal/db"
 )
 
-func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound, apiPort int, speeds map[int64]int64) (map[string]any, error) {
+func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound, apiPort int, speeds map[int64]int64, denies map[int64]SiteDeny) (map[string]any, error) {
 	var ins []any
 	var outs []any
 	used := false
@@ -59,16 +59,15 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 		return nil, nil
 	}
 
-	// Chain inbound rules first so a limited user is not stolen onto freedom.
-	routeRules := []any{}
-	final := "direct"
+	// Deny, then chain, then speed. Chain catch-all would otherwise steal denied users.
+	var chainRules []any
 	var speedRules []any
 	for _, in := range inbounds {
 		if in.Core != CoreSingbox || !in.Enabled {
 			continue
 		}
 		if in.LineKind == "chain" {
-			routeRules = append(routeRules, map[string]any{
+			chainRules = append(chainRules, map[string]any{
 				"inbound":  []string{inboundTag(in.ID)},
 				"outbound": outboundTag(in.ID),
 			})
@@ -90,7 +89,10 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 			})
 		}
 	}
+	routeRules := singSiteDenyRules(collectSiteDenyGroups(inbounds, clients, denies, CoreSingbox))
+	routeRules = append(routeRules, chainRules...)
 	routeRules = append(routeRules, speedRules...)
+	final := "direct"
 
 	cfg := map[string]any{
 		"log":       map[string]any{"level": "warn"},
@@ -153,12 +155,14 @@ func singInbound(in *db.Inbound, clients []*db.Client, certs map[int64]*db.Certi
 		tls["server_name"] = sni
 	}
 	return map[string]any{
-		"type":        "anytls",
-		"tag":         inboundTag(in.ID),
-		"listen":      in.Listen,
-		"listen_port": in.Port,
-		"users":       users,
-		"tls":         tls,
+		"type":                       "anytls",
+		"tag":                        inboundTag(in.ID),
+		"listen":                     in.Listen,
+		"listen_port":                in.Port,
+		"users":                      users,
+		"tls":                        tls,
+		"sniff":                      true,
+		"sniff_override_destination": false,
 	}, nil
 }
 
@@ -190,11 +194,13 @@ func singSocksInbound(in *db.Inbound, clients []*db.Client, byID map[int64]*db.I
 		users = []any{map[string]any{"username": "hold", "password": "hold"}}
 	}
 	return map[string]any{
-		"type":        "socks",
-		"tag":         inboundTag(in.ID),
-		"listen":      in.Listen,
-		"listen_port": in.Port,
-		"users":       users,
+		"type":                       "socks",
+		"tag":                        inboundTag(in.ID),
+		"listen":                     in.Listen,
+		"listen_port":                in.Port,
+		"users":                      users,
+		"sniff":                      true,
+		"sniff_override_destination": false,
 	}, nil
 }
 

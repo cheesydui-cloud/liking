@@ -151,6 +151,7 @@ const PAGE_TITLES = {
   '/packages': '套餐',
   '/forwards': '中转',
   '/traffic': '流量',
+  '/subscribe': '订阅',
   '/settings': '设置',
   '/my': '订阅',
   '/my/nodes': '节点',
@@ -258,6 +259,7 @@ export function Layout({ children }) {
     {
       label: '系统',
       items: [
+        { to: '/subscribe', icon: 'link', label: '订阅' },
         { to: '/settings', icon: 'gear', label: '设置' },
       ],
     },

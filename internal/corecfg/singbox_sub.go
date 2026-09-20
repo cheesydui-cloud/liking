@@ -19,7 +19,7 @@ func SingboxClientDocument(proxyOutbounds []any, tags []string, selected []strin
 			"type":      "urltest",
 			"tag":       GroupAuto,
 			"outbounds": autoMembers,
-			"url":       "https://www.gstatic.com/generate_204",
+			"url":       ClientHealthCheckURL,
 			"interval":  "5m",
 		},
 	}

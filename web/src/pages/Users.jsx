@@ -9,6 +9,7 @@ import { useToast, useDialog } from '../components/Layout'
 import { Badge, DayBars, Empty, Field, FilterTabs, Icon, Meter, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, billedBytes, fmtBps, fmtBytes, fmtDateShort } from '../components/ui'
 import { SubPanel } from '../components/SubPanel'
 import { NodePreviewList } from '../components/NodePreview'
+import { catsForPreset, presetLabel, SubRulePicker, userRulePresets } from '../components/SubRules'
 
 function randPassword() {
   const a = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
@@ -84,8 +85,35 @@ function UserFlags({ u }) {
   else if (u.quota_ratio >= 80) flags.push(<Badge key="q" tone="warn">{u.quota_ratio}%</Badge>)
   if (u.enabled === false) flags.push(<Badge key="off" tone="muted">停用</Badge>)
   if (u.speed_limit > 0) flags.push(<Badge key="spd" tone="muted">{u.speed_limit} Mbps</Badge>)
+  if (u.sub_rule_preset) flags.push(<Badge key="rule" tone="muted">独立规则</Badge>)
+  const deny = denyBadgeText(u)
+  if (deny) flags.push(<Badge key="deny" tone="muted">{deny}</Badge>)
   if (!flags.length) return null
   return flags
+}
+
+const siteDenyFallback = [
+  { name: 'google', label: '谷歌' },
+  { name: 'youtube', label: '油管' },
+  { name: 'tiktok', label: 'TikTok' },
+]
+
+function denyCatLabel(name, catalog) {
+  const hit = (catalog || siteDenyFallback).find(c => c.name === name)
+  return hit ? hit.label : name
+}
+
+function denyBadgeText(u) {
+  const cats = Array.isArray(u?.site_deny_categories) ? u.site_deny_categories : []
+  const domains = Array.isArray(u?.site_deny_domains) ? u.site_deny_domains : []
+  if (!cats.length && !domains.length) return ''
+  const parts = cats.map(n => denyCatLabel(n))
+  if (domains.length) parts.push(domains.length === 1 ? domains[0] : `${domains.length} 个域名`)
+  return `已禁止：${parts.join('、')}`
+}
+
+function parseDenyLines(text) {
+  return String(text || '').split(/[\s,;]+/).map(s => s.trim()).filter(Boolean)
 }
 
 function cardDate(ts) {
@@ -137,6 +165,166 @@ function Metric({ label, value, danger, plain, tone }) {
   )
 }
 
+function UserRulesModal({ user, onClose, onSaved }) {
+  const toast = useToast()
+  const [preset, setPreset] = useState(user.sub_rule_preset || '')
+  const [cats, setCats] = useState(Array.isArray(user.sub_rule_categories) ? user.sub_rule_categories : [])
+  const [catalog, setCatalog] = useState([])
+  const [globalPreset, setGlobalPreset] = useState('balanced')
+  const [globalCats, setGlobalCats] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    api.get('/settings').then(d => {
+      const gp = d.sub_rule_preset || 'balanced'
+      const list = Array.isArray(d.sub_rule_catalog) ? d.sub_rule_catalog : []
+      const gc = Array.isArray(d.sub_rule_categories) ? d.sub_rule_categories : catsForPreset(gp, list)
+      setCatalog(list)
+      setGlobalPreset(gp)
+      setGlobalCats(gc)
+      const p = user.sub_rule_preset || ''
+      setPreset(p)
+      if (!p) setCats(gc)
+      else if (p === 'custom') setCats(Array.isArray(user.sub_rule_categories) ? user.sub_rule_categories : [])
+      else setCats(catsForPreset(p, list))
+      setReady(true)
+    }).catch(e => toast(e.message, 'error'))
+  }, [user])
+
+  const pickPreset = (id) => {
+    setPreset(id)
+    if (!id) setCats(globalCats)
+    else if (id !== 'custom') setCats(catsForPreset(id, catalog))
+  }
+
+  const toggle = (name) => {
+    setPreset('custom')
+    setCats(prev => prev.includes(name) ? prev.filter(x => x !== name) : [...prev, name])
+  }
+
+  const save = async () => {
+    setBusy(true)
+    try {
+      await api.put(`/users/${user.id}`, {
+        sub_rule_preset: preset,
+        sub_rule_categories: preset ? cats : [],
+      })
+      toast('已保存')
+      onSaved()
+      onClose()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <Modal open title={`${user.username} 的分流规则`} onClose={onClose} size="lg" footer={
+      <>
+        <button type="button" className="btn-ghost" onClick={onClose}>取消</button>
+        <button type="button" className="btn-primary" disabled={busy || !ready} onClick={save}>{busy ? '保存中…' : '保存'}</button>
+      </>
+    }>
+      <div className="space-y-4">
+        <p className="text-[12.5px] text-ink-mut leading-relaxed">
+          只改这个用户的 Clash Meta 与 sing-box 订阅。跟随全局则用侧栏「订阅」里的规则。节点仍由套餐决定，通用 URI 不受影响。
+        </p>
+        {!preset ? (
+          <p className="text-[12px] text-ink-mut">当前全局：{presetLabel(globalPreset)}，{globalCats.length} 类。点规则会变成这个用户自己的自定义。</p>
+        ) : null}
+        <SubRulePicker
+          preset={preset}
+          cats={cats}
+          catalog={catalog}
+          onPreset={pickPreset}
+          onToggle={toggle}
+          items={userRulePresets}
+        />
+      </div>
+    </Modal>
+  )
+}
+
+function UserDenyModal({ user, onClose, onSaved }) {
+  const toast = useToast()
+  const [catalog, setCatalog] = useState(siteDenyFallback)
+  const [cats, setCats] = useState(Array.isArray(user.site_deny_categories) ? user.site_deny_categories : [])
+  const [custom, setCustom] = useState(Array.isArray(user.site_deny_domains) ? user.site_deny_domains.join('\n') : '')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    api.get('/settings').then(d => {
+      const list = Array.isArray(d.site_deny_catalog) && d.site_deny_catalog.length ? d.site_deny_catalog : siteDenyFallback
+      setCatalog(list)
+    }).catch(() => setCatalog(siteDenyFallback))
+  }, [user])
+
+  const toggle = (name) => {
+    setCats(prev => prev.includes(name) ? prev.filter(x => x !== name) : [...prev, name])
+  }
+
+  const save = async () => {
+    const domains = parseDenyLines(custom)
+    if (domains.length > 50) {
+      toast('自定义域名最多 50 个', 'error')
+      return
+    }
+    setBusy(true)
+    try {
+      await api.put(`/users/${user.id}`, {
+        site_deny_categories: cats,
+        site_deny_domains: domains,
+      })
+      toast('已保存，节点立刻生效')
+      onSaved()
+      onClose()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <Modal open title={`${user.username} 的访问限制`} onClose={onClose} size="lg" footer={
+      <>
+        <button type="button" className="btn-ghost" onClick={onClose}>取消</button>
+        <button type="button" className="btn-primary" disabled={busy} onClick={save}>{busy ? '保存中…' : '保存'}</button>
+      </>
+    }>
+      <div className="space-y-4">
+        <p className="text-[12.5px] text-ink-mut leading-relaxed">
+          在节点上拦截，Clash、v2rayN、URI 都生效，不用更新订阅。已建立的连接可能要重连。禁站对 Mieru 无效。
+        </p>
+        <div>
+          <div className="kicker mb-2">禁止访问</div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {catalog.map(c => {
+              const on = cats.includes(c.name)
+              return (
+                <button
+                  key={c.name}
+                  type="button"
+                  className={`node-pick ${on ? 'is-on' : ''}`}
+                  onClick={() => toggle(c.name)}
+                >
+                  <span className={`node-check ${on ? 'is-on' : ''}`}>{on ? '✓' : ''}</span>
+                  <span className="text-[13px] leading-snug">{c.label}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+        <Field label="自定义域名" hint="每行一个，域名或 IP。最多 50 个。">
+          <textarea
+            className="input-field"
+            rows={5}
+            placeholder={"instagram.com\n1.1.1.1"}
+            value={custom}
+            onChange={e => setCustom(e.target.value)}
+          />
+        </Field>
+      </div>
+    </Modal>
+  )
+}
+
 export default function Users() {
   const toast = useToast()
   const dialog = useDialog()
@@ -165,6 +353,8 @@ export default function Users() {
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkPkg, setBulkPkg] = useState('')
   const [bulkDays, setBulkDays] = useState(30)
+  const [ruleUser, setRuleUser] = useState(null)
+  const [denyUser, setDenyUser] = useState(null)
 
   const load = async () => {
     try {
@@ -523,6 +713,8 @@ export default function Users() {
                     <MoreMenu iconOnly items={[
                       { label: '编辑', onSelect: () => openEdit(u) },
                       { label: '订阅', onSelect: () => setSubUser(u) },
+                      { label: '分流规则', onSelect: () => setRuleUser(u) },
+                      { label: '访问限制', onSelect: () => setDenyUser(u) },
                       { label: '预览节点', onSelect: () => openPreview(u) },
                       { label: '复制名片', onSelect: () => copyCard(u) },
                       { label: '重置密码', onSelect: () => resetPassword(u) },
@@ -634,6 +826,20 @@ export default function Users() {
           )}
         </form>
       </Modal>
+      {ruleUser ? (
+        <UserRulesModal
+          user={ruleUser}
+          onClose={() => setRuleUser(null)}
+          onSaved={load}
+        />
+      ) : null}
+      {denyUser ? (
+        <UserDenyModal
+          user={denyUser}
+          onClose={() => setDenyUser(null)}
+          onSaved={load}
+        />
+      ) : null}
       <Modal open={!!subUser} title={subUser ? `${subUser.username} 的订阅` : '订阅'} onClose={() => setSubUser(null)} wide footer={
         <>
           <button type="button" className="btn-ghost" onClick={() => subUser && rotate(subUser)}>重置令牌</button>

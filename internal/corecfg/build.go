@@ -57,13 +57,14 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 	// already loaded them.
 
 	speeds := loadUserSpeeds(d, clients)
+	denies := loadUserSiteDenies(d, clients)
 	apiPort := pickAPIPort(ins, XrayAPIPort)
 	sbPort := pickAPIPort(ins, SingboxAPIPort, apiPort)
-	xray, err := buildXray(ins, clients, certs, byID, apiPort, speeds)
+	xray, err := buildXray(ins, clients, certs, byID, apiPort, speeds, denies)
 	if err != nil {
 		return nil, err
 	}
-	sb, err := buildSingbox(ins, clients, certs, byID, sbPort, speeds)
+	sb, err := buildSingbox(ins, clients, certs, byID, sbPort, speeds, denies)
 	if err != nil {
 		return nil, err
 	}

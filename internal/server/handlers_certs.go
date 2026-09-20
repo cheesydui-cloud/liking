@@ -379,6 +379,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"sub_rule_preset":     preset,
 		"sub_rule_categories": cats,
 		"sub_rule_catalog":    corecfg.SubRuleCatalogPublic(),
+		"site_deny_catalog":   corecfg.SiteDenyCatalogPublic(),
 	})
 }
 
