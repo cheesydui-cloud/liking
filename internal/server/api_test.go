@@ -1600,8 +1600,17 @@ func TestCertsAndSettings(t *testing.T) {
 		t.Fatalf("sub rules %+v", st["sub_rule_preset"])
 	}
 	denyCat, _ := st["site_deny_catalog"].([]any)
-	if len(denyCat) < 3 {
+	if len(denyCat) < 8 {
 		t.Fatalf("site deny catalog %+v", st["site_deny_catalog"])
+	}
+	catNames := map[string]bool{}
+	for _, raw := range denyCat {
+		m, _ := raw.(map[string]any)
+		name, _ := m["name"].(string)
+		catNames[name] = true
+	}
+	if !catNames["speedtest"] || !catNames["iplookup"] || !catNames["openai"] {
+		t.Fatalf("catalog names %+v", catNames)
 	}
 	if _, ok := st["cf_api_token"]; ok {
 		t.Fatal("token leaked")
@@ -3217,6 +3226,7 @@ func TestUserSiteDeny(t *testing.T) {
 			Username           string   `json:"username"`
 			SiteDenyCategories []string `json:"site_deny_categories"`
 			SiteDenyDomains    []string `json:"site_deny_domains"`
+			SiteFilterMode     string   `json:"site_filter_mode"`
 		} `json:"user"`
 	}
 
@@ -3231,10 +3241,13 @@ func TestUserSiteDeny(t *testing.T) {
 	if len(edited.User.SiteDenyDomains) != 2 || edited.User.SiteDenyDomains[0] != "www.instagram.com" || edited.User.SiteDenyDomains[1] != "10.0.0.0/8" {
 		t.Fatalf("domains %+v", edited.User.SiteDenyDomains)
 	}
+	if edited.User.SiteFilterMode != "deny" {
+		t.Fatalf("compat mode %q", edited.User.SiteFilterMode)
+	}
 
 	res = putJSON(userPath, map[string]any{"enabled": true})
 	decodeRes(t, res, &edited)
-	if edited.User.Username != "alice" || edited.User.SiteDenyCategories[0] != "google" || len(edited.User.SiteDenyDomains) != 2 {
+	if edited.User.Username != "alice" || edited.User.SiteDenyCategories[0] != "google" || len(edited.User.SiteDenyDomains) != 2 || edited.User.SiteFilterMode != "deny" {
 		t.Fatalf("partial wiped deny %+v", edited.User)
 	}
 
@@ -3260,7 +3273,39 @@ func TestUserSiteDeny(t *testing.T) {
 
 	res = putJSON(userPath, map[string]any{"site_deny_categories": []string{}, "site_deny_domains": []string{}})
 	decodeRes(t, res, &edited)
-	if len(edited.User.SiteDenyCategories) != 0 || len(edited.User.SiteDenyDomains) != 0 {
+	if len(edited.User.SiteDenyCategories) != 0 || len(edited.User.SiteDenyDomains) != 0 || edited.User.SiteFilterMode != "" {
 		t.Fatalf("clear %+v", edited.User)
+	}
+
+	res = putJSON(userPath, map[string]any{"site_filter_mode": "allow"})
+	if res.StatusCode != 400 {
+		t.Fatalf("empty allow %d", res.StatusCode)
+	}
+	io.ReadAll(res.Body)
+	res.Body.Close()
+
+	res = putJSON(userPath, map[string]any{"site_filter_mode": "nope", "site_deny_categories": []string{"tiktok"}})
+	if res.StatusCode != 400 {
+		t.Fatalf("bad mode %d", res.StatusCode)
+	}
+	io.ReadAll(res.Body)
+	res.Body.Close()
+
+	res = putJSON(userPath, map[string]any{
+		"site_filter_mode":     "allow",
+		"site_deny_categories": []string{"speedtest", "iplookup", "nope"},
+	})
+	decodeRes(t, res, &edited)
+	if edited.User.SiteFilterMode != "allow" {
+		t.Fatalf("allow mode %q", edited.User.SiteFilterMode)
+	}
+	if len(edited.User.SiteDenyCategories) != 2 || edited.User.SiteDenyCategories[0] != "speedtest" || edited.User.SiteDenyCategories[1] != "iplookup" {
+		t.Fatalf("allow cats %+v", edited.User.SiteDenyCategories)
+	}
+
+	res = putJSON(userPath, map[string]any{"site_filter_mode": ""})
+	decodeRes(t, res, &edited)
+	if edited.User.SiteFilterMode != "" || len(edited.User.SiteDenyCategories) != 0 {
+		t.Fatalf("explicit off %+v", edited.User)
 	}
 }

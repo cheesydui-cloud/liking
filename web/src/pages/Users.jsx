@@ -96,6 +96,21 @@ const siteDenyFallback = [
   { name: 'google', label: '谷歌' },
   { name: 'youtube', label: '油管' },
   { name: 'tiktok', label: 'TikTok' },
+  { name: 'facebook', label: 'Facebook' },
+  { name: 'instagram', label: 'Instagram' },
+  { name: 'twitter', label: 'Twitter / X' },
+  { name: 'telegram', label: 'Telegram' },
+  { name: 'discord', label: 'Discord' },
+  { name: 'netflix', label: 'Netflix' },
+  { name: 'openai', label: 'ChatGPT' },
+  { name: 'speedtest', label: '测速' },
+  { name: 'iplookup', label: 'IP 查询' },
+]
+
+const siteFilterTabs = [
+  ['', '不限制'],
+  ['deny', '禁止这些'],
+  ['allow', '只允许这些'],
 ]
 
 function denyCatLabel(name, catalog) {
@@ -103,13 +118,26 @@ function denyCatLabel(name, catalog) {
   return hit ? hit.label : name
 }
 
+function siteFilterModeOf(u) {
+  const m = String(u?.site_filter_mode || '')
+  if (m === 'allow' || m === 'deny') return m
+  if (m === 'off') return ''
+  const cats = Array.isArray(u?.site_deny_categories) ? u.site_deny_categories : []
+  const domains = Array.isArray(u?.site_deny_domains) ? u.site_deny_domains : []
+  if (cats.length || domains.length) return 'deny'
+  return ''
+}
+
 function denyBadgeText(u) {
+  const mode = siteFilterModeOf(u)
+  if (!mode) return ''
   const cats = Array.isArray(u?.site_deny_categories) ? u.site_deny_categories : []
   const domains = Array.isArray(u?.site_deny_domains) ? u.site_deny_domains : []
   if (!cats.length && !domains.length) return ''
   const parts = cats.map(n => denyCatLabel(n))
   if (domains.length) parts.push(domains.length === 1 ? domains[0] : `${domains.length} 个域名`)
-  return `已禁止：${parts.join('、')}`
+  const joined = parts.join('、')
+  return mode === 'allow' ? `只允许：${joined}` : `已禁止：${joined}`
 }
 
 function parseDenyLines(text) {
@@ -247,6 +275,7 @@ function UserRulesModal({ user, onClose, onSaved }) {
 function UserDenyModal({ user, onClose, onSaved }) {
   const toast = useToast()
   const [catalog, setCatalog] = useState(siteDenyFallback)
+  const [mode, setMode] = useState(() => siteFilterModeOf(user))
   const [cats, setCats] = useState(Array.isArray(user.site_deny_categories) ? user.site_deny_categories : [])
   const [custom, setCustom] = useState(Array.isArray(user.site_deny_domains) ? user.site_deny_domains.join('\n') : '')
   const [busy, setBusy] = useState(false)
@@ -263,16 +292,21 @@ function UserDenyModal({ user, onClose, onSaved }) {
   }
 
   const save = async () => {
-    const domains = parseDenyLines(custom)
-    if (domains.length > 50) {
+    const domains = mode ? parseDenyLines(custom) : []
+    if (mode && domains.length > 50) {
       toast('自定义域名最多 50 个', 'error')
+      return
+    }
+    if (mode === 'allow' && !cats.length && !domains.length) {
+      toast('只允许至少选一个网站', 'error')
       return
     }
     setBusy(true)
     try {
       await api.put(`/users/${user.id}`, {
-        site_deny_categories: cats,
-        site_deny_domains: domains,
+        site_filter_mode: mode,
+        site_deny_categories: mode ? cats : [],
+        site_deny_domains: mode ? domains : [],
       })
       toast('已保存，节点立刻生效')
       onSaved()
@@ -280,6 +314,10 @@ function UserDenyModal({ user, onClose, onSaved }) {
     } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
   }
+
+  const hint = mode === 'allow'
+    ? '只放行勾选的网站，其它一律拦截。测活和常用 DNS 会自动放行。Clash、v2rayN、URI 都生效，不用更新订阅。已建立的连接可能要重连。访问限制对 Mieru 无效。'
+    : '在节点上拦截，Clash、v2rayN、URI 都生效，不用更新订阅。已建立的连接可能要重连。访问限制对 Mieru 无效。'
 
   return (
     <Modal open title={`${user.username} 的访问限制`} onClose={onClose} size="lg" footer={
@@ -289,37 +327,42 @@ function UserDenyModal({ user, onClose, onSaved }) {
       </>
     }>
       <div className="space-y-4">
-        <p className="text-[12.5px] text-ink-mut leading-relaxed">
-          在节点上拦截，Clash、v2rayN、URI 都生效，不用更新订阅。已建立的连接可能要重连。禁站对 Mieru 无效。
-        </p>
-        <div>
-          <div className="kicker mb-2">禁止访问</div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {catalog.map(c => {
-              const on = cats.includes(c.name)
-              return (
-                <button
-                  key={c.name}
-                  type="button"
-                  className={`node-pick ${on ? 'is-on' : ''}`}
-                  onClick={() => toggle(c.name)}
-                >
-                  <span className={`node-check ${on ? 'is-on' : ''}`}>{on ? '✓' : ''}</span>
-                  <span className="text-[13px] leading-snug">{c.label}</span>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-        <Field label="自定义域名" hint="每行一个，域名或 IP。最多 50 个。">
-          <textarea
-            className="input-field"
-            rows={5}
-            placeholder={"instagram.com\n1.1.1.1"}
-            value={custom}
-            onChange={e => setCustom(e.target.value)}
-          />
-        </Field>
+        <p className="text-[12.5px] text-ink-mut leading-relaxed">{hint}</p>
+        <FilterTabs value={mode} onChange={setMode} items={siteFilterTabs} />
+        {mode ? (
+          <>
+            <div>
+              <div className="kicker mb-2">{mode === 'allow' ? '只允许访问' : '禁止访问'}</div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {catalog.map(c => {
+                  const on = cats.includes(c.name)
+                  return (
+                    <button
+                      key={c.name}
+                      type="button"
+                      className={`node-pick ${on ? 'is-on' : ''}`}
+                      onClick={() => toggle(c.name)}
+                    >
+                      <span className={`node-check ${on ? 'is-on' : ''}`}>{on ? '✓' : ''}</span>
+                      <span className="text-[13px] leading-snug">{c.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <Field label="自定义域名" hint="每行一个，域名或 IP。最多 50 个。">
+              <textarea
+                className="input-field"
+                rows={5}
+                placeholder={"instagram.com\n1.1.1.1"}
+                value={custom}
+                onChange={e => setCustom(e.target.value)}
+              />
+            </Field>
+          </>
+        ) : (
+          <p className="text-[12px] text-ink-mut">这个用户走节点时不拦网站。</p>
+        )}
       </div>
     </Modal>
   )

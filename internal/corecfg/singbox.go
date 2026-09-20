@@ -59,7 +59,7 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 		return nil, nil
 	}
 
-	// Deny, then chain, then speed. Chain catch-all would otherwise steal denied users.
+	// Deny, then allow-pass, allow-block, then chain. Catch-all would steal filtered users.
 	var chainRules []any
 	var speedRules []any
 	for _, in := range inbounds {
@@ -89,7 +89,10 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 			})
 		}
 	}
+	pass, block := collectSiteAllowGroups(inbounds, clients, denies, speeds, CoreSingbox)
 	routeRules := singSiteDenyRules(collectSiteDenyGroups(inbounds, clients, denies, CoreSingbox))
+	routeRules = append(routeRules, singSiteAllowPassRules(pass)...)
+	routeRules = append(routeRules, singSiteAllowBlockRules(block)...)
 	routeRules = append(routeRules, chainRules...)
 	routeRules = append(routeRules, speedRules...)
 	final := "direct"

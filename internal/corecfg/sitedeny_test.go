@@ -308,6 +308,285 @@ func TestBuildSiteDenySingbox(t *testing.T) {
 	}
 }
 
+func TestSiteDenyCatalogSpeedtestAndIPLookup(t *testing.T) {
+	pub := SiteDenyCatalogPublic()
+	got := map[string]string{}
+	for _, c := range pub {
+		got[c["name"]] = c["label"]
+	}
+	if got["speedtest"] != "测速" || got["iplookup"] != "IP 查询" {
+		t.Fatalf("catalog %+v", pub)
+	}
+	if got["openai"] != "ChatGPT" || got["telegram"] != "Telegram" {
+		t.Fatalf("extra cats %+v", pub)
+	}
+	d, _ := ResolveSiteDeny(SiteDeny{Categories: []string{"speedtest"}})
+	if !hasStr(d, "speedtest.net") || !hasStr(d, "fast.com") || !hasStr(d, "speed.cloudflare.com") {
+		t.Fatalf("speedtest %+v", d)
+	}
+	ipd, _ := ResolveSiteDeny(SiteDeny{Categories: []string{"iplookup"}})
+	if !hasStr(ipd, "ipinfo.io") || !hasStr(ipd, "icanhazip.com") || !hasStr(ipd, "cip.cc") {
+		t.Fatalf("iplookup %+v", ipd)
+	}
+}
+
+func TestResolveSiteAllowExtras(t *testing.T) {
+	d, ips := ResolveSiteDeny(SiteDeny{Mode: SiteFilterAllow, Categories: []string{"tiktok"}})
+	if !hasStr(d, "tiktok.com") || !hasStr(d, clientHealthHost()) {
+		t.Fatalf("allow domains %+v", d)
+	}
+	if hasStr(d, "google.com") {
+		t.Fatalf("tiktok allow leaked google %+v", d)
+	}
+	if !hasStr(ips, "1.1.1.1/32") || !hasStr(ips, "8.8.8.8/32") {
+		t.Fatalf("allow dns %+v", ips)
+	}
+	gd, _ := ResolveSiteDeny(SiteDeny{Mode: SiteFilterDeny, Categories: []string{"google"}})
+	if hasStr(gd, clientHealthHost()) {
+		t.Fatalf("deny should not add health %+v", gd)
+	}
+}
+
+func TestCollectSiteAllowGroups(t *testing.T) {
+	in := &db.Inbound{ID: 7, Core: CoreXray, Enabled: true, Profile: ProfileVLESSRealityVision, LineKind: "direct"}
+	c1 := &db.Client{UserID: 1, Email: "u1.i7", Enabled: true}
+	c2 := &db.Client{UserID: 2, Email: "u2.i7", Enabled: true}
+	c3 := &db.Client{UserID: 3, Email: "u3.i7", Enabled: true}
+	filters := map[int64]SiteDeny{
+		1: {Mode: SiteFilterAllow, Categories: []string{"tiktok"}},
+		2: {Mode: SiteFilterAllow, Categories: []string{"tiktok"}},
+		3: {Mode: SiteFilterDeny, Categories: []string{"google"}},
+	}
+	pass, block := collectSiteAllowGroups([]*db.Inbound{in}, map[int64][]*db.Client{7: {c1, c2, c3}}, filters, nil, CoreXray)
+	if len(pass) != 1 {
+		t.Fatalf("pass %d %+v", len(pass), pass)
+	}
+	if pass[0].Outbound != "direct" {
+		t.Fatalf("ob %s", pass[0].Outbound)
+	}
+	if len(pass[0].Users) != 2 {
+		t.Fatalf("pass users %+v", pass[0].Users)
+	}
+	joined := strings.Join(pass[0].Users, ",")
+	if !strings.Contains(joined, "u1.i7") || !strings.Contains(joined, "u2.i7") || strings.Contains(joined, "u3.i7") {
+		t.Fatalf("users %s", joined)
+	}
+	if !hasStr(pass[0].Domains, "tiktok.com") || !hasStr(pass[0].Domains, clientHealthHost()) {
+		t.Fatalf("pass domains %+v", pass[0].Domains)
+	}
+	if len(block) != 1 || len(block[0].Users) != 2 {
+		t.Fatalf("block %+v", block)
+	}
+
+	speeds := map[int64]int64{1: 10}
+	pass, block = collectSiteAllowGroups([]*db.Inbound{in}, map[int64][]*db.Client{7: {c1, c2}}, filters, speeds, CoreXray)
+	if len(pass) != 2 {
+		t.Fatalf("speed split %d %+v", len(pass), pass)
+	}
+	obs := map[string]int{}
+	for _, g := range pass {
+		obs[g.Outbound]++
+		if g.Outbound != "direct" && !strings.HasPrefix(g.Outbound, "limit-") {
+			t.Fatalf("outbound %s", g.Outbound)
+		}
+	}
+	if obs["direct"] != 1 || len(obs) != 2 {
+		t.Fatalf("obs %+v", obs)
+	}
+	if len(block) != 1 {
+		t.Fatalf("block after split %+v", block)
+	}
+
+	denyOnly := collectSiteDenyGroups([]*db.Inbound{in}, map[int64][]*db.Client{7: {c1, c2, c3}}, filters, CoreXray)
+	if len(denyOnly) != 1 || !hasStr(denyOnly[0].Domains, "google.com") {
+		t.Fatalf("deny groups %+v", denyOnly)
+	}
+}
+
+func TestBuildSiteAllowXrayOrder(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	u, in, _ := provisionDenyFixture(t, d, ProfileVLESSRealityVision, "direct", 443)
+	u.SiteFilterMode = SiteFilterAllow
+	u.SiteDenyCategories = []string{"tiktok"}
+	if err := db.UpdateUser(d, u); err != nil {
+		t.Fatal(err)
+	}
+	b, err := Build(d, in.ServerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var xray map[string]any
+	if err := json.Unmarshal(b.Apply.Xray, &xray); err != nil {
+		t.Fatal(err)
+	}
+	c, err := db.GetClient(d, in.ID, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routing, _ := xray["routing"].(map[string]any)
+	rules, _ := routing["rules"].([]any)
+	apiAt, passAt, blockAt, directAt := -1, -1, -1, -1
+	var passDomains []any
+	for i, raw := range rules {
+		m, _ := raw.(map[string]any)
+		tags, _ := m["inboundTag"].([]any)
+		if len(tags) == 1 && tags[0] == "api" {
+			apiAt = i
+			continue
+		}
+		if m["outboundTag"] == "direct" && m["domain"] != nil && passAt < 0 {
+			passAt = i
+			passDomains, _ = m["domain"].([]any)
+			continue
+		}
+		if m["outboundTag"] == "block" && m["domain"] == nil && m["ip"] == nil && blockAt < 0 {
+			users, _ := m["user"].([]any)
+			if len(users) == 1 && users[0] == c.Email {
+				blockAt = i
+			}
+			continue
+		}
+		if m["outboundTag"] == "direct" && m["user"] == nil && len(tags) == 1 && tags[0] == inboundTag(in.ID) {
+			directAt = i
+		}
+	}
+	if apiAt != 0 || passAt < 0 || blockAt < 0 || directAt < 0 || !(apiAt < passAt && passAt < blockAt && blockAt < directAt) {
+		t.Fatalf("order api=%d pass=%d block=%d direct=%d", apiAt, passAt, blockAt, directAt)
+	}
+	joined := fmtJoin(passDomains)
+	if !strings.Contains(joined, "domain:tiktok.com") || !strings.Contains(joined, "domain:"+clientHealthHost()) {
+		t.Fatalf("pass domains %s", joined)
+	}
+	if strings.Contains(joined, "youtube.com") {
+		t.Fatalf("pass leaked youtube %s", joined)
+	}
+	for _, raw := range rules {
+		m, _ := raw.(map[string]any)
+		if m["domain"] != nil && m["ip"] != nil {
+			t.Fatal("domain and ip must be separate")
+		}
+	}
+}
+
+func TestBuildSiteAllowBeforeChain(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	srv, err := db.CreateServer(d, "n1", "10.0.0.1", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &db.Inbound{
+		ServerID: srv.ID, Name: "vless-in", Profile: ProfileVLESSRealityVision,
+		Port: 8443, Enabled: true, LineKind: "chain",
+		ExitURI:  "vless://11111111-1111-4111-8111-111111111111@203.0.113.10:443?encryption=none&security=reality&sni=www.microsoft.com&fp=chrome&pbk=abc&sid=abcd&type=tcp&flow=xtls-rprx-vision#ext",
+		Settings: "{}",
+	}
+	if err := Normalize(in, nil); err != nil {
+		t.Fatal(err)
+	}
+	created, err := db.CreateInbound(d, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := provisionOnInbound(t, d, srv.ID, created)
+	u.SiteFilterMode = SiteFilterAllow
+	u.SiteDenyCategories = []string{"speedtest"}
+	if err := db.UpdateUser(d, u); err != nil {
+		t.Fatal(err)
+	}
+	b, err := Build(d, srv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var xray map[string]any
+	if err := json.Unmarshal(b.Apply.Xray, &xray); err != nil {
+		t.Fatal(err)
+	}
+	routing, _ := xray["routing"].(map[string]any)
+	rules, _ := routing["rules"].([]any)
+	tag := inboundTag(created.ID)
+	passAt, blockAt, chainAt := -1, -1, -1
+	wantOB := outboundTag(created.ID)
+	for i, raw := range rules {
+		m, _ := raw.(map[string]any)
+		tags, _ := m["inboundTag"].([]any)
+		if !hasTag(tags, tag) {
+			continue
+		}
+		if m["outboundTag"] == wantOB && m["domain"] != nil && passAt < 0 {
+			passAt = i
+			continue
+		}
+		if m["outboundTag"] == "block" && m["domain"] == nil && m["ip"] == nil && blockAt < 0 {
+			blockAt = i
+			continue
+		}
+		if m["user"] == nil && m["outboundTag"] != "block" && chainAt < 0 {
+			chainAt = i
+		}
+	}
+	if passAt < 0 || blockAt < 0 || chainAt < 0 || !(passAt < blockAt && blockAt < chainAt) {
+		t.Fatalf("pass=%d block=%d chain=%d rules=%v", passAt, blockAt, chainAt, rules)
+	}
+}
+
+func TestBuildSiteAllowSingbox(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	u, in, _ := provisionDenyFixture(t, d, ProfileSOCKS5, "direct", 1080)
+	u.SiteFilterMode = SiteFilterAllow
+	u.SiteDenyCategories = []string{"iplookup"}
+	u.SiteDenyDomains = []string{"only.example"}
+	if err := db.UpdateUser(d, u); err != nil {
+		t.Fatal(err)
+	}
+	b, err := Build(d, in.ServerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.Apply.Singbox) == 0 {
+		t.Fatal("singbox")
+	}
+	var sb map[string]any
+	if err := json.Unmarshal(b.Apply.Singbox, &sb); err != nil {
+		t.Fatal(err)
+	}
+	route, _ := sb["route"].(map[string]any)
+	rules, _ := route["rules"].([]any)
+	if len(rules) < 2 {
+		t.Fatalf("rules %+v", rules)
+	}
+	passAt, blockAt := -1, -1
+	for i, raw := range rules {
+		m, _ := raw.(map[string]any)
+		if m["outbound"] == "direct" && m["domain_suffix"] != nil && passAt < 0 {
+			passAt = i
+			suf, _ := m["domain_suffix"].([]any)
+			joined := fmtJoin(suf)
+			if !strings.Contains(joined, "ipinfo.io") || !strings.Contains(joined, "only.example") || !strings.Contains(joined, clientHealthHost()) {
+				t.Fatalf("suffix %s", joined)
+			}
+			continue
+		}
+		if m["action"] == "reject" && m["domain_suffix"] == nil && m["ip_cidr"] == nil && blockAt < 0 {
+			blockAt = i
+		}
+	}
+	if passAt < 0 || blockAt < 0 || passAt >= blockAt {
+		t.Fatalf("pass=%d block=%d rules=%v", passAt, blockAt, rules)
+	}
+}
+
 func TestClientHealthCheckURL(t *testing.T) {
 	if strings.Contains(ClientHealthCheckURL, "gstatic") || strings.Contains(ClientHealthCheckURL, "google") {
 		t.Fatalf("health %s", ClientHealthCheckURL)
@@ -403,4 +682,13 @@ func fmtJoin(v []any) string {
 func toStr(v any) string {
 	s, _ := v.(string)
 	return s
+}
+
+func hasStr(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }

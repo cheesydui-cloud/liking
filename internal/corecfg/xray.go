@@ -108,7 +108,11 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 		})
 	}
 
+	// Deny, then allow-pass, allow-block, then chain. Catch-all would steal filtered users.
+	pass, block := collectSiteAllowGroups(inbounds, clients, denies, speeds, CoreXray)
 	rules = append(rules, xraySiteDenyRules(collectSiteDenyGroups(inbounds, clients, denies, CoreXray))...)
+	rules = append(rules, xraySiteAllowPassRules(pass)...)
+	rules = append(rules, xraySiteAllowBlockRules(block)...)
 	rules = append(rules, chainRules...)
 	rules = append(rules, speedRules...)
 	rules = append(rules, directRules...)

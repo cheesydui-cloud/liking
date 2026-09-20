@@ -184,6 +184,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		SubRuleCategories  *[]string       `json:"sub_rule_categories"`
 		SiteDenyCategories *[]string       `json:"site_deny_categories"`
 		SiteDenyDomains    *[]string       `json:"site_deny_domains"`
+		SiteFilterMode     *string         `json:"site_filter_mode"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -277,22 +278,51 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			u.SubRuleCategories = corecfg.NormalizeCategoryNames(*req.SubRuleCategories)
 		}
 	}
-	if req.SiteDenyCategories != nil || req.SiteDenyDomains != nil {
+	if req.SiteFilterMode != nil || req.SiteDenyCategories != nil || req.SiteDenyDomains != nil {
+		mode := u.SiteFilterMode
 		cats := u.SiteDenyCategories
 		doms := u.SiteDenyDomains
+		if req.SiteFilterMode != nil {
+			mode = *req.SiteFilterMode
+		}
 		if req.SiteDenyCategories != nil {
 			cats = *req.SiteDenyCategories
 		}
 		if req.SiteDenyDomains != nil {
 			doms = *req.SiteDenyDomains
 		}
+		nmode, err := corecfg.NormalizeSiteFilterMode(mode)
+		if err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		deny, err := corecfg.NormalizeSiteDeny(cats, doms)
 		if err != nil {
 			jsonErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		u.SiteDenyCategories = deny.Categories
-		u.SiteDenyDomains = deny.Domains
+		if req.SiteFilterMode != nil && nmode == "" {
+			u.SiteFilterMode = ""
+			u.SiteDenyCategories = []string{}
+			u.SiteDenyDomains = []string{}
+		} else {
+			if nmode == "" && !deny.Empty() {
+				nmode = corecfg.SiteFilterDeny
+			}
+			if nmode == corecfg.SiteFilterAllow && deny.Empty() {
+				jsonErr(w, http.StatusBadRequest, "只允许至少选一个网站")
+				return
+			}
+			if nmode == corecfg.SiteFilterDeny && deny.Empty() {
+				nmode = ""
+			}
+			if nmode == "" {
+				deny = corecfg.SiteDeny{}
+			}
+			u.SiteFilterMode = nmode
+			u.SiteDenyCategories = deny.Categories
+			u.SiteDenyDomains = deny.Domains
+		}
 	}
 	if err := db.UpdateUser(s.DB, u); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {

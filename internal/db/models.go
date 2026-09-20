@@ -32,6 +32,7 @@ type User struct {
 	SubRuleCategories  []string `json:"sub_rule_categories"`
 	SiteDenyCategories []string `json:"site_deny_categories"`
 	SiteDenyDomains    []string `json:"site_deny_domains"`
+	SiteFilterMode     string   `json:"site_filter_mode"`
 }
 
 type Server struct {

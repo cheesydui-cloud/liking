@@ -13,8 +13,13 @@ import (
 
 const MaxSiteDenyCustom = 50
 
+const (
+	SiteFilterDeny  = "deny"
+	SiteFilterAllow = "allow"
+)
+
 // ClientHealthCheckURL is Clash / sing-box url-test. Not Google, so a Google
-// deny still lets the node look alive.
+// deny still lets the node look alive. Allow-only always passes this host.
 const ClientHealthCheckURL = "https://cp.cloudflare.com/"
 
 var siteDenyCatalog = []struct {
@@ -24,6 +29,15 @@ var siteDenyCatalog = []struct {
 	{Name: "google", Label: "谷歌"},
 	{Name: "youtube", Label: "油管"},
 	{Name: "tiktok", Label: "TikTok"},
+	{Name: "facebook", Label: "Facebook"},
+	{Name: "instagram", Label: "Instagram"},
+	{Name: "twitter", Label: "Twitter / X"},
+	{Name: "telegram", Label: "Telegram"},
+	{Name: "discord", Label: "Discord"},
+	{Name: "netflix", Label: "Netflix"},
+	{Name: "openai", Label: "ChatGPT"},
+	{Name: "speedtest", Label: "测速"},
+	{Name: "iplookup", Label: "IP 查询"},
 }
 
 var siteDenyDomains = map[string][]string{
@@ -51,6 +65,46 @@ var siteDenyDomains = map[string][]string{
 		"ttlivecdn.com", "tiktokrow-cdn.com", "byteimg.com", "bytescm.com",
 		"bytednsdoc.com",
 	},
+	"facebook": {
+		"facebook.com", "fb.com", "fbcdn.net", "facebook.net", "messenger.com",
+		"fbsbx.com", "fb.watch", "fbcdn.com",
+	},
+	"instagram": {
+		"instagram.com", "cdninstagram.com", "ig.me",
+	},
+	"twitter": {
+		"twitter.com", "x.com", "t.co", "twimg.com", "ads-twitter.com",
+		"pscp.tv", "periscope.tv", "tweetdeck.com",
+	},
+	"telegram": {
+		"telegram.org", "t.me", "telegram.me", "telegram.dog", "tdesktop.com",
+		"telegra.ph", "telegram-cdn.org", "cdn-telegram.org",
+	},
+	"discord": {
+		"discord.com", "discordapp.com", "discord.gg", "discord.media",
+		"discordapp.net", "discordcdn.com", "discord.gift",
+	},
+	"netflix": {
+		"netflix.com", "netflix.net", "nflxvideo.net", "nflximg.net",
+		"nflxso.net", "nflxext.com",
+	},
+	"openai": {
+		"openai.com", "chatgpt.com", "chat.com", "oaistatic.com",
+		"oaiusercontent.com",
+	},
+	"speedtest": {
+		"speedtest.net", "ookla.com", "fast.com", "speed.cloudflare.com",
+		"measurementlab.net", "openspeedtest.com", "librespeed.org",
+		"speedof.me", "testmy.net", "ping.pe", "speedtest.cn", "itdog.cn",
+		"17ce.com",
+	},
+	"iplookup": {
+		"ipinfo.io", "ipify.org", "icanhazip.com", "ifconfig.me", "ifconfig.co",
+		"ip.sb", "ipapi.co", "ip-api.com", "ipwho.is", "ipwhois.io",
+		"ident.me", "ipecho.net", "seeip.org", "myip.com", "whatismyip.com",
+		"whatismyipaddress.com", "iplocation.net", "checkip.amazonaws.com",
+		"cip.cc", "ip138.com", "ipip.net", "ip.skk.moe", "ping0.cc", "ipw.cn",
+	},
 }
 
 var siteDenyIPs = map[string][]string{
@@ -60,7 +114,19 @@ var siteDenyIPs = map[string][]string{
 	},
 }
 
+// Common resolvers so v2rayN / Clash still resolve when the user is allow-only.
+var siteAllowDNS = []string{
+	"1.1.1.1/32", "1.0.0.1/32",
+	"8.8.8.8/32", "8.8.4.4/32",
+	"9.9.9.9/32", "149.112.112.112/32",
+	"223.5.5.5/32", "223.6.6.6/32",
+	"119.29.29.29/32", "114.114.114.114/32",
+	"2606:4700:4700::1111/128", "2606:4700:4700::1001/128",
+	"2001:4860:4860::8888/128", "2001:4860:4860::8844/128",
+}
+
 type SiteDeny struct {
+	Mode       string
 	Categories []string
 	Domains    []string
 }
@@ -83,6 +149,19 @@ func SiteDenyCatalogPublic() []map[string]string {
 		out = append(out, map[string]string{"name": c.Name, "label": c.Label})
 	}
 	return out
+}
+
+func NormalizeSiteFilterMode(s string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "off", "none":
+		return "", nil
+	case SiteFilterDeny:
+		return SiteFilterDeny, nil
+	case SiteFilterAllow:
+		return SiteFilterAllow, nil
+	default:
+		return "", fmt.Errorf("访问限制模式无效")
+	}
 }
 
 func NormalizeSiteDenyCategories(names []string) []string {
@@ -139,6 +218,15 @@ func siteDenyFromUser(u *db.User) SiteDeny {
 		d.Categories = NormalizeSiteDenyCategories(u.SiteDenyCategories)
 		d.Domains, _ = capDenyCustom(u.SiteDenyDomains)
 	}
+	mode, _ := NormalizeSiteFilterMode(u.SiteFilterMode)
+	if d.Empty() {
+		d.Mode = ""
+		return d
+	}
+	if mode == "" {
+		mode = SiteFilterDeny
+	}
+	d.Mode = mode
 	return d
 }
 
@@ -220,6 +308,14 @@ func isCIDR(s string) bool {
 	return err == nil
 }
 
+func clientHealthHost() string {
+	u, err := url.Parse(ClientHealthCheckURL)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(u.Hostname()))
+}
+
 func ResolveSiteDeny(s SiteDeny) (domains, ips []string) {
 	seenD := map[string]bool{}
 	seenI := map[string]bool{}
@@ -255,6 +351,12 @@ func ResolveSiteDeny(s SiteDeny) (domains, ips []string) {
 	}
 	addD(customD)
 	addI(customI)
+	if s.Mode == SiteFilterAllow {
+		if h := clientHealthHost(); h != "" {
+			addD([]string{h})
+		}
+		addI(siteAllowDNS)
+	}
 	return domains, ips
 }
 
@@ -278,7 +380,7 @@ func loadUserSiteDenies(d *sql.DB, clients map[int64][]*db.Client) map[int64]Sit
 				continue
 			}
 			sd := siteDenyFromUser(u)
-			if sd.Empty() {
+			if sd.Empty() || sd.Mode == "" {
 				continue
 			}
 			out[u.ID] = sd
@@ -300,11 +402,31 @@ func clientRouteUser(in *db.Inbound, c *db.Client) string {
 	return strings.TrimSpace(c.Email)
 }
 
+func userOutboundTag(in *db.Inbound, c *db.Client, speeds map[int64]int64) string {
+	if in != nil && in.LineKind == "chain" {
+		return outboundTag(in.ID)
+	}
+	if in != nil && directThrottle(in) {
+		if mark, ok := clientSpeedMark(c, speeds); ok {
+			return limitTag(mark)
+		}
+	}
+	return "direct"
+}
+
 type siteDenyGroup struct {
 	Tags    []string
 	Users   []string
 	Domains []string
 	IPs     []string
+}
+
+type siteAllowPassGroup struct {
+	Tags     []string
+	Users    []string
+	Domains  []string
+	IPs      []string
+	Outbound string
 }
 
 func collectSiteDenyGroups(inbounds []*db.Inbound, clients map[int64][]*db.Client, denies map[int64]SiteDeny, core string) []siteDenyGroup {
@@ -330,6 +452,12 @@ func collectSiteDenyGroups(inbounds []*db.Inbound, clients map[int64][]*db.Clien
 			}
 			d, ok := denies[c.UserID]
 			if !ok || d.Empty() {
+				continue
+			}
+			if d.Mode == SiteFilterAllow {
+				continue
+			}
+			if d.Mode != SiteFilterDeny && d.Mode != "" {
 				continue
 			}
 			key := d.key()
@@ -359,6 +487,79 @@ func collectSiteDenyGroups(inbounds []*db.Inbound, clients map[int64][]*db.Clien
 		out = append(out, siteDenyGroup{Tags: a.tags, Users: a.users, Domains: a.domains, IPs: a.ips})
 	}
 	return out
+}
+
+func collectSiteAllowGroups(inbounds []*db.Inbound, clients map[int64][]*db.Client, denies map[int64]SiteDeny, speeds map[int64]int64, core string) (pass []siteAllowPassGroup, block []siteDenyGroup) {
+	type acc struct {
+		tags     []string
+		users    []string
+		seenT    map[string]bool
+		seenU    map[string]bool
+		domains  []string
+		ips      []string
+		outbound string
+	}
+	byKey := map[string]*acc{}
+	var order []string
+	blockAcc := &acc{seenT: map[string]bool{}, seenU: map[string]bool{}}
+	for _, in := range inbounds {
+		if in == nil || !in.Enabled || in.Core != core || in.Profile == ProfilePortForward || in.Profile == ProfileMieru {
+			continue
+		}
+		tag := inboundTag(in.ID)
+		for _, c := range clients[in.ID] {
+			user := clientRouteUser(in, c)
+			if user == "" {
+				continue
+			}
+			d, ok := denies[c.UserID]
+			if !ok || d.Empty() || d.Mode != SiteFilterAllow {
+				continue
+			}
+			ob := userOutboundTag(in, c, speeds)
+			if ob == "" {
+				continue
+			}
+			key := d.key() + "\x00" + ob
+			a := byKey[key]
+			if a == nil {
+				doms, ips := ResolveSiteDeny(d)
+				if len(doms) == 0 && len(ips) == 0 {
+					continue
+				}
+				a = &acc{seenT: map[string]bool{}, seenU: map[string]bool{}, domains: doms, ips: ips, outbound: ob}
+				byKey[key] = a
+				order = append(order, key)
+			}
+			if !a.seenT[tag] {
+				a.seenT[tag] = true
+				a.tags = append(a.tags, tag)
+			}
+			if !a.seenU[user] {
+				a.seenU[user] = true
+				a.users = append(a.users, user)
+			}
+			if !blockAcc.seenT[tag] {
+				blockAcc.seenT[tag] = true
+				blockAcc.tags = append(blockAcc.tags, tag)
+			}
+			if !blockAcc.seenU[user] {
+				blockAcc.seenU[user] = true
+				blockAcc.users = append(blockAcc.users, user)
+			}
+		}
+	}
+	pass = make([]siteAllowPassGroup, 0, len(order))
+	for _, k := range order {
+		a := byKey[k]
+		pass = append(pass, siteAllowPassGroup{
+			Tags: a.tags, Users: a.users, Domains: a.domains, IPs: a.ips, Outbound: a.outbound,
+		})
+	}
+	if len(blockAcc.users) > 0 && len(blockAcc.tags) > 0 {
+		block = []siteDenyGroup{{Tags: blockAcc.tags, Users: blockAcc.users}}
+	}
+	return pass, block
 }
 
 func xraySiteDenyRules(groups []siteDenyGroup) []any {
@@ -393,6 +594,54 @@ func xraySiteDenyRules(groups []siteDenyGroup) []any {
 	return rules
 }
 
+func xraySiteAllowPassRules(groups []siteAllowPassGroup) []any {
+	var rules []any
+	for _, g := range groups {
+		if len(g.Users) == 0 || len(g.Tags) == 0 || g.Outbound == "" {
+			continue
+		}
+		if len(g.Domains) > 0 {
+			items := make([]string, 0, len(g.Domains))
+			for _, d := range g.Domains {
+				items = append(items, "domain:"+d)
+			}
+			rules = append(rules, map[string]any{
+				"type":        "field",
+				"inboundTag":  g.Tags,
+				"user":        g.Users,
+				"domain":      items,
+				"outboundTag": g.Outbound,
+			})
+		}
+		if len(g.IPs) > 0 {
+			rules = append(rules, map[string]any{
+				"type":        "field",
+				"inboundTag":  g.Tags,
+				"user":        g.Users,
+				"ip":          g.IPs,
+				"outboundTag": g.Outbound,
+			})
+		}
+	}
+	return rules
+}
+
+func xraySiteAllowBlockRules(groups []siteDenyGroup) []any {
+	var rules []any
+	for _, g := range groups {
+		if len(g.Users) == 0 || len(g.Tags) == 0 {
+			continue
+		}
+		rules = append(rules, map[string]any{
+			"type":        "field",
+			"inboundTag":  g.Tags,
+			"user":        g.Users,
+			"outboundTag": "block",
+		})
+	}
+	return rules
+}
+
 func singSiteDenyRules(groups []siteDenyGroup) []any {
 	var rules []any
 	for _, g := range groups {
@@ -415,6 +664,47 @@ func singSiteDenyRules(groups []siteDenyGroup) []any {
 				"action":    "reject",
 			})
 		}
+	}
+	return rules
+}
+
+func singSiteAllowPassRules(groups []siteAllowPassGroup) []any {
+	var rules []any
+	for _, g := range groups {
+		if len(g.Users) == 0 || len(g.Tags) == 0 || g.Outbound == "" {
+			continue
+		}
+		if len(g.Domains) > 0 {
+			rules = append(rules, map[string]any{
+				"inbound":       g.Tags,
+				"auth_user":     g.Users,
+				"domain_suffix": g.Domains,
+				"outbound":      g.Outbound,
+			})
+		}
+		if len(g.IPs) > 0 {
+			rules = append(rules, map[string]any{
+				"inbound":   g.Tags,
+				"auth_user": g.Users,
+				"ip_cidr":   g.IPs,
+				"outbound":  g.Outbound,
+			})
+		}
+	}
+	return rules
+}
+
+func singSiteAllowBlockRules(groups []siteDenyGroup) []any {
+	var rules []any
+	for _, g := range groups {
+		if len(g.Users) == 0 || len(g.Tags) == 0 {
+			continue
+		}
+		rules = append(rules, map[string]any{
+			"inbound":   g.Tags,
+			"auth_user": g.Users,
+			"action":    "reject",
+		})
 	}
 	return rules
 }
