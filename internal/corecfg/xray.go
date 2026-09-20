@@ -127,7 +127,7 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 			"loglevel": "warning",
 		},
 		"stats": map[string]any{},
-		"api":   map[string]any{"tag": "api", "services": []string{"StatsService"}},
+		"api":   map[string]any{"tag": "api", "services": []string{"HandlerService", "StatsService"}},
 		"policy": map[string]any{
 			"levels": map[string]any{"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true}},
 			"system": map[string]any{"statsInboundUplink": true, "statsInboundDownlink": true},

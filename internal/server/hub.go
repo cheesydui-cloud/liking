@@ -40,6 +40,7 @@ func writeTimeoutFor(size int) time.Duration {
 
 type userLivePart struct {
 	up, down int64
+	serverID int64
 	at       time.Time
 }
 
@@ -52,7 +53,7 @@ type Hub struct {
 	conns map[int64]*agentConn
 
 	userLiveMu sync.Mutex
-	userParts  map[int64]map[int64]userLivePart // userID -> serverID -> bps
+	userParts  map[int64]map[int64]userLivePart // userID -> inboundID -> bps
 	userPartAt map[int64]time.Time              // serverID -> last stats time
 }
 
@@ -291,7 +292,7 @@ func (h *Hub) readerLoop(parent context.Context, ac *agentConn) {
 			}
 			h.noteLive(ac, st)
 			h.applyStats(ac.serverID, st.Samples)
-		case wsproto.TypeApplyAck, wsproto.TypeHelloAck, wsproto.TypeUpgradeAck, wsproto.TypeUninstallAck, wsproto.TypeEnsureCoreAck, wsproto.TypeRemoveCoreAck, wsproto.TypeProbeAck:
+		case wsproto.TypeApplyAck, wsproto.TypeHelloAck, wsproto.TypeUpgradeAck, wsproto.TypeUninstallAck, wsproto.TypeEnsureCoreAck, wsproto.TypeRemoveCoreAck, wsproto.TypeProbeAck, wsproto.TypeKickAck:
 			ac.dispatchAck(env)
 		default:
 			log.Printf("hub: server %d unknown frame %q", ac.serverID, env.Type)
@@ -501,7 +502,7 @@ type liveBytes struct{ up, down int64 }
 func (h *Hub) applyStats(serverID int64, samples []wsproto.Sample) {
 	day := db.ClockDay(h.DB)
 	touched := map[int64]struct{}{}
-	live := map[int64]liveBytes{}
+	live := map[int64]map[int64]liveBytes{}
 	var items []db.TrafficWrite
 	for _, s := range samples {
 		if s.Email == "" || strings.HasPrefix(s.Email, "relay.") {
@@ -526,10 +527,15 @@ func (h *Hub) applyStats(serverID int64, samples []wsproto.Sample) {
 		if err != nil || u == nil {
 			continue
 		}
-		a := live[c.UserID]
+		byIn := live[c.UserID]
+		if byIn == nil {
+			byIn = map[int64]liveBytes{}
+			live[c.UserID] = byIn
+		}
+		a := byIn[c.InboundID]
 		a.up += up
 		a.down += down
-		live[c.UserID] = a
+		byIn[c.InboundID] = a
 		mult := 1.0
 		if u.PackageID != nil {
 			if p, err := db.GetPackage(h.DB, *u.PackageID); err == nil {
@@ -560,7 +566,7 @@ func (h *Hub) applyStats(serverID int64, samples []wsproto.Sample) {
 	}
 }
 
-func (h *Hub) noteUserLive(serverID int64, live map[int64]liveBytes) {
+func (h *Hub) noteUserLive(serverID int64, live map[int64]map[int64]liveBytes) {
 	if len(live) == 0 {
 		return
 	}
@@ -581,16 +587,19 @@ func (h *Hub) noteUserLive(serverID int64, live map[int64]liveBytes) {
 		}
 	}
 	h.userPartAt[serverID] = now
-	for uid, b := range live {
+	for uid, byIn := range live {
 		parts := h.userParts[uid]
 		if parts == nil {
 			parts = map[int64]userLivePart{}
 			h.userParts[uid] = parts
 		}
-		parts[serverID] = userLivePart{
-			up:   int64(float64(b.up) / dt),
-			down: int64(float64(b.down) / dt),
-			at:   now,
+		for iid, b := range byIn {
+			parts[iid] = userLivePart{
+				up:       int64(float64(b.up) / dt),
+				down:     int64(float64(b.down) / dt),
+				serverID: serverID,
+				at:       now,
+			}
 		}
 	}
 	h.pruneUserLiveLocked(now)
@@ -614,7 +623,11 @@ func (h *Hub) clearUserLive(serverID int64) {
 	defer h.userLiveMu.Unlock()
 	delete(h.userPartAt, serverID)
 	for uid, parts := range h.userParts {
-		delete(parts, serverID)
+		for iid, p := range parts {
+			if p.serverID == serverID {
+				delete(parts, iid)
+			}
+		}
 		if len(parts) == 0 {
 			delete(h.userParts, uid)
 		}
@@ -638,6 +651,30 @@ func (h *Hub) UserLive(id int64) (up, down int64, ok bool) {
 		ok = true
 	}
 	return
+}
+
+type UserLivePart struct {
+	ServerID  int64
+	InboundID int64
+	Up        int64
+	Down      int64
+}
+
+func (h *Hub) UserLiveParts(id int64) []UserLivePart {
+	h.userLiveMu.Lock()
+	defer h.userLiveMu.Unlock()
+	h.pruneUserLiveLocked(time.Now())
+	parts := h.userParts[id]
+	out := make([]UserLivePart, 0, len(parts))
+	for iid, p := range parts {
+		out = append(out, UserLivePart{
+			ServerID:  p.serverID,
+			InboundID: iid,
+			Up:        p.up,
+			Down:      p.down,
+		})
+	}
+	return out
 }
 
 func (h *Hub) AllUserLive() (up, down int64) {

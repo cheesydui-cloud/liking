@@ -117,6 +117,22 @@ export default function MyNodes() {
     }
   }
 
+  const copyAll = async () => {
+    const uris = filtered.map(n => n.uri).filter(Boolean)
+    if (!uris.length) {
+      toast('没有可复制的链接', 'error')
+      return
+    }
+    const text = uris.join('\n')
+    try {
+      await copyText(text)
+      toast(`已复制 ${uris.length} 条链接`)
+    } catch {
+      setShareText(text)
+      toast('浏览器不允许自动复制，请手动选中链接', 'error')
+    }
+  }
+
   const toggleStar = async (n) => {
     const id = Number(n.id)
     const on = starred.includes(id)
@@ -152,6 +168,9 @@ export default function MyNodes() {
       <PageHead
         title="节点"
         desc="按实例分组。复制是当前账号的链接。星标的会进 Clash / 订阅；一个都不标则全部可用节点都进。"
+        actions={filtered.some(n => n.uri) ? (
+          <button type="button" className="btn-ghost" onClick={copyAll}>复制全部链接</button>
+        ) : null}
       />
       {error ? <div className="alert-row is-warn mb-4">{error}</div> : null}
       {nodes.length > 0 || q || kind ? (

@@ -22,9 +22,12 @@ const (
 	TypeRemoveCoreAck = "remove_core_ack"
 	TypeProbe         = "probe"
 	TypeProbeAck      = "probe_ack"
+	TypeKick          = "kick"
+	TypeKickAck       = "kick_ack"
 
 	CapCores = "cores"
 	CapProbe = "probe"
+	CapKick  = "kick"
 )
 
 type Envelope struct {
@@ -130,6 +133,16 @@ type ProbeAck struct {
 	OK        bool   `json:"ok"`
 	Error     string `json:"error,omitempty"`
 	LatencyMS int64  `json:"latency_ms,omitempty"`
+}
+
+type Kick struct {
+	Emails []string `json:"emails"`
+}
+
+type KickAck struct {
+	OK     bool   `json:"ok"`
+	Error  string `json:"error,omitempty"`
+	Closed int    `json:"closed"`
 }
 
 type Ping struct {

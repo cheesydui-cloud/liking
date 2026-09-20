@@ -151,6 +151,17 @@ func TestUserLiveBps(t *testing.T) {
 	if !ok || up != 3000 || down != 5000 {
 		t.Fatalf("sum up=%d down=%d ok=%v", up, down, ok)
 	}
+	parts := h.UserLiveParts(u.ID)
+	if len(parts) != 2 {
+		t.Fatalf("parts %d %+v", len(parts), parts)
+	}
+	byIn := map[int64]UserLivePart{}
+	for _, p := range parts {
+		byIn[p.InboundID] = p
+	}
+	if byIn[in.ID].ServerID != srv.ID || byIn[in.ID].Up != 2000 || byIn[in2.ID].ServerID != srv2.ID {
+		t.Fatalf("parts %+v", parts)
+	}
 
 	h.applyStats(srv.ID, nil)
 	up, down, ok = h.UserLive(u.ID)

@@ -57,6 +57,60 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 	s.runProbe(w, req.ServerID, host, port)
 }
 
+var listenDialTimeout = func(network, address string, timeout time.Duration) (net.Conn, error) {
+	return net.DialTimeout(network, address, timeout)
+}
+
+func (s *Server) handleListenProbe(w http.ResponseWriter, r *http.Request) {
+	id, err := chiID(r, "id")
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	in, err := db.GetInbound(s.DB, id)
+	if err != nil || in == nil {
+		jsonErr(w, http.StatusNotFound, "入站不存在")
+		return
+	}
+	host := corecfg.ShareHost(in)
+	port := in.Port
+	if host == "" {
+		jsonErr(w, http.StatusBadRequest, "没有公开地址")
+		return
+	}
+	if port < 1 || port > 65535 {
+		jsonErr(w, http.StatusBadRequest, "端口无效")
+		return
+	}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	start := time.Now()
+	conn, err := listenDialTimeout("tcp", addr, 4*time.Second)
+	out := map[string]any{
+		"ok":   false,
+		"host": host,
+		"port": port,
+	}
+	if err != nil {
+		msg := "不通"
+		if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			msg = "超时"
+		} else if strings.TrimSpace(err.Error()) != "" {
+			msg = err.Error()
+		}
+		out["error"] = msg
+		jsonOK(w, out)
+		return
+	}
+	_ = conn.Close()
+	ms := time.Since(start).Milliseconds()
+	if ms < 1 {
+		ms = 1
+	}
+	out["ok"] = true
+	out["latency_ms"] = ms
+	jsonOK(w, out)
+}
+
 func (s *Server) handleInboundProbe(w http.ResponseWriter, r *http.Request) {
 	id, err := chiID(r, "id")
 	if err != nil {

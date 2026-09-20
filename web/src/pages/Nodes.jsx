@@ -537,6 +537,16 @@ export default function Nodes() {
     }
   }
 
+  const probeListen = async (inb) => {
+    await ops.current.run(`listen-${inb.id}`, async () => {
+      try {
+        const d = await api.post(`/inbounds/${inb.id}/listen-probe`)
+        if (d.ok) toast(`端口通，${d.latency_ms} ms`)
+        else toast(d.error || '端口不通', 'error')
+      } catch (e) { toast(e.message, 'error') }
+    })
+  }
+
   const direct = useMemo(() => list.filter(isDirectNode), [list])
   const groups = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -653,6 +663,7 @@ export default function Nodes() {
                               { label: '编辑', onSelect: () => startEdit(inb) },
                               { label: '复制', onSelect: () => copyShare(inb) },
                               { label: '参数', onSelect: () => setParamInb(inb) },
+                              { label: '探测端口', onSelect: () => probeListen(inb) },
                               { sep: true },
                               { label: inb.enabled ? '停用' : '启用', onSelect: () => toggle(inb) },
                               { sep: true },
@@ -676,6 +687,7 @@ export default function Nodes() {
                         {st === '流量已满' ? <div className="text-[12px] px-3 pb-1" style={{ color: 'var(--color-danger)' }}>实例流量已满，节点已停用</div> : null}
                         <div className="machine-foot">
                           <button type="button" className="machine-ports" onClick={() => setParamInb(inb)}>参数</button>
+                          <button type="button" className="row-act" onClick={() => probeListen(inb)}>探测端口</button>
                           <button type="button" className="row-act" onClick={() => copyShare(inb)}>复制</button>
                         </div>
                       </div>

@@ -17,8 +17,9 @@ export function singboxImportURL(token) {
   return `sing-box://import-remote-profile?url=${encodeURIComponent(subURL(token, 'singbox'))}`
 }
 
-export function SubPanel({ token, onCopied }) {
+export function SubPanel({ token, onCopied, onRotate, rotating }) {
   const [qr, setQr] = useState('')
+  const [downloading, setDownloading] = useState('')
   const auto = subURL(token)
   const rows = [
     ['自动识别', auto],
@@ -42,6 +43,28 @@ export function SubPanel({ token, onCopied }) {
       onCopied?.(ok)
     } catch {
       onCopied?.('浏览器不允许自动复制，请手动选中链接', 'error')
+    }
+  }
+
+  const download = async (fmt, filename) => {
+    if (!token || downloading) return
+    setDownloading(fmt)
+    try {
+      const res = await fetch(subURL(token, fmt), { credentials: 'same-origin' })
+      if (!res.ok) throw new Error('下载失败')
+      const blob = await res.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(a.href)
+      onCopied?.('已开始下载')
+    } catch {
+      onCopied?.('下载失败', 'error')
+    } finally {
+      setDownloading('')
     }
   }
 
@@ -69,7 +92,18 @@ export function SubPanel({ token, onCopied }) {
           <button type="button" className="btn-primary h-8" onClick={() => copy(subURL(token, 'clash'), '已复制 Clash 订阅')}>复制 Clash 订阅</button>
           <a className="btn-ghost h-8" href={clashImportURL(token)}>打开 Clash</a>
           <a className="btn-ghost h-8" href={singboxImportURL(token)}>打开 sing-box</a>
+          <button type="button" className="btn-ghost h-8" disabled={!!downloading} onClick={() => download('clash', 'liking.yaml')}>
+            {downloading === 'clash' ? '下载中…' : '下载 Clash'}
+          </button>
+          <button type="button" className="btn-ghost h-8" disabled={!!downloading} onClick={() => download('singbox', 'liking.json')}>
+            {downloading === 'singbox' ? '下载中…' : '下载 sing-box'}
+          </button>
           <button type="button" className="btn-ghost h-8" onClick={() => copy(auto, '已复制自动识别链接')}><Icon name="link" size={14} /> 复制自动识别</button>
+          {onRotate ? (
+            <button type="button" className="btn-ghost h-8" disabled={rotating} onClick={onRotate}>
+              {rotating ? '重置中…' : '重置令牌'}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

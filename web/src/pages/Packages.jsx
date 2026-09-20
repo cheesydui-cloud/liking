@@ -3,10 +3,50 @@ import { api } from '../lib/api'
 import { cacheGen, peekList, putList } from '../lib/listCache'
 import { asArray } from '../lib/safe'
 import { useToast, useDialog } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, StatusWord } from '../components/ui'
+import { Badge, Empty, Field, FilterTabs, Icon, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, StatusWord } from '../components/ui'
 import { NodePreviewList } from '../components/NodePreview'
+import { catsForPreset, SubRulePicker, userRulePresets } from '../components/SubRules'
 
-const emptyForm = { name: '', gb: '', direction: 'oneway', inbound_ids: [], multipliers: {} }
+const emptyForm = {
+  name: '', gb: '', direction: 'oneway', inbound_ids: [], multipliers: {},
+  speed_mbps: '', sub_rule_preset: '', sub_rule_categories: [],
+  site_filter_mode: '', site_deny_categories: [], site_deny_domains: '',
+}
+
+const siteFilterTabs = [
+  ['', '不限制'],
+  ['deny', '禁止这些'],
+  ['allow', '只允许这些'],
+]
+
+const siteDenyGroupOrder = ['社交', '视频', 'AI', '工具']
+
+function catalogGroups(catalog) {
+  const by = {}
+  for (const c of catalog || []) {
+    const g = c.group || '其它'
+    if (!by[g]) by[g] = []
+    by[g].push(c)
+  }
+  const order = [...siteDenyGroupOrder]
+  for (const g of Object.keys(by)) {
+    if (!order.includes(g)) order.push(g)
+  }
+  return order.filter(g => by[g]?.length).map(g => [g, by[g]])
+}
+
+function parseDenyLines(text) {
+  return String(text || '').split(/[\s,;]+/).map(s => s.trim()).filter(Boolean)
+}
+
+function policyLine(p) {
+  const bits = []
+  if (p.speed_limit > 0) bits.push(`默认 ${p.speed_limit} Mbps`)
+  if (p.site_filter_mode === 'allow') bits.push('开户只允许指定站')
+  else if (p.site_filter_mode === 'deny') bits.push('开户禁止指定站')
+  if (p.sub_rule_preset) bits.push('独立分流')
+  return bits.join(' · ')
+}
 
 function protoShort(profile) {
   switch (profile) {
@@ -91,6 +131,9 @@ export default function Packages() {
   const [previewData, setPreviewData] = useState(null)
   const [previewErr, setPreviewErr] = useState('')
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [ruleCatalog, setRuleCatalog] = useState([])
+  const [denyCatalog, setDenyCatalog] = useState([])
+  const [globalCats, setGlobalCats] = useState([])
 
   const load = async () => {
     try {
@@ -104,6 +147,15 @@ export default function Packages() {
     finally { setReady(true) }
   }
   useEffect(() => { load() }, [])
+  useEffect(() => {
+    api.get('/settings').then(d => {
+      const gp = d.sub_rule_preset || 'balanced'
+      const list = Array.isArray(d.sub_rule_catalog) ? d.sub_rule_catalog : []
+      setRuleCatalog(list)
+      setGlobalCats(Array.isArray(d.sub_rule_categories) ? d.sub_rule_categories : catsForPreset(gp, list))
+      setDenyCatalog(Array.isArray(d.site_deny_catalog) ? d.site_deny_catalog : [])
+    }).catch(() => {})
+  }, [])
 
   const toggleNode = (id) => {
     const n = Number(id)
@@ -143,6 +195,12 @@ export default function Packages() {
       direction: p.direction || 'oneway',
       inbound_ids: selectedInboundIds(p, ins),
       multipliers: Object.fromEntries((selectedInboundIds(p, ins) || []).map((id, i) => [id, p.multipliers?.[i] ?? 1])),
+      speed_mbps: p.speed_limit > 0 ? String(p.speed_limit) : '',
+      sub_rule_preset: p.sub_rule_preset || '',
+      sub_rule_categories: Array.isArray(p.sub_rule_categories) ? p.sub_rule_categories : [],
+      site_filter_mode: p.site_filter_mode || '',
+      site_deny_categories: Array.isArray(p.site_deny_categories) ? p.site_deny_categories : [],
+      site_deny_domains: Array.isArray(p.site_deny_domains) ? p.site_deny_domains.join('\n') : '',
     })
     setFormOpen(true)
   }
@@ -163,6 +221,15 @@ export default function Packages() {
     const gbRaw = String(f.gb).trim()
     const gb = gbRaw === '' ? 0 : Number(gbRaw)
     if (!Number.isFinite(gb) || gb < 0) { toast('流量无效', 'error'); return }
+    const speed = f.speed_mbps === '' ? 0 : Number(f.speed_mbps)
+    if (!Number.isFinite(speed) || speed < 0 || speed > 10000) { toast('限速无效', 'error'); return }
+    const mode = f.site_filter_mode || ''
+    const domains = mode ? parseDenyLines(f.site_deny_domains) : []
+    if (mode && domains.length > 50) { toast('自定义域名最多 50 个', 'error'); return }
+    if (mode === 'allow' && !f.site_deny_categories.length && !domains.length) {
+      toast('只允许至少选一个网站', 'error')
+      return
+    }
     setBusy(true)
     const body = {
       name,
@@ -174,6 +241,12 @@ export default function Packages() {
         const n = Number(f.multipliers?.[id])
         return Number.isFinite(n) && n > 0 ? n : 1
       }),
+      speed_limit: Math.round(speed),
+      sub_rule_preset: f.sub_rule_preset || '',
+      sub_rule_categories: f.sub_rule_preset ? f.sub_rule_categories : [],
+      site_filter_mode: mode,
+      site_deny_categories: mode ? f.site_deny_categories : [],
+      site_deny_domains: mode ? domains : [],
     }
     const wasEdit = !!editId
     try {
@@ -277,6 +350,11 @@ export default function Packages() {
                     {meta.servers.length ? (
                       <div className="machine-host">
                         <span className="machine-host-addr" title={nodeTip}>{meta.servers.join(' · ')}</span>
+                      </div>
+                    ) : null}
+                    {policyLine(p) ? (
+                      <div className="machine-host">
+                        <span className="text-[12px] text-ink-mut truncate" title={policyLine(p)}>{policyLine(p)}</span>
                       </div>
                     ) : null}
                   </div>
@@ -421,6 +499,87 @@ export default function Packages() {
                 })}
               </div>
             )}
+          </div>
+          <div>
+            <div className="text-[12px] font-medium text-ink-soft">开户默认</div>
+            <p className="text-[12px] text-ink-mut mt-0.5 mb-3">只对之后开户或换套餐生效，不会改已经开好的用户。</p>
+            <div className="space-y-4">
+              <Field label="限速 Mbps" hint="留空 = 不限">
+                <input className="input-field font-mono" type="number" min="0" max="10000" step="1" value={f.speed_mbps} onChange={e => setF({ ...f, speed_mbps: e.target.value })} />
+              </Field>
+              <div>
+                <div className="text-[12px] font-medium text-ink-soft mb-1.5">分流规则</div>
+                <p className="text-[12px] text-ink-mut mb-2">空则跟随侧栏「订阅」的全局规则。只影响 Clash Meta / sing-box。</p>
+                <SubRulePicker
+                  preset={f.sub_rule_preset}
+                  cats={f.sub_rule_preset ? f.sub_rule_categories : globalCats}
+                  catalog={ruleCatalog}
+                  onPreset={(id) => {
+                    setF(prev => ({
+                      ...prev,
+                      sub_rule_preset: id,
+                      sub_rule_categories: !id ? [] : (id === 'custom' ? prev.sub_rule_categories : catsForPreset(id, ruleCatalog)),
+                    }))
+                  }}
+                  onToggle={(name) => {
+                    setF(prev => {
+                      const cur = prev.sub_rule_categories || []
+                      const next = cur.includes(name) ? cur.filter(x => x !== name) : [...cur, name]
+                      return { ...prev, sub_rule_preset: 'custom', sub_rule_categories: next }
+                    })
+                  }}
+                  items={userRulePresets}
+                />
+              </div>
+              <div>
+                <div className="text-[12px] font-medium text-ink-soft mb-1.5">访问限制</div>
+                <p className="text-[12px] text-ink-mut mb-2">在节点上拦截。Mieru 无效。</p>
+                <FilterTabs
+                  value={f.site_filter_mode}
+                  onChange={(mode) => setF({ ...f, site_filter_mode: mode })}
+                  items={siteFilterTabs}
+                />
+                {f.site_filter_mode ? (
+                  <div className="space-y-4 mt-3">
+                    {catalogGroups(denyCatalog).map(([g, items]) => (
+                      <div key={g}>
+                        <div className="kicker mb-2">{g}</div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {items.map(c => {
+                            const on = f.site_deny_categories.includes(c.name)
+                            return (
+                              <button
+                                key={c.name}
+                                type="button"
+                                className={`node-pick ${on ? 'is-on' : ''}`}
+                                onClick={() => setF(prev => ({
+                                  ...prev,
+                                  site_deny_categories: on
+                                    ? prev.site_deny_categories.filter(x => x !== c.name)
+                                    : [...prev.site_deny_categories, c.name],
+                                }))}
+                              >
+                                <span className={`node-check ${on ? 'is-on' : ''}`}>{on ? '✓' : ''}</span>
+                                <span className="text-[13px] leading-snug">{c.label}</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    <Field label="自定义域名" hint="每行一个，域名或 IP。最多 50 个。">
+                      <textarea
+                        className="input-field"
+                        rows={3}
+                        value={f.site_deny_domains}
+                        onChange={e => setF({ ...f, site_deny_domains: e.target.value })}
+                        placeholder="example.com"
+                      />
+                    </Field>
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </div>
         </form>
       </Modal>

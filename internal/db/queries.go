@@ -804,11 +804,15 @@ func CreatePackage(d *sql.DB, name string, trafficBytes int64, cycleDays, resetD
 
 func GetPackage(d *sql.DB, id int64) (*Package, error) {
 	p := &Package{}
-	err := d.QueryRow(`SELECT id,name,traffic_bytes,cycle_days,reset_day,direction,created_at FROM packages WHERE id=?`, id).
-		Scan(&p.ID, &p.Name, &p.TrafficBytes, &p.CycleDays, &p.ResetDay, &p.Direction, &p.CreatedAt)
+	var catsRaw, denyCatsRaw, denyDomsRaw string
+	err := d.QueryRow(`SELECT id,name,traffic_bytes,cycle_days,reset_day,direction,created_at,speed_limit,sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains,site_filter_mode FROM packages WHERE id=?`, id).
+		Scan(&p.ID, &p.Name, &p.TrafficBytes, &p.CycleDays, &p.ResetDay, &p.Direction, &p.CreatedAt, &p.SpeedLimit, &p.SubRulePreset, &catsRaw, &denyCatsRaw, &denyDomsRaw, &p.SiteFilterMode)
 	if err != nil {
 		return nil, err
 	}
+	p.SubRuleCategories = decodeStringSlice(catsRaw)
+	p.SiteDenyCategories = decodeStringSlice(denyCatsRaw)
+	p.SiteDenyDomains = decodeStringSlice(denyDomsRaw)
 	rows, err := d.Query(`SELECT inbound_id, multiplier FROM package_inbounds WHERE package_id=?`, id)
 	if err != nil {
 		return nil, err
@@ -907,9 +911,22 @@ func SetPackageServers(d *sql.DB, pkgID int64, serverIDs []int64) error {
 }
 
 func UpdatePackage(d *sql.DB, p *Package) error {
-	_, err := d.Exec(`UPDATE packages SET name=?, traffic_bytes=?, cycle_days=?, reset_day=?, direction=? WHERE id=?`,
-		p.Name, p.TrafficBytes, p.CycleDays, p.ResetDay, p.Direction, p.ID)
+	_, err := d.Exec(`UPDATE packages SET name=?, traffic_bytes=?, cycle_days=?, reset_day=?, direction=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=?, site_filter_mode=? WHERE id=?`,
+		p.Name, p.TrafficBytes, p.CycleDays, p.ResetDay, p.Direction, p.SpeedLimit, p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, p.ID)
 	return err
+}
+
+// CopyPackagePolicy writes suite defaults onto a user. Call only on 开户 / 换套餐.
+func CopyPackagePolicy(dst *User, p *Package) {
+	if dst == nil || p == nil {
+		return
+	}
+	dst.SpeedLimit = p.SpeedLimit
+	dst.SubRulePreset = p.SubRulePreset
+	dst.SubRuleCategories = append([]string{}, p.SubRuleCategories...)
+	dst.SiteFilterMode = p.SiteFilterMode
+	dst.SiteDenyCategories = append([]string{}, p.SiteDenyCategories...)
+	dst.SiteDenyDomains = append([]string{}, p.SiteDenyDomains...)
 }
 
 func DeletePackage(d *sql.DB, id int64) error {

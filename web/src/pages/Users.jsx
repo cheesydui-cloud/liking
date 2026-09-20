@@ -443,6 +443,8 @@ export default function Users() {
   const [bulkDays, setBulkDays] = useState(30)
   const [ruleUser, setRuleUser] = useState(null)
   const [denyUser, setDenyUser] = useState(null)
+  const [selected, setSelected] = useState(() => new Set())
+  const [batchBusy, setBatchBusy] = useState(false)
 
   const load = async () => {
     try {
@@ -691,6 +693,52 @@ export default function Users() {
     } catch (e) { toast(e.message, 'error') }
   }
 
+  const kickUser = async (u) => {
+    const nodes = asArray(u.live_nodes).map(n => n.inbound_name || n.server_name).filter(Boolean)
+    const where = nodes.length ? `当前在 ${nodes.join('、')}。` : '断开这个用户现在的连接。'
+    if (!(await dialog.confirm({
+      title: '踢下线',
+      message: `${where}用户可以立刻重连。旧 Agent 需先升级。`,
+    }))) return
+    await act(`kick-${u.id}`, async () => {
+      const d = await api.post(`/users/${u.id}/kick`, {})
+      const fail = asArray(d.results).filter(x => !x.ok)
+      if (fail.length && !d.ok) toast(fail[0]?.error || '踢下线失败', 'error')
+      else if (fail.length) toast(`部分实例失败：${fail.map(x => x.server_name || x.error).join('、')}`, 'error')
+      else toast('已踢下线')
+    })
+  }
+
+  const toggleSelect = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const batchAct = async (action, extra = {}) => {
+    const ids = [...selected]
+    if (!ids.length) return
+    const titles = {
+      extend: { title: '批量续期', message: `给已选 ${ids.length} 个用户续期 30 天。` },
+      reset_traffic: { title: '批量清零流量', message: `清空已选 ${ids.length} 个用户的已用流量。` },
+      enable: { title: '批量启用', message: `启用已选 ${ids.length} 个用户。` },
+      disable: { title: '批量停用', message: `停用已选 ${ids.length} 个用户，他们立刻无法登录。`, danger: true, okText: '停用' },
+    }
+    const conf = titles[action]
+    if (conf && !(await dialog.confirm(conf))) return
+    setBatchBusy(true)
+    try {
+      const d = await api.post('/users/batch', { ids, action, ...extra })
+      toast(`完成 ${d.ok}/${d.total}`)
+      setSelected(new Set())
+      load()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBatchBusy(false) }
+  }
+
   const openPreview = async (u) => {
     setPreviewUser(u)
     setPreviewData(null)
@@ -729,6 +777,8 @@ export default function Users() {
   const hasCustomers = list.some(u => u.role !== 'admin')
   const editing = !!editUser
   const selectedPkg = pkgs.find(p => Number(p.id) === Number(f.package_id))
+  const selectedN = selected.size
+  const allVisibleSelected = rows.length > 0 && rows.every(u => selected.has(u.id))
 
   return (
     <div>
@@ -757,6 +807,30 @@ export default function Users() {
           items={[['','全部'],['warn','将满 80%'],['expired','已到期']]}
         />
       </div>
+      {rows.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <button
+            type="button"
+            className="row-act"
+            onClick={() => {
+              if (allVisibleSelected) setSelected(new Set())
+              else setSelected(new Set(rows.map(u => u.id)))
+            }}
+          >
+            {allVisibleSelected ? '取消全选' : '全选当前'}
+          </button>
+          {selectedN > 0 ? (
+            <>
+              <span className="text-[12px] text-ink-mut">已选 {selectedN} 个</span>
+              <button type="button" className="row-act" disabled={batchBusy} onClick={() => batchAct('extend', { days: 30 })}>续期 30 天</button>
+              <button type="button" className="row-act" disabled={batchBusy} onClick={() => batchAct('reset_traffic')}>清零流量</button>
+              <button type="button" className="row-act" disabled={batchBusy} onClick={() => batchAct('enable')}>启用</button>
+              <button type="button" className="row-act" disabled={batchBusy} onClick={() => batchAct('disable')}>停用</button>
+              <button type="button" className="row-act" disabled={batchBusy} onClick={() => setSelected(new Set())}>取消</button>
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       {!ready ? (
         <div className="card overflow-hidden"><SkeletonRows /></div>
@@ -783,6 +857,15 @@ export default function Users() {
             return (
               <div key={u.id} className={`machine ${userTone(u)}`}>
                 <div className="machine-head">
+                  <button
+                    type="button"
+                    className={`node-check shrink-0 mt-1 ${selected.has(u.id) ? 'is-on' : ''}`}
+                    aria-pressed={selected.has(u.id)}
+                    aria-label={selected.has(u.id) ? '取消选择' : '选择'}
+                    onClick={() => toggleSelect(u.id)}
+                  >
+                    {selected.has(u.id) ? '✓' : ''}
+                  </button>
                   <div className="min-w-0 flex-1">
                     <div className="machine-title">
                       <span className="machine-name truncate">{u.username}</span>
@@ -791,6 +874,13 @@ export default function Users() {
                     {u.remark ? (
                       <div className="machine-host">
                         <span className="machine-remark" title={u.remark}>{u.remark}</span>
+                      </div>
+                    ) : null}
+                    {asArray(u.live_nodes).length ? (
+                      <div className="machine-host">
+                        <span className="text-[12px] text-ink-mut truncate" title={asArray(u.live_nodes).map(n => n.inbound_name || n.server_name).join('、')}>
+                          在线 {asArray(u.live_nodes).map(n => n.inbound_name || n.server_name).filter(Boolean).join(' · ') || '连接中'}
+                        </span>
                       </div>
                     ) : null}
                   </div>
@@ -806,6 +896,7 @@ export default function Users() {
                       { label: '预览节点', onSelect: () => openPreview(u) },
                       { label: '复制名片', onSelect: () => copyCard(u) },
                       { label: '重置密码', onSelect: () => resetPassword(u) },
+                      { label: '踢下线', onSelect: () => kickUser(u) },
                       { sep: true },
                       { label: '流量', onSelect: () => openTraffic(u) },
                       { label: u.enabled ? '停用' : '启用', onSelect: () => toggleEnabled(u) },
@@ -829,6 +920,9 @@ export default function Users() {
                 <div className="machine-foot">
                   <button type="button" className="machine-ports" onClick={() => setSubUser(u)}>订阅</button>
                   <button type="button" className="row-act" onClick={() => copyCard(u)}>复制名片</button>
+                  {asArray(u.live_nodes).length ? (
+                    <button type="button" className="row-act" onClick={() => kickUser(u)}>踢下线</button>
+                  ) : null}
                 </div>
               </div>
             )

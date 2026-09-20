@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useUser, useToast } from '../components/Layout'
+import { useUser, useToast, useDialog } from '../components/Layout'
 import { api } from '../lib/api'
 import { cacheGen, peekList, putList } from '../lib/listCache'
 import { startPoll } from '../lib/poll'
@@ -15,6 +15,8 @@ function sumDays(days) {
 export default function My() {
   const { user, sub, refreshUser } = useUser()
   const toast = useToast()
+  const dialog = useDialog()
+  const [rotating, setRotating] = useState(false)
   const cached = peekList('me-nodes')
   const [traffic, setTraffic] = useState(null)
   const [payload, setPayload] = useState(() => cached ?? { nodes: [], hidden: [] })
@@ -116,7 +118,21 @@ export default function My() {
 
       {sub && user?.sub_token ? (
         <div className="card p-5 mb-4">
-          <SubPanel token={user.sub_token} onCopied={(msg, kind) => toast(msg, kind)} />
+          <SubPanel
+            token={user.sub_token}
+            rotating={rotating}
+            onCopied={(msg, kind) => toast(msg, kind)}
+            onRotate={async () => {
+              if (!(await dialog.confirm({ title: '重置订阅令牌', message: '旧订阅链接立刻失效。' }))) return
+              setRotating(true)
+              try {
+                await api.post('/me/rotate-sub')
+                await refreshUser()
+                toast('订阅令牌已更换')
+              } catch (e) { toast(e.message, 'error') }
+              finally { setRotating(false) }
+            }}
+          />
           {isAdmin ? (
             <div className="text-[12px] text-ink-mut mt-3">
               星标的节点会进订阅；未标星则全部可用节点都进。

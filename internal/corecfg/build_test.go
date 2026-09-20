@@ -2,6 +2,8 @@ package corecfg
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"liking/internal/db"
@@ -109,6 +111,12 @@ func TestBuildXrayAndMita(t *testing.T) {
 	}
 	if _, ok := xray["inbounds"]; !ok {
 		t.Fatal("xray inbounds")
+	}
+	apiMod, _ := xray["api"].(map[string]any)
+	svcs, _ := apiMod["services"].([]any)
+	joined := fmt.Sprintf("%v", svcs)
+	if !strings.Contains(joined, "HandlerService") || !strings.Contains(joined, "StatsService") {
+		t.Fatalf("xray api services %v", svcs)
 	}
 	routing, _ := xray["routing"].(map[string]any)
 	rules, _ := routing["rules"].([]any)

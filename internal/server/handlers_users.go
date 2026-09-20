@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"liking/internal/corecfg"
 	"liking/internal/db"
+	"liking/internal/wsproto"
 )
 
 func randomPassword(n int) (string, error) {
@@ -34,19 +36,62 @@ func adminUserView(u *db.User) any {
 	return adminUserViewPW(u, "")
 }
 
+type userLiveNode struct {
+	ServerID    int64  `json:"server_id"`
+	ServerName  string `json:"server_name"`
+	InboundID   int64  `json:"inbound_id"`
+	InboundName string `json:"inbound_name"`
+	UpBps       int64  `json:"up_bps"`
+	DownBps     int64  `json:"down_bps"`
+	CanKick     bool   `json:"can_kick"`
+}
+
 func adminUserViewPW(u *db.User, loginPW string) any {
+	return adminUserViewLive(u, loginPW, nil)
+}
+
+func adminUserViewLive(u *db.User, loginPW string, live []userLiveNode) any {
 	if u == nil {
 		return nil
 	}
 	type view struct {
 		*db.User
-		Password string `json:"password,omitempty"`
+		Password  string         `json:"password,omitempty"`
+		LiveNodes []userLiveNode `json:"live_nodes,omitempty"`
 	}
 	pw := ""
 	if u.Role != "admin" {
 		pw = loginPW
 	}
-	return view{User: u, Password: pw}
+	return view{User: u, Password: pw, LiveNodes: live}
+}
+
+func (s *Server) userLiveNodes(uid int64) []userLiveNode {
+	parts := s.Hub.UserLiveParts(uid)
+	if len(parts) == 0 {
+		return nil
+	}
+	out := make([]userLiveNode, 0, len(parts))
+	for _, p := range parts {
+		n := userLiveNode{
+			ServerID:  p.ServerID,
+			InboundID: p.InboundID,
+			UpBps:     p.Up,
+			DownBps:   p.Down,
+			CanKick:   s.Hub.HasCap(p.ServerID, wsproto.CapKick),
+		}
+		if in, err := db.GetInbound(s.DB, p.InboundID); err == nil && in != nil {
+			n.InboundName = in.Name
+			n.ServerName = in.ServerName
+		}
+		if n.ServerName == "" {
+			if srv, err := db.GetServer(s.DB, p.ServerID); err == nil && srv != nil {
+				n.ServerName = srv.Name
+			}
+		}
+		out = append(out, n)
+	}
+	return out
 }
 
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +106,7 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 			u.NetUpBps = up
 			u.NetDownBps = down
 		}
-		out = append(out, adminUserView(u))
+		out = append(out, adminUserViewLive(u, "", s.userLiveNodes(u.ID)))
 	}
 	jsonOK(w, map[string]any{"users": out})
 }
@@ -128,6 +173,11 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		u.ExpiresAt = exp
+		if p, err := db.GetPackage(s.DB, *req.PackageID); err == nil {
+			db.CopyPackagePolicy(u, p)
+		}
+		_ = db.UpdateUser(s.DB, u)
 	} else if exp > 0 {
 		u.ExpiresAt = exp
 		_ = db.UpdateUser(s.DB, u)
@@ -168,18 +218,18 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		oldPkgID = *u.PackageID
 	}
 	var req struct {
-		Username          *string         `json:"username"`
-		Remark            *string         `json:"remark"`
-		Enabled           *bool           `json:"enabled"`
-		ExpiresAt         *int64          `json:"expires_at"`
-		Days              *int            `json:"days"`
-		PackageID         *int64          `json:"package_id"`
-		Unbind            bool            `json:"unbind_package"`
-		TrafficLimit      json.RawMessage `json:"traffic_limit"`
-		ExtendDays        *int            `json:"extend_days"`
-		Password          *string         `json:"password"`
-		TrafficResetDay   *int            `json:"traffic_reset_day"`
-		SpeedLimit        *int64          `json:"speed_limit"`
+		Username           *string         `json:"username"`
+		Remark             *string         `json:"remark"`
+		Enabled            *bool           `json:"enabled"`
+		ExpiresAt          *int64          `json:"expires_at"`
+		Days               *int            `json:"days"`
+		PackageID          *int64          `json:"package_id"`
+		Unbind             bool            `json:"unbind_package"`
+		TrafficLimit       json.RawMessage `json:"traffic_limit"`
+		ExtendDays         *int            `json:"extend_days"`
+		Password           *string         `json:"password"`
+		TrafficResetDay    *int            `json:"traffic_reset_day"`
+		SpeedLimit         *int64          `json:"speed_limit"`
 		SubRulePreset      *string         `json:"sub_rule_preset"`
 		SubRuleCategories  *[]string       `json:"sub_rule_categories"`
 		SiteDenyCategories *[]string       `json:"site_deny_categories"`
@@ -364,6 +414,21 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, http.StatusBadRequest, err.Error())
 				return
 			}
+			if p, err := db.GetPackage(s.DB, *req.PackageID); err == nil {
+				if req.SpeedLimit == nil {
+					u.SpeedLimit = p.SpeedLimit
+				}
+				if req.SubRulePreset == nil && req.SubRuleCategories == nil {
+					u.SubRulePreset = p.SubRulePreset
+					u.SubRuleCategories = append([]string{}, p.SubRuleCategories...)
+				}
+				if req.SiteFilterMode == nil && req.SiteDenyCategories == nil && req.SiteDenyDomains == nil {
+					u.SiteFilterMode = p.SiteFilterMode
+					u.SiteDenyCategories = append([]string{}, p.SiteDenyCategories...)
+					u.SiteDenyDomains = append([]string{}, p.SiteDenyDomains...)
+				}
+				_ = db.UpdateUser(s.DB, u)
+			}
 		} else if req.ExpiresAt != nil || req.Days != nil || req.ExtendDays != nil {
 			if err := db.SetPackageExpiry(s.DB, u.ID, u.ExpiresAt); err != nil {
 				jsonErr(w, http.StatusInternalServerError, err.Error())
@@ -437,6 +502,136 @@ func (s *Server) handleRotateSub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, map[string]any{"sub_token": tok})
+}
+
+func (s *Server) handleRotateMeSub(w http.ResponseWriter, r *http.Request) {
+	u := userFromCtx(r.Context())
+	if u == nil {
+		jsonErr(w, http.StatusUnauthorized, "未登录")
+		return
+	}
+	tok, err := db.RotateSubToken(s.DB, u.ID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	fresh, err := db.GetUser(s.DB, u.ID)
+	if err == nil && fresh != nil {
+		u = fresh
+	} else {
+		u.SubToken = tok
+	}
+	db.AddAudit(s.DB, &u.ID, "user.rotate_sub", u.Username)
+	jsonOK(w, map[string]any{"sub_token": tok, "user": u})
+}
+
+func (s *Server) handleBatchUsers(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs    []int64 `json:"ids"`
+		Action string  `json:"action"`
+		Days   int     `json:"days"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效请求")
+		return
+	}
+	if len(req.IDs) == 0 {
+		jsonErr(w, http.StatusBadRequest, "没有用户")
+		return
+	}
+	if len(req.IDs) > 200 {
+		jsonErr(w, http.StatusBadRequest, "一次最多 200 个")
+		return
+	}
+	action := strings.TrimSpace(req.Action)
+	switch action {
+	case "extend", "reset_traffic", "enable", "disable":
+	default:
+		jsonErr(w, http.StatusBadRequest, "操作无效")
+		return
+	}
+	if action == "extend" && req.Days <= 0 {
+		jsonErr(w, http.StatusBadRequest, "天数无效")
+		return
+	}
+	admin := userFromCtx(r.Context())
+	type row struct {
+		ID    int64  `json:"id"`
+		Error string `json:"error,omitempty"`
+		OK    bool   `json:"ok"`
+	}
+	out := make([]row, 0, len(req.IDs))
+	okN := 0
+	seen := map[int64]struct{}{}
+	for _, id := range req.IDs {
+		rec := row{ID: id}
+		if id <= 0 {
+			rec.Error = "无效 ID"
+			out = append(out, rec)
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		u, err := db.GetUser(s.DB, id)
+		if err != nil || u == nil {
+			rec.Error = "用户不存在"
+			out = append(out, rec)
+			continue
+		}
+		if u.Role == "admin" {
+			rec.Error = "不能批量操作管理员"
+			out = append(out, rec)
+			continue
+		}
+		switch action {
+		case "extend":
+			base := u.ExpiresAt
+			now := time.Now().Unix()
+			if base < now {
+				base = now
+			}
+			u.ExpiresAt = base + int64(req.Days)*24*3600
+			if err := db.UpdateUser(s.DB, u); err != nil {
+				rec.Error = err.Error()
+				out = append(out, rec)
+				continue
+			}
+			_ = db.SetPackageExpiry(s.DB, u.ID, u.ExpiresAt)
+		case "reset_traffic":
+			if err := db.ResetUserTraffic(s.DB, u.ID); err != nil {
+				rec.Error = err.Error()
+				out = append(out, rec)
+				continue
+			}
+		case "enable":
+			u.Enabled = true
+			if err := db.UpdateUser(s.DB, u); err != nil {
+				rec.Error = err.Error()
+				out = append(out, rec)
+				continue
+			}
+		case "disable":
+			u.Enabled = false
+			if err := db.UpdateUser(s.DB, u); err != nil {
+				rec.Error = err.Error()
+				out = append(out, rec)
+				continue
+			}
+		}
+		if fresh, err := db.GetUser(s.DB, u.ID); err == nil && fresh != nil {
+			u = fresh
+		}
+		s.provisionAndSyncUser(u)
+		rec.OK = true
+		okN++
+		out = append(out, rec)
+	}
+	if admin != nil {
+		db.AddAudit(s.DB, &admin.ID, "user.batch", action+" "+strconv.Itoa(okN)+"/"+strconv.Itoa(len(req.IDs)))
+	}
+	jsonOK(w, map[string]any{"ok": okN, "total": len(req.IDs), "users": out})
 }
 
 func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {

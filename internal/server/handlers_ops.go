@@ -89,6 +89,11 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 				out = append(out, rec)
 				continue
 			}
+			u.ExpiresAt = exp
+			if p, err := db.GetPackage(s.DB, *item.PackageID); err == nil {
+				db.CopyPackagePolicy(u, p)
+			}
+			_ = db.UpdateUser(s.DB, u)
 		} else if exp > 0 {
 			u.ExpiresAt = exp
 			_ = db.UpdateUser(s.DB, u)
