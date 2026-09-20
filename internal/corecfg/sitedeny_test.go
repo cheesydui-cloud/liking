@@ -22,7 +22,14 @@ func TestNormalizeSiteDeny(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(d.Categories) != 2 || d.Categories[0] != "google" || d.Categories[1] != "youtube" {
+	if len(d.Categories) != 2 {
+		t.Fatalf("cats %+v", d.Categories)
+	}
+	got := map[string]bool{}
+	for _, n := range d.Categories {
+		got[n] = true
+	}
+	if !got["google"] || !got["youtube"] {
 		t.Fatalf("cats %+v", d.Categories)
 	}
 	want := map[string]bool{"www.instagram.com": true, "example.com": true, "10.0.0.0/8": true, "8.8.8.8/32": true}
@@ -319,6 +326,36 @@ func TestSiteDenyCatalogSpeedtestAndIPLookup(t *testing.T) {
 	}
 	if got["openai"] != "ChatGPT" || got["telegram"] != "Telegram" {
 		t.Fatalf("extra cats %+v", pub)
+	}
+	if got["reddit"] != "Reddit" || got["weibo"] != "微博" || got["claude"] != "Claude" || got["grok"] != "Grok" {
+		t.Fatalf("social/ai %+v", pub)
+	}
+	groups := map[string]string{}
+	for _, c := range pub {
+		groups[c["name"]] = c["group"]
+	}
+	if groups["reddit"] != "社交" || groups["claude"] != "AI" || groups["bilibili"] != "视频" || groups["speedtest"] != "工具" {
+		t.Fatalf("groups %+v", groups)
+	}
+	rd, _ := ResolveSiteDeny(SiteDeny{Categories: []string{"reddit"}})
+	if !hasStr(rd, "reddit.com") {
+		t.Fatalf("reddit %+v", rd)
+	}
+	cl, _ := ResolveSiteDeny(SiteDeny{Categories: []string{"claude"}})
+	if !hasStr(cl, "claude.ai") || !hasStr(cl, "anthropic.com") {
+		t.Fatalf("claude %+v", cl)
+	}
+	gm, _ := ResolveSiteDeny(SiteDeny{Categories: []string{"gemini"}})
+	if !hasStr(gm, "gemini.google.com") || hasStr(gm, "google.com") {
+		t.Fatalf("gemini %+v", gm)
+	}
+	gk, _ := ResolveSiteDeny(SiteDeny{Categories: []string{"grok"}})
+	if !hasStr(gk, "x.ai") || !hasStr(gk, "grok.com") || hasStr(gk, "x.com") || hasStr(gk, "twitter.com") {
+		t.Fatalf("grok %+v", gk)
+	}
+	dy, _ := ResolveSiteDeny(SiteDeny{Categories: []string{"douyin"}})
+	if !hasStr(dy, "douyin.com") || hasStr(dy, "tiktok.com") || hasStr(dy, "bytedance.com") {
+		t.Fatalf("douyin %+v", dy)
 	}
 	d, _ := ResolveSiteDeny(SiteDeny{Categories: []string{"speedtest"}})
 	if !hasStr(d, "speedtest.net") || !hasStr(d, "fast.com") || !hasStr(d, "speed.cloudflare.com") {

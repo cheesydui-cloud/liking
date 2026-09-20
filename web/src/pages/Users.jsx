@@ -93,19 +93,60 @@ function UserFlags({ u }) {
 }
 
 const siteDenyFallback = [
-  { name: 'google', label: '谷歌' },
-  { name: 'youtube', label: '油管' },
-  { name: 'tiktok', label: 'TikTok' },
-  { name: 'facebook', label: 'Facebook' },
-  { name: 'instagram', label: 'Instagram' },
-  { name: 'twitter', label: 'Twitter / X' },
-  { name: 'telegram', label: 'Telegram' },
-  { name: 'discord', label: 'Discord' },
-  { name: 'netflix', label: 'Netflix' },
-  { name: 'openai', label: 'ChatGPT' },
-  { name: 'speedtest', label: '测速' },
-  { name: 'iplookup', label: 'IP 查询' },
+  { name: 'tiktok', label: 'TikTok', group: '社交' },
+  { name: 'facebook', label: 'Facebook', group: '社交' },
+  { name: 'instagram', label: 'Instagram', group: '社交' },
+  { name: 'twitter', label: 'Twitter / X', group: '社交' },
+  { name: 'telegram', label: 'Telegram', group: '社交' },
+  { name: 'discord', label: 'Discord', group: '社交' },
+  { name: 'whatsapp', label: 'WhatsApp', group: '社交' },
+  { name: 'line', label: 'LINE', group: '社交' },
+  { name: 'reddit', label: 'Reddit', group: '社交' },
+  { name: 'linkedin', label: 'LinkedIn', group: '社交' },
+  { name: 'pinterest', label: 'Pinterest', group: '社交' },
+  { name: 'snapchat', label: 'Snapchat', group: '社交' },
+  { name: 'threads', label: 'Threads', group: '社交' },
+  { name: 'weibo', label: '微博', group: '社交' },
+  { name: 'xiaohongshu', label: '小红书', group: '社交' },
+  { name: 'douyin', label: '抖音', group: '社交' },
+  { name: 'youtube', label: '油管', group: '视频' },
+  { name: 'netflix', label: 'Netflix', group: '视频' },
+  { name: 'twitch', label: 'Twitch', group: '视频' },
+  { name: 'bilibili', label: '哔哩哔哩', group: '视频' },
+  { name: 'openai', label: 'ChatGPT', group: 'AI' },
+  { name: 'claude', label: 'Claude', group: 'AI' },
+  { name: 'gemini', label: 'Gemini', group: 'AI' },
+  { name: 'grok', label: 'Grok', group: 'AI' },
+  { name: 'perplexity', label: 'Perplexity', group: 'AI' },
+  { name: 'deepseek', label: 'DeepSeek', group: 'AI' },
+  { name: 'huggingface', label: 'Hugging Face', group: 'AI' },
+  { name: 'midjourney', label: 'Midjourney', group: 'AI' },
+  { name: 'characterai', label: 'Character.AI', group: 'AI' },
+  { name: 'copilot', label: 'Copilot', group: 'AI' },
+  { name: 'kimi', label: 'Kimi', group: 'AI' },
+  { name: 'tongyi', label: '通义千问', group: 'AI' },
+  { name: 'doubao', label: '豆包', group: 'AI' },
+  { name: 'poe', label: 'Poe', group: 'AI' },
+  { name: 'google', label: '谷歌', group: '工具' },
+  { name: 'speedtest', label: '测速', group: '工具' },
+  { name: 'iplookup', label: 'IP 查询', group: '工具' },
 ]
+
+const siteDenyGroupOrder = ['社交', '视频', 'AI', '工具']
+
+function catalogGroups(catalog) {
+  const by = {}
+  for (const c of catalog || []) {
+    const g = c.group || '其它'
+    if (!by[g]) by[g] = []
+    by[g].push(c)
+  }
+  const order = [...siteDenyGroupOrder]
+  for (const g of Object.keys(by)) {
+    if (!order.includes(g)) order.push(g)
+  }
+  return order.filter(g => by[g]?.length).map(g => [g, by[g]])
+}
 
 const siteFilterTabs = [
   ['', '不限制'],
@@ -331,24 +372,28 @@ function UserDenyModal({ user, onClose, onSaved }) {
         <FilterTabs value={mode} onChange={setMode} items={siteFilterTabs} />
         {mode ? (
           <>
-            <div>
-              <div className="kicker mb-2">{mode === 'allow' ? '只允许访问' : '禁止访问'}</div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {catalog.map(c => {
-                  const on = cats.includes(c.name)
-                  return (
-                    <button
-                      key={c.name}
-                      type="button"
-                      className={`node-pick ${on ? 'is-on' : ''}`}
-                      onClick={() => toggle(c.name)}
-                    >
-                      <span className={`node-check ${on ? 'is-on' : ''}`}>{on ? '✓' : ''}</span>
-                      <span className="text-[13px] leading-snug">{c.label}</span>
-                    </button>
-                  )
-                })}
-              </div>
+            <div className="space-y-4">
+              {catalogGroups(catalog).map(([g, items]) => (
+                <div key={g}>
+                  <div className="kicker mb-2">{g}</div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {items.map(c => {
+                      const on = cats.includes(c.name)
+                      return (
+                        <button
+                          key={c.name}
+                          type="button"
+                          className={`node-pick ${on ? 'is-on' : ''}`}
+                          onClick={() => toggle(c.name)}
+                        >
+                          <span className={`node-check ${on ? 'is-on' : ''}`}>{on ? '✓' : ''}</span>
+                          <span className="text-[13px] leading-snug">{c.label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
             <Field label="自定义域名" hint="每行一个，域名或 IP。最多 50 个。">
               <textarea

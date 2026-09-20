@@ -25,19 +25,45 @@ const ClientHealthCheckURL = "https://cp.cloudflare.com/"
 var siteDenyCatalog = []struct {
 	Name  string
 	Label string
+	Group string
 }{
-	{Name: "google", Label: "谷歌"},
-	{Name: "youtube", Label: "油管"},
-	{Name: "tiktok", Label: "TikTok"},
-	{Name: "facebook", Label: "Facebook"},
-	{Name: "instagram", Label: "Instagram"},
-	{Name: "twitter", Label: "Twitter / X"},
-	{Name: "telegram", Label: "Telegram"},
-	{Name: "discord", Label: "Discord"},
-	{Name: "netflix", Label: "Netflix"},
-	{Name: "openai", Label: "ChatGPT"},
-	{Name: "speedtest", Label: "测速"},
-	{Name: "iplookup", Label: "IP 查询"},
+	{Name: "tiktok", Label: "TikTok", Group: "社交"},
+	{Name: "facebook", Label: "Facebook", Group: "社交"},
+	{Name: "instagram", Label: "Instagram", Group: "社交"},
+	{Name: "twitter", Label: "Twitter / X", Group: "社交"},
+	{Name: "telegram", Label: "Telegram", Group: "社交"},
+	{Name: "discord", Label: "Discord", Group: "社交"},
+	{Name: "whatsapp", Label: "WhatsApp", Group: "社交"},
+	{Name: "line", Label: "LINE", Group: "社交"},
+	{Name: "reddit", Label: "Reddit", Group: "社交"},
+	{Name: "linkedin", Label: "LinkedIn", Group: "社交"},
+	{Name: "pinterest", Label: "Pinterest", Group: "社交"},
+	{Name: "snapchat", Label: "Snapchat", Group: "社交"},
+	{Name: "threads", Label: "Threads", Group: "社交"},
+	{Name: "weibo", Label: "微博", Group: "社交"},
+	{Name: "xiaohongshu", Label: "小红书", Group: "社交"},
+	{Name: "douyin", Label: "抖音", Group: "社交"},
+	{Name: "youtube", Label: "油管", Group: "视频"},
+	{Name: "netflix", Label: "Netflix", Group: "视频"},
+	{Name: "twitch", Label: "Twitch", Group: "视频"},
+	{Name: "bilibili", Label: "哔哩哔哩", Group: "视频"},
+	{Name: "openai", Label: "ChatGPT", Group: "AI"},
+	{Name: "claude", Label: "Claude", Group: "AI"},
+	{Name: "gemini", Label: "Gemini", Group: "AI"},
+	{Name: "grok", Label: "Grok", Group: "AI"},
+	{Name: "perplexity", Label: "Perplexity", Group: "AI"},
+	{Name: "deepseek", Label: "DeepSeek", Group: "AI"},
+	{Name: "huggingface", Label: "Hugging Face", Group: "AI"},
+	{Name: "midjourney", Label: "Midjourney", Group: "AI"},
+	{Name: "characterai", Label: "Character.AI", Group: "AI"},
+	{Name: "copilot", Label: "Copilot", Group: "AI"},
+	{Name: "kimi", Label: "Kimi", Group: "AI"},
+	{Name: "tongyi", Label: "通义千问", Group: "AI"},
+	{Name: "doubao", Label: "豆包", Group: "AI"},
+	{Name: "poe", Label: "Poe", Group: "AI"},
+	{Name: "google", Label: "谷歌", Group: "工具"},
+	{Name: "speedtest", Label: "测速", Group: "工具"},
+	{Name: "iplookup", Label: "IP 查询", Group: "工具"},
 }
 
 var siteDenyDomains = map[string][]string{
@@ -88,9 +114,89 @@ var siteDenyDomains = map[string][]string{
 		"netflix.com", "netflix.net", "nflxvideo.net", "nflximg.net",
 		"nflxso.net", "nflxext.com",
 	},
+	"whatsapp": {
+		"whatsapp.com", "whatsapp.net", "wa.me",
+	},
+	"line": {
+		"line.me", "line-scdn.net", "line-apps.com",
+	},
+	"reddit": {
+		"reddit.com", "redd.it", "redditstatic.com", "redditmedia.com",
+		"reddituploads.com",
+	},
+	"linkedin": {
+		"linkedin.com", "licdn.com", "lnkd.in",
+	},
+	"pinterest": {
+		"pinterest.com", "pinimg.com", "pin.it",
+	},
+	"snapchat": {
+		"snapchat.com", "snap.com", "sc-cdn.net", "snapkit.com",
+	},
+	"threads": {
+		"threads.net", "threads.com",
+	},
+	"weibo": {
+		"weibo.com", "weibo.cn", "weibocdn.com",
+	},
+	"xiaohongshu": {
+		"xiaohongshu.com", "xhslink.com", "xhscdn.com",
+	},
+	"douyin": {
+		"douyin.com", "iesdouyin.com", "douyinvod.com", "douyincdn.com",
+		"amemv.com",
+	},
+	"twitch": {
+		"twitch.tv", "twitchcdn.net", "jtvnw.net", "ttvnw.net", "ext-twitch.tv",
+	},
+	"bilibili": {
+		"bilibili.com", "b23.tv", "hdslb.com", "bilivideo.com",
+		"biliapi.net", "biliapi.com",
+	},
 	"openai": {
 		"openai.com", "chatgpt.com", "chat.com", "oaistatic.com",
 		"oaiusercontent.com",
+	},
+	"claude": {
+		"anthropic.com", "claude.ai", "claude.com",
+	},
+	"gemini": {
+		"gemini.google.com", "aistudio.google.com", "notebooklm.google.com",
+		"deepmind.com", "deepmind.google", "ai.google.dev",
+		"makersuite.google.com", "bard.google.com",
+	},
+	"grok": {
+		"x.ai", "grok.com",
+	},
+	"perplexity": {
+		"perplexity.ai", "pplx.ai",
+	},
+	"deepseek": {
+		"deepseek.com",
+	},
+	"huggingface": {
+		"huggingface.co", "hf.co",
+	},
+	"midjourney": {
+		"midjourney.com",
+	},
+	"characterai": {
+		"character.ai", "characterai.io",
+	},
+	"copilot": {
+		"copilot.microsoft.com", "githubcopilot.com", "copilot.github.com",
+	},
+	"kimi": {
+		"kimi.com", "moonshot.cn", "moonshot.ai",
+	},
+	"tongyi": {
+		"tongyi.aliyun.com", "qianwen.aliyun.com", "dashscope.aliyun.com",
+	},
+	"doubao": {
+		"doubao.com",
+	},
+	"poe": {
+		"poe.com",
 	},
 	"speedtest": {
 		"speedtest.net", "ookla.com", "fast.com", "speed.cloudflare.com",
@@ -146,7 +252,7 @@ func (s SiteDeny) key() string {
 func SiteDenyCatalogPublic() []map[string]string {
 	out := make([]map[string]string, 0, len(siteDenyCatalog))
 	for _, c := range siteDenyCatalog {
-		out = append(out, map[string]string{"name": c.Name, "label": c.Label})
+		out = append(out, map[string]string{"name": c.Name, "label": c.Label, "group": c.Group})
 	}
 	return out
 }

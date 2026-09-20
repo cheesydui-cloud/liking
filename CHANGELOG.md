@@ -2,6 +2,21 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.2.16 — 2026-09-20
+
+访问限制补充社交和 AI 分类，弹窗按组排列。
+
+### 新增
+- 社交：WhatsApp、LINE、Reddit、LinkedIn、Pinterest、Snapchat、Threads、微博、小红书、抖音
+- 视频：Twitch、哔哩哔哩
+- AI：Claude、Gemini、Grok、Perplexity、DeepSeek、Hugging Face、Midjourney、Character.AI、Copilot、Kimi、通义千问、豆包、Poe
+- 分类按社交 / 视频 / AI / 工具分组
+
+### 升级注意
+- 只升面板即可。同机 Agent 会随 `liking-upgrade` 重启
+- 日本线不用升
+- 回滚：`liking-upgrade --release v0.2.15`
+
 ## v0.2.15 — 2026-09-20
 
 访问限制增加测速、IP 查询等分类，并支持只允许访问指定网站。

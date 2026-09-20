@@ -3253,7 +3253,14 @@ func TestUserSiteDeny(t *testing.T) {
 
 	res = putJSON(userPath, map[string]any{"site_deny_categories": []string{"youtube", "tiktok"}})
 	decodeRes(t, res, &edited)
-	if len(edited.User.SiteDenyCategories) != 2 || edited.User.SiteDenyCategories[0] != "youtube" || edited.User.SiteDenyCategories[1] != "tiktok" {
+	if len(edited.User.SiteDenyCategories) != 2 {
+		t.Fatalf("cats only %+v", edited.User.SiteDenyCategories)
+	}
+	gotCats := map[string]bool{}
+	for _, n := range edited.User.SiteDenyCategories {
+		gotCats[n] = true
+	}
+	if !gotCats["youtube"] || !gotCats["tiktok"] {
 		t.Fatalf("cats only %+v", edited.User.SiteDenyCategories)
 	}
 	if len(edited.User.SiteDenyDomains) != 2 {
