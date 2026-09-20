@@ -164,17 +164,13 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	h.readerLoop(ctx, ac)
 }
 
-func (h *Hub) reconcileOnConnect(serverID int64, lastRev string) {
+func (h *Hub) reconcileOnConnect(serverID int64, _ string) {
 	if h.Redispatch == nil {
 		return
 	}
-	s, err := db.GetServer(h.DB, serverID)
-	if err != nil {
-		return
-	}
-	if lastRev != "" && s.ConfigRev != "" && lastRev == s.ConfigRev && strings.TrimSpace(s.LastError) == "" {
-		return
-	}
+	// Always rebuild. ConfigRev is only updated after a successful apply, so
+	// a matching rev can still be stale (user site filter / speed saved while
+	// the client row was unchanged). Agent skips the reload if JSON is identical.
 	go h.Redispatch([]int64{serverID})
 }
 

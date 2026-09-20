@@ -168,6 +168,36 @@ func TestLoginLimiterPrunesEmpty(t *testing.T) {
 	}
 }
 
+func TestReconcileOnConnectPushesMatchingRev(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	tok, _ := db.RandomHex(8)
+	srv, err := db.CreateServer(d, "n1", "1.1.1.1", tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetServerRev(d, srv.ID, "rev-1"); err != nil {
+		t.Fatal(err)
+	}
+	called := make(chan int64, 1)
+	h := NewHub(d)
+	h.Redispatch = func(ids []int64) {
+		called <- ids[0]
+	}
+	h.reconcileOnConnect(srv.ID, "rev-1")
+	select {
+	case id := <-called:
+		if id != srv.ID {
+			t.Fatalf("id %d", id)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected redispatch even when rev matches")
+	}
+}
+
 func TestReconcileOnConnectRetriesLastError(t *testing.T) {
 	d, err := db.Open(":memory:")
 	if err != nil {

@@ -300,8 +300,8 @@ func TestProvisionUserIncremental(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ids) != 0 {
-		t.Fatalf("unchanged provision %+v", ids)
+	if len(ids) != 1 || ids[0] != srv.ID {
+		t.Fatalf("unchanged still needs sync %+v", ids)
 	}
 	c2, err := db.GetClient(d, created.ID, admin.ID)
 	if err != nil || c2.UUID != c1.UUID {

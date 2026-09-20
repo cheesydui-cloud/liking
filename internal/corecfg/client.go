@@ -74,6 +74,9 @@ func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
 		if in.Profile == ProfileMieru {
 			wantUser = wantEmail
 		}
+		// Always mark the server. Speed limit and site filter live on the
+		// user row; skipping here meant saving 访问限制 never pushed xray.
+		touched[in.ServerID] = struct{}{}
 		if !created && c.Enabled == wantEnabled && c.Email == wantEmail && c.Username == wantUser {
 			continue
 		}
@@ -85,7 +88,6 @@ func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
 		if err := db.UpsertClient(d, c); err != nil {
 			return nil, err
 		}
-		touched[in.ServerID] = struct{}{}
 	}
 	out := make([]int64, 0, len(touched))
 	for id := range touched {
