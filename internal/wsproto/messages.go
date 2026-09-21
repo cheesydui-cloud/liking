@@ -24,10 +24,13 @@ const (
 	TypeProbeAck      = "probe_ack"
 	TypeKick          = "kick"
 	TypeKickAck       = "kick_ack"
+	TypeEnsureNFT     = "ensure_nft"
+	TypeEnsureNFTAck  = "ensure_nft_ack"
 
 	CapCores = "cores"
 	CapProbe = "probe"
 	CapKick  = "kick"
+	CapNFT   = "nft"
 )
 
 type Envelope struct {
@@ -149,6 +152,12 @@ type KickAck struct {
 	OK     bool   `json:"ok"`
 	Error  string `json:"error,omitempty"`
 	Closed int    `json:"closed"`
+}
+
+type EnsureNFTAck struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+	Have  bool   `json:"have"`
 }
 
 type Ping struct {

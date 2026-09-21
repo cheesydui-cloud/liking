@@ -72,6 +72,7 @@ type Server struct {
 	TrafficResetDay int    `json:"traffic_reset_day"`
 	DisableIPv6     bool   `json:"disable_ipv6"`
 	CanPushCores    bool   `json:"can_push_cores,omitempty"`
+	CanPushNft      bool   `json:"can_push_nft,omitempty"`
 }
 
 type Certificate struct {

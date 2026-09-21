@@ -2,6 +2,22 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.2.21 — 2026-09-21
+
+实例卡片可安装 nftables，「拒绝中国 IP」不必再 SSH。
+
+### 新增
+- 实例菜单「安装 nftables」；卡片报缺 nftables 时直接点按钮
+- Agent 用 apt / yum / dnf / apk 安装，装完自动再下发拒绝中国 IP
+
+### 修复
+- Agent 能找到 `/usr/sbin/nft`，已装过也不再误报
+
+### 升级注意
+- 升面板和落地 Agent。远程机器先一键升级，再点安装 nftables
+- 日本线不用升
+- 回滚：`liking-upgrade --release v0.2.20`
+
 ## v0.2.20 — 2026-09-20
 
 直连落地可拒绝中国 IP，家里大陆直连失败，海外中转仍可打进来。

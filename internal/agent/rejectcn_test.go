@@ -107,11 +107,11 @@ func TestLoadCNListCacheAndFetch(t *testing.T) {
 func TestApplyRejectCNWritesScript(t *testing.T) {
 	oldOS := rejectCNGOOS
 	rejectCNGOOS = "linux"
-	oldHave := haveNFT
-	haveNFT = func() bool { return true }
+	oldBin := nftBin
+	nftBin = func() string { return "/usr/sbin/nft" }
 	defer func() {
 		rejectCNGOOS = oldOS
-		haveNFT = oldHave
+		nftBin = oldBin
 		nftRun = nftRunCmd
 	}()
 	dir := t.TempDir()
@@ -142,6 +142,84 @@ func TestApplyRejectCNWritesScript(t *testing.T) {
 	dropAt := strings.Index(script, "ip saddr @cn4 drop")
 	if allowAt < 0 || dropAt < 0 || allowAt > dropAt {
 		t.Fatalf("order %d %d", allowAt, dropAt)
+	}
+}
+
+func TestInstallNFTSkipWhenPresent(t *testing.T) {
+	oldBin := nftBin
+	oldRun := nftPkgRun
+	nftBin = func() string { return "/usr/sbin/nft" }
+	nftPkgRun = func(bin string, args ...string) ([]byte, error) {
+		t.Fatal("should not install")
+		return nil, nil
+	}
+	defer func() {
+		nftBin = oldBin
+		nftPkgRun = oldRun
+	}()
+	if err := defaultInstallNFT(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInstallNFTNonLinux(t *testing.T) {
+	oldOS := rejectCNGOOS
+	oldBin := nftBin
+	rejectCNGOOS = "darwin"
+	nftBin = func() string { return "" }
+	defer func() {
+		rejectCNGOOS = oldOS
+		nftBin = oldBin
+	}()
+	if err := defaultInstallNFT(); err == nil || !strings.Contains(err.Error(), "Linux") {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestInstallNFTUsesAptGet(t *testing.T) {
+	oldOS := rejectCNGOOS
+	oldBin := nftBin
+	oldRun := nftPkgRun
+	oldMgr := nftPkgManagers
+	rejectCNGOOS = "linux"
+	have := false
+	nftBin = func() string {
+		if have {
+			return "/usr/sbin/nft"
+		}
+		return ""
+	}
+	nftPkgManagers = func() []nftPkgMgr {
+		return []nftPkgMgr{{Bin: "/usr/bin/apt-get", Pre: []string{"update", "-qq"}, Args: []string{"install", "-y", "nftables"}}}
+	}
+	var cmds []string
+	nftPkgRun = func(bin string, args ...string) ([]byte, error) {
+		cmds = append(cmds, bin+" "+strings.Join(args, " "))
+		if len(args) > 0 && args[0] == "install" {
+			have = true
+		}
+		return nil, nil
+	}
+	defer func() {
+		rejectCNGOOS = oldOS
+		nftBin = oldBin
+		nftPkgRun = oldRun
+		nftPkgManagers = oldMgr
+	}()
+	if err := defaultInstallNFT(); err != nil {
+		t.Fatal(err)
+	}
+	if len(cmds) != 2 || !strings.Contains(cmds[0], "update") || !strings.Contains(cmds[1], "install -y nftables") {
+		t.Fatalf("%v", cmds)
+	}
+}
+
+func TestNftRunCmdRequiresBin(t *testing.T) {
+	old := nftBin
+	nftBin = func() string { return "" }
+	defer func() { nftBin = old }()
+	if err := nftRunCmd("list", "tables"); err == nil || !strings.Contains(err.Error(), "nftables") {
+		t.Fatalf("%v", err)
 	}
 }
 

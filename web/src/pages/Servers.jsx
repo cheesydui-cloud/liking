@@ -258,6 +258,36 @@ export default function Servers() {
     setCoreSrv(s)
   }
 
+  const pushNft = async (s) => {
+    if (!s?.id) return
+    if (!s.online) {
+      toast('Agent 不在线，无法安装 nftables', 'error')
+      return
+    }
+    if (!s.can_push_nft) {
+      toast('该 Agent 还不支持安装 nftables。请先一键升级', 'error')
+      return
+    }
+    setBusyId(s.id)
+    try {
+      const d = await api.post(`/servers/${s.id}/push-nft`, {})
+      if (d.apply_error) toast(d.apply_error, 'error')
+      else toast('已安装 nftables')
+      await load()
+    } catch (e) {
+      toast(e.message, 'error')
+      if (e.code === 'agent_too_old') showInstall(s.id)
+    } finally { setBusyId(0) }
+  }
+
+  const nftCta = async (s) => {
+    if (!s.can_push_nft) {
+      await upgradeAgent(s)
+      return
+    }
+    await pushNft(s)
+  }
+
   const pushCore = async () => {
     if (!coreSrv) return
     setBusy(true)
@@ -556,6 +586,12 @@ export default function Servers() {
                       { label: '改公开地址', onSelect: () => saveHost(s) },
                       { label: '编辑', hint: '名称、端口区间、到期、流量、IPv6', onSelect: () => openEdit(s) },
                       { label: '推送核心', hint: s.can_push_cores ? '安装或卸载 Xray / sing-box / Mita' : (s.online ? '需先升级 Agent' : '需在线'), onSelect: () => openCores(s) },
+                      {
+                        label: '安装 nftables',
+                        hint: s.can_push_nft ? '拒绝中国 IP 需要。已装则跳过' : (s.online ? '需先升级 Agent' : '需在线'),
+                        disabled: !s.online || busyId === s.id,
+                        onSelect: () => pushNft(s),
+                      },
                       { label: '流量上限', onSelect: () => saveLimit(s) },
                       {
                         label: s.disable_ipv6 ? '允许 IPv6' : '禁止 IPv6',
@@ -599,7 +635,18 @@ export default function Servers() {
                 ) : (
                   s.last_error ? <div className="machine-fault">{s.last_error}</div> : null
                 )}
-                {s.online && s.last_error ? <div className="machine-fault">{s.last_error}</div> : null}
+                {s.online && s.last_error ? (
+                  <div>
+                    <div className="machine-fault">{s.last_error}</div>
+                    {/nftables/i.test(s.last_error) ? (
+                      <div className="px-3 pb-2">
+                        <button type="button" className="btn-primary h-8 w-full" disabled={busyId === s.id} onClick={() => nftCta(s)}>
+                          {busyId === s.id ? '处理中…' : (s.can_push_nft ? '安装 nftables' : '先升级 Agent')}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {!fresh ? <ServerMeta s={s} /> : null}
                 <div className="machine-foot">
                   <button type="button" className="machine-ports" onClick={() => openEdit(s)} title="编辑实例">

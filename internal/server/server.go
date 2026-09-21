@@ -126,6 +126,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/api/servers/{id}/uninstall-agent", s.handleUninstallAgent)
 			r.Post("/api/servers/{id}/push-core", s.handlePushCore)
 			r.Post("/api/servers/{id}/remove-core", s.handleRemoveCore)
+			r.Post("/api/servers/{id}/push-nft", s.handlePushNft)
 			r.Post("/api/servers/{id}/rotate-token", s.handleRotateToken)
 			r.Post("/api/servers/{id}/dest-probe", s.handleDestProbe)
 			r.Get("/api/servers/{id}/cf-domains", s.handleServerCFDomains)

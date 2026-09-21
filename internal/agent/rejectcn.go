@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -34,12 +35,17 @@ var cnListURLs = []struct {
 }
 
 var (
-	nftRun       = nftRunCmd
-	haveNFT      = func() bool { return lookBin("nft") != "" }
-	cnHTTPGet    = httpGetBody
-	cnListNow    = time.Now
-	rejectCNGOOS = runtime.GOOS
+	nftRun         = nftRunCmd
+	nftBin         = lookNft
+	installNFT     = defaultInstallNFT
+	nftPkgRun      = nftPkgRunCmd
+	nftPkgManagers = defaultNFTPkgManagers
+	cnHTTPGet      = httpGetBody
+	cnListNow      = time.Now
+	rejectCNGOOS   = runtime.GOOS
 )
+
+func haveNFT() bool { return nftBin() != "" }
 
 func applyRejectCN(dir string, spec wsproto.RejectCN) error {
 	if rejectCNGOOS != "linux" {
@@ -77,7 +83,11 @@ func applyRejectCN(dir string, spec wsproto.RejectCN) error {
 }
 
 func nftRunCmd(args ...string) error {
-	cmd := exec.Command("nft", args...)
+	bin := nftBin()
+	if bin == "" {
+		return fmt.Errorf("需要 nftables 才能拒绝中国 IP")
+	}
+	cmd := exec.Command(bin, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
@@ -87,6 +97,82 @@ func nftRunCmd(args ...string) error {
 		return fmt.Errorf("%s", msg)
 	}
 	return nil
+}
+
+type nftPkgMgr struct {
+	Bin  string
+	Pre  []string
+	Args []string
+}
+
+func defaultNFTPkgManagers() []nftPkgMgr {
+	var out []nftPkgMgr
+	if p := lookBin("apt-get", "apt"); p != "" {
+		out = append(out, nftPkgMgr{Bin: p, Pre: []string{"update", "-qq"}, Args: []string{"install", "-y", "nftables"}})
+	}
+	if p := lookBin("dnf"); p != "" {
+		out = append(out, nftPkgMgr{Bin: p, Args: []string{"install", "-y", "nftables"}})
+	}
+	if p := lookBin("yum"); p != "" {
+		out = append(out, nftPkgMgr{Bin: p, Args: []string{"install", "-y", "nftables"}})
+	}
+	if p := lookBin("apk"); p != "" {
+		out = append(out, nftPkgMgr{Bin: p, Args: []string{"add", "nftables"}})
+	}
+	if p := lookBin("pacman"); p != "" {
+		out = append(out, nftPkgMgr{Bin: p, Args: []string{"-Sy", "--noconfirm", "nftables"}})
+	}
+	if p := lookBin("zypper"); p != "" {
+		out = append(out, nftPkgMgr{Bin: p, Args: []string{"install", "-y", "nftables"}})
+	}
+	return out
+}
+
+func nftPkgRunCmd(bin string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, args...)
+	base := strings.ToLower(filepath.Base(bin))
+	if base == "apt-get" || base == "apt" {
+		cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
+	}
+	return cmd.CombinedOutput()
+}
+
+func defaultInstallNFT() error {
+	if haveNFT() {
+		return nil
+	}
+	if rejectCNGOOS != "linux" {
+		return fmt.Errorf("需要 Linux 才能安装 nftables")
+	}
+	mgrs := nftPkgManagers()
+	if len(mgrs) == 0 {
+		return fmt.Errorf("需要 nftables 才能拒绝中国 IP")
+	}
+	var last error
+	for _, m := range mgrs {
+		if len(m.Pre) > 0 {
+			_, _ = nftPkgRun(m.Bin, m.Pre...)
+		}
+		out, err := nftPkgRun(m.Bin, m.Args...)
+		if err != nil {
+			msg := strings.TrimSpace(string(out))
+			if msg == "" {
+				msg = err.Error()
+			}
+			last = fmt.Errorf("安装 nftables: %s", msg)
+			continue
+		}
+		if haveNFT() {
+			return nil
+		}
+		last = fmt.Errorf("安装后仍找不到 nft")
+	}
+	if last != nil {
+		return last
+	}
+	return fmt.Errorf("需要 nftables 才能拒绝中国 IP")
 }
 
 func uniqPorts(ports []int) []int {

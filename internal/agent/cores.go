@@ -688,7 +688,7 @@ func lookBin(names ...string) string {
 		if p, err := exec.LookPath(n); err == nil {
 			return p
 		}
-		for _, dir := range []string{"/usr/local/bin", "/usr/bin"} {
+		for _, dir := range []string{"/usr/local/bin", "/usr/bin", "/usr/sbin", "/sbin"} {
 			p := filepath.Join(dir, n)
 			if st, err := os.Stat(p); err == nil && !st.IsDir() {
 				return p

@@ -47,6 +47,7 @@ func (s *Server) decorateServers(list []*db.Server) {
 		x.NeedsUpgrade = x.Online == 1 && x.AgentVer != "" && x.AgentVer != version.Version
 		x.NeedsReinstall = x.Online == 1 && !version.CanRemoteUpgrade(x.AgentVer)
 		x.CanPushCores = s.Hub.HasCap(x.ID, wsproto.CapCores)
+		x.CanPushNft = s.Hub.HasCap(x.ID, wsproto.CapNFT)
 		if up, down, ok := s.Hub.Live(x.ID); ok {
 			x.NetUpBps = up
 			x.NetDownBps = down

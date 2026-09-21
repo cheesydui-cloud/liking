@@ -120,7 +120,7 @@ func (a *Agent) session(ctx context.Context) error {
 		Arch:         runtime.GOARCH,
 		LastRev:      lastRev,
 		Cores:        detectedCores(),
-		Caps:         []string{wsproto.CapCores, wsproto.CapProbe, wsproto.CapKick},
+		Caps:         []string{wsproto.CapCores, wsproto.CapProbe, wsproto.CapKick, wsproto.CapNFT},
 	})
 	if err := a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeHello, ID: "hello", Payload: hello}); err != nil {
 		return err
@@ -168,7 +168,7 @@ func (a *Agent) session(ctx context.Context) error {
 		case err := <-errCh:
 			return err
 		case env := <-envCh:
-			if env.Type == wsproto.TypeApply || env.Type == wsproto.TypeEnsureCore || env.Type == wsproto.TypeRemoveCore || env.Type == wsproto.TypeProbe || env.Type == wsproto.TypeKick {
+			if env.Type == wsproto.TypeApply || env.Type == wsproto.TypeEnsureCore || env.Type == wsproto.TypeRemoveCore || env.Type == wsproto.TypeProbe || env.Type == wsproto.TypeKick || env.Type == wsproto.TypeEnsureNFT {
 				go func(env wsproto.Envelope) {
 					var err error
 					switch env.Type {
@@ -182,6 +182,8 @@ func (a *Agent) session(ctx context.Context) error {
 						err = a.handleProbe(ctx, ws, env)
 					case wsproto.TypeKick:
 						err = a.handleKick(ctx, ws, env)
+					case wsproto.TypeEnsureNFT:
+						err = a.handleEnsureNFT(ctx, ws, env)
 					}
 					if err != nil {
 						log.Printf("agent %s: %v", env.Type, err)
@@ -394,6 +396,22 @@ func (a *Agent) handleKick(ctx context.Context, ws *websocket.Conn, env wsproto.
 func (a *Agent) ackKick(ctx context.Context, ws *websocket.Conn, id string, ok bool, errMsg string, closed int) error {
 	p, _ := json.Marshal(wsproto.KickAck{OK: ok, Error: errMsg, Closed: closed})
 	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeKickAck, ID: id, Payload: p})
+}
+
+func (a *Agent) handleEnsureNFT(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {
+	err := installNFT()
+	have := haveNFT()
+	ok := err == nil && have
+	msg := ""
+	if !ok {
+		if err != nil {
+			msg = err.Error()
+		} else {
+			msg = "需要 nftables 才能拒绝中国 IP"
+		}
+	}
+	p, _ := json.Marshal(wsproto.EnsureNFTAck{OK: ok, Error: msg, Have: have})
+	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeEnsureNFTAck, ID: env.ID, Payload: p})
 }
 
 func (a *Agent) handleApply(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {
