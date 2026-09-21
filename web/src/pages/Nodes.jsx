@@ -224,6 +224,11 @@ function hasAdvanced(st) {
   if (st.mode && st.mode !== 'auto') return true
   const alpn = Array.isArray(st.alpn) ? st.alpn.join(',') : String(st.alpn || '')
   if (alpn && alpn !== 'h2,http/1.1') return true
+  if (st.listen && st.listen !== '0.0.0.0') return true
+  const destHost = destHostOf(st.dest || '')
+  if (String(st.sni || '').trim() && String(st.sni).trim() !== destHost) return true
+  const names = Array.isArray(st.server_names) ? st.server_names.filter(Boolean) : []
+  if (names.length > 1 || names.some(n => n !== destHost)) return true
   return false
 }
 
@@ -777,7 +782,7 @@ export default function Nodes() {
                         {p.need_tls ? <Badge tone="muted">需证书</Badge> : null}
                         {p.landing === false ? <Badge tone="muted">仅入口</Badge> : null}
                       </span>
-                      {p.desc ? <span className="block text-[12px] text-ink-mut mt-0.5 leading-snug">{p.desc}</span> : null}
+                      {p.desc && on ? <span className="block text-[12px] text-ink-mut mt-0.5 leading-snug">{p.desc}</span> : null}
                     </span>
                   </button>
                 )
@@ -795,7 +800,7 @@ export default function Nodes() {
             <input type="checkbox" className="mt-0.5" checked={!!f.reject_cn} onChange={e => setF({ ...f, reject_cn: e.target.checked })} />
             <span>
               <span className="font-medium text-ink">拒绝中国 IP</span>
-              <span className="block text-[12px] text-ink-mut mt-0.5">大陆家里直连这个落地会失败。海外或香港中转仍可打进来。面板自己的中转会放行入口 IP。认的是 IP，不是账号。大陆机房的自建中转也会失败。需要新 Agent。</span>
+              <span className="block text-[12px] text-ink-mut mt-0.5">大陆家里直连失败，海外中转仍可进。认 IP，不是账号。</span>
             </span>
           </label>
           {meta?.need_tls && (
@@ -807,29 +812,19 @@ export default function Nodes() {
             </Field>
           )}
           {isReality(f.profile) && (
-            <>
-              <div className="sm:col-span-2">
-                <Field as="div" label="伪装目标 dest" hint="点开从这台实例测延迟，选数字最小的。也可自己填。">
-                  <DestPicker
-                    value={f.dest}
-                    server={selectedServer}
-                    onChange={dest => {
-                      const prev = destHostName
-                      const sni = String(f.sni || '').trim()
-                      setF({ ...f, dest, sni: (!sni || sni === prev) ? '' : f.sni })
-                    }}
-                  />
-                </Field>
-              </div>
-              <Field label="SNI / serverNames" hint="客户端校验用。留空则用 dest 的域名。可逗号分隔多个。">
-                <input className="input-field" value={f.sni} onChange={e => setF({ ...f, sni: e.target.value })} placeholder={destHostName || 'www.cloudflare.com'} />
+            <div className="sm:col-span-2">
+              <Field as="div" label="伪装目标 dest" hint="点开从这台实例测延迟，选数字最小的。也可自己填。SNI 默认用 dest 域名。">
+                <DestPicker
+                  value={f.dest}
+                  server={selectedServer}
+                  onChange={dest => {
+                    const prev = destHostName
+                    const sni = String(f.sni || '').trim()
+                    setF({ ...f, dest, sni: (!sni || sni === prev) ? '' : f.sni })
+                  }}
+                />
               </Field>
-            </>
-          )}
-          {needsTLS(f.profile) && (
-            <Field label="SNI" hint="客户端校验的域名。留空则用实例公开地址。">
-              <input className="input-field" value={f.sni} onChange={e => setF({ ...f, sni: e.target.value })} placeholder={selectedServer?.public_host || ''} />
-            </Field>
+            </div>
           )}
           {f.profile === 'vless-xhttp-tls' && (
             <Field label="Path" hint="可留空自动生成。建议随机路径，不要用 /">
@@ -867,7 +862,7 @@ export default function Nodes() {
           )}
           <div className="sm:col-span-2">
             <button type="button" className="row-act" onClick={() => setShowAdv(v => !v)} aria-expanded={showAdv}>
-              {showAdv ? '收起高级选项' : '高级选项 / 指纹 / 密钥 / TLS'}
+              {showAdv ? '收起高级选项' : '高级选项 / SNI / 指纹 / 密钥'}
             </button>
           </div>
           {showAdv && (
@@ -875,6 +870,16 @@ export default function Nodes() {
               <Field label="监听地址" hint="一般保持 0.0.0.0">
                 <input className="input-field" value={f.listen} onChange={e => setF({ ...f, listen: e.target.value })} />
               </Field>
+              {isReality(f.profile) && (
+                <Field label="SNI / serverNames" hint="客户端校验用。留空则用 dest 的域名。可逗号分隔多个。">
+                  <input className="input-field" value={f.sni} onChange={e => setF({ ...f, sni: e.target.value })} placeholder={destHostName || 'www.cloudflare.com'} />
+                </Field>
+              )}
+              {needsTLS(f.profile) && (
+                <Field label="SNI" hint="客户端校验的域名。留空则用实例公开地址。">
+                  <input className="input-field" value={f.sni} onChange={e => setF({ ...f, sni: e.target.value })} placeholder={selectedServer?.public_host || ''} />
+                </Field>
+              )}
               {(isReality(f.profile) || needsTLS(f.profile)) && (
                 <Field label="uTLS 指纹" hint="客户端伪装成这种浏览器的 TLS 握手。">
                   <select className="input-field" value={f.fingerprint} onChange={e => setF({ ...f, fingerprint: e.target.value })}>

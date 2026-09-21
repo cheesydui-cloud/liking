@@ -579,8 +579,10 @@ export default function Servers() {
                     </div>
                   </div>
                   <div className="machine-toolbar">
+                    {s.online && !fresh ? (
+                      <button type="button" className="row-act" disabled={busyId === s.id} onClick={() => sync(s.id)}>同步</button>
+                    ) : null}
                     <MoreMenu iconOnly items={[
-                      { label: '同步', hint: '把配置下发到这台机器', onSelect: () => sync(s.id) },
                       { label: '安装命令', onSelect: () => showInstall(s.id) },
                       { label: '从 CF 同步', onSelect: () => openCF(s) },
                       { label: '改公开地址', onSelect: () => saveHost(s) },
@@ -645,6 +647,20 @@ export default function Servers() {
                         </button>
                       </div>
                     ) : null}
+                  </div>
+                ) : null}
+                {!fresh && !(/nftables/i.test(s.last_error || '')) && s.needs_reinstall ? (
+                  <div className="px-3 pb-2">
+                    <button type="button" className="btn-primary h-8 w-full" onClick={() => showInstall(s.id)}>
+                      <Icon name="copy" size={14} /> 复制安装命令
+                    </button>
+                  </div>
+                ) : null}
+                {!fresh && s.online && s.needs_upgrade && !s.needs_reinstall && !(/nftables/i.test(s.last_error || '')) ? (
+                  <div className="px-3 pb-2">
+                    <button type="button" className="btn-primary h-8 w-full" disabled={busyId === s.id} onClick={() => upgradeAgent(s)}>
+                      {busyId === s.id ? '升级中…' : '一键升级'}
+                    </button>
                   </div>
                 ) : null}
                 {!fresh ? <ServerMeta s={s} /> : null}

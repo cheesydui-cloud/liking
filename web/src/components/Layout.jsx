@@ -151,7 +151,6 @@ const PAGE_TITLES = {
   '/packages': '套餐',
   '/forwards': '中转',
   '/traffic': '流量',
-  '/subscribe': '订阅',
   '/settings': '设置',
   '/my': '订阅',
   '/my/nodes': '节点',
@@ -188,18 +187,10 @@ export function Layout({ children }) {
   }, [loc.pathname])
 
   useEffect(() => {
-    const on = loc.pathname === '/' || loc.pathname === '/servers'
-    document.documentElement.classList.toggle('page-aliyun', on)
-    return () => document.documentElement.classList.remove('page-aliyun')
-  }, [loc.pathname])
-
-  useEffect(() => {
+    document.documentElement.classList.add('page-aliyun')
     const meta = document.querySelector('meta[name="theme-color"]')
-    if (!meta) return
-    const on = loc.pathname === '/' || loc.pathname === '/servers'
-    if (on) meta.setAttribute('content', dark ? '#141414' : '#F7F8FA')
-    else meta.setAttribute('content', dark ? '#18181B' : '#F6F6F4')
-  }, [loc.pathname, dark])
+    if (meta) meta.setAttribute('content', dark ? '#141414' : '#F7F8FA')
+  }, [dark])
 
   useEffect(() => {
     if (!open) return
@@ -235,7 +226,7 @@ export function Layout({ children }) {
     document.documentElement.classList.toggle('dark', next)
     localStorage.setItem('lk-theme', next ? 'dark' : 'light')
     const meta = document.querySelector('meta[name="theme-color"]')
-    if (meta) meta.setAttribute('content', next ? '#18181B' : '#F6F6F4')
+    if (meta) meta.setAttribute('content', next ? '#141414' : '#F7F8FA')
   }
 
   const groups = isAdmin && !userView ? [
@@ -259,7 +250,6 @@ export function Layout({ children }) {
     {
       label: '系统',
       items: [
-        { to: '/subscribe', icon: 'link', label: '订阅' },
         { to: '/settings', icon: 'gear', label: '设置' },
       ],
     },
@@ -337,9 +327,11 @@ export function Layout({ children }) {
             <Icon name={dark ? 'sun' : 'moon'} size={15} />
           </button>
         </div>
-        <div ref={scrollRef} className="scroll-pane flex-1 overflow-y-auto px-3 sm:px-5 py-4 sm:py-5 pb-24 sm:pb-5">
+        <div ref={scrollRef} className="scroll-pane flex-1 overflow-y-auto px-3 sm:px-5 py-4 sm:py-5">
           <div className="max-w-[1280px]">
-            {announceLong ? <div className="notice mb-4">{announceText}</div> : null}
+            {announceText ? (
+              <div className={`notice mb-4${announceLong ? '' : ' sm:hidden'}`}>{announceText}</div>
+            ) : null}
             {children}
           </div>
         </div>

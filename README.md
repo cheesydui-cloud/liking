@@ -9,7 +9,7 @@
 ## 能做什么
 
 - 管理员登录、服务器（机器卡片：实时上下行、健康、一键升级 / 卸载 Agent、轮换令牌）、节点（按服务器分组、协议入站）、反向 WSS 纳管 Agent；公开地址可从 Cloudflare 拉取已托管域名
-- 设置分 Tab：面板、证书、备份、安全、账号、审计。侧栏「订阅」绑定 Clash Meta / sing-box 分流（极简 / 均衡 / 完整 / 自定义，规则集来自 MetaCubeX）；用户页可单独改。证书：Cloudflare DNS 申请 Let's Encrypt（支持泛域名，域名不必指向面板）、自签、上传 PEM；到期前自动续期。面板可选 HTTPS（选证书后重启服务）。账号可改用户名、密码和 TOTP。备份可加密 `.lkb1`、定时保留 N 份。管理员 IP 白名单、操作审计
+- 设置分 Tab：面板、分流、证书、备份、安全、账号、审计。分流绑定 Clash Meta / sing-box 规则（极简 / 均衡 / 完整 / 自定义，规则集来自 MetaCubeX）；用户页可单独改。证书：Cloudflare DNS 申请 Let's Encrypt（支持泛域名，域名不必指向面板）、自签、上传 PEM；到期前自动续期。面板可选 HTTPS（选证书后重启服务）。账号可改用户名、密码和 TOTP。备份可加密 `.lkb1`、定时保留 N 份。管理员 IP 白名单、操作审计
 - 七组入站：VLESS+REALITY、VLESS+REALITY+Vision、VLESS+XHTTP+TLS、Trojan+TLS、SS2022、AnyTLS+TLS、Mieru；第一次下发时节点自动安装对应内核。增加节点按协议给 dest / SNI / 指纹 / TLS 1.3 等选项；REALITY dest 不能指向本机
 - 用户 / 套餐（一人一套餐；套餐必须勾选节点，不选则没有节点；列表显示节点数量和机器名）；到期或超量从内核配置摘掉客户端。Agent 采集 Xray / AnyTLS / Mieru 用户流量；管理端「流量」按日、用户、节点统计，计费按套餐方向和节点倍率
 - 开户随机密码、用户编辑（用户名 / 套餐 / 到期 / 流量 / 登录密码）、流量进度、订阅二维码 / Clash·sing-box 导入。用户卡片可设访问限制：节点侧禁止谷歌 / 油管 / TikTok / 自定义域名，任意客户端生效
@@ -56,7 +56,7 @@ liking-upgrade
 指定版本：
 
 ```bash
-liking-upgrade --release v0.2.21
+liking-upgrade --release v0.2.22
 ```
 
 只更新安装脚本本身：

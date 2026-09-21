@@ -295,7 +295,7 @@ function UserRulesModal({ user, onClose, onSaved }) {
     }>
       <div className="space-y-4">
         <p className="text-[12.5px] text-ink-mut leading-relaxed">
-          只改这个用户的 Clash Meta 与 sing-box 订阅。跟随全局则用侧栏「订阅」里的规则。节点仍由套餐决定，通用 URI 不受影响。
+          只改这个用户的 Clash Meta 与 sing-box 订阅。跟随全局则用「设置 · 分流」里的规则。节点仍由套餐决定，通用 URI 不受影响。
         </p>
         {!preset ? (
           <p className="text-[12px] text-ink-mut">当前全局：{presetLabel(globalPreset)}，{globalCats.length} 类。点规则会变成这个用户自己的自定义。</p>
@@ -890,13 +890,10 @@ export default function Users() {
                     </button>
                     <MoreMenu iconOnly items={[
                       { label: '编辑', onSelect: () => openEdit(u) },
-                      { label: '订阅', onSelect: () => setSubUser(u) },
                       { label: '分流规则', onSelect: () => setRuleUser(u) },
                       { label: '访问限制', onSelect: () => setDenyUser(u) },
                       { label: '预览节点', onSelect: () => openPreview(u) },
-                      { label: '复制名片', onSelect: () => copyCard(u) },
                       { label: '重置密码', onSelect: () => resetPassword(u) },
-                      { label: '踢下线', onSelect: () => kickUser(u) },
                       { sep: true },
                       { label: '流量', onSelect: () => openTraffic(u) },
                       { label: u.enabled ? '停用' : '启用', onSelect: () => toggleEnabled(u) },

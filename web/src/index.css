@@ -106,7 +106,6 @@
   --color-danger-soft: rgba(248, 113, 113, 0.16);
 }
 
-/* Preview: 总览 / 实例 only. Confirm before applying globally. */
 html.page-aliyun {
   --ink-50: #f7f8fa;
   --warn-700: #fa8c16;
