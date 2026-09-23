@@ -24,6 +24,13 @@ func nftMbpsToKBps(mbps int64) int64 {
 	return n
 }
 
+func limitKBps(l wsproto.SpeedLimit) int64 {
+	if l.KBps > 0 {
+		return l.KBps
+	}
+	return nftMbpsToKBps(l.Mbps)
+}
+
 func nftSpeedTable(limits []wsproto.SpeedLimit) string {
 	seen := map[uint32]struct{}{}
 	var b strings.Builder
@@ -35,17 +42,17 @@ func nftSpeedTable(limits []wsproto.SpeedLimit) string {
 	var input strings.Builder
 	n := 0
 	for _, l := range limits {
-		if l.Mark == 0 || l.Mbps < 1 {
+		if l.Mark == 0 {
+			continue
+		}
+		kBps := limitKBps(l)
+		if kBps < 1 {
 			continue
 		}
 		if _, ok := seen[l.Mark]; ok {
 			continue
 		}
 		seen[l.Mark] = struct{}{}
-		kBps := nftMbpsToKBps(l.Mbps)
-		if kBps < 1 {
-			continue
-		}
 		n++
 		fmt.Fprintf(&b, "    meta mark 0x%08x ct mark set meta mark\n", l.Mark)
 		fmt.Fprintf(&b, "    ct mark 0x%08x limit rate over %d kbytes/second drop\n", l.Mark, kBps)

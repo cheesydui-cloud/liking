@@ -10,6 +10,8 @@ import { Badge, DayBars, Empty, Field, FilterTabs, Icon, Meter, Modal, MoreMenu,
 import { SubPanel } from '../components/SubPanel'
 import { NodePreviewList } from '../components/NodePreview'
 import { catsForPreset, presetLabel, SubRulePicker, userRulePresets } from '../components/SubRules'
+import { SpeedField } from '../components/SpeedField'
+import { formatSpeedLimit, kbpsFromForm, speedFormFromKbps } from '../lib/speed'
 
 function randPassword() {
   const a = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
@@ -58,12 +60,12 @@ function bytesFromGB(s) {
   return Math.round(n * 1024 * 1024 * 1024)
 }
 
-const emptyForm = { username: '', password: '', remark: '', package_id: '', days: 30, expires: '', traffic_gb: '', enabled: true, traffic_reset_day: 0, speed_mbps: '' }
+const emptyForm = { username: '', password: '', remark: '', package_id: '', days: 30, expires: '', traffic_gb: '', enabled: true, traffic_reset_day: 0, speed_value: '', speed_unit: 'mbps' }
 
-function speedLimitBps(mbps) {
-  const n = Number(mbps) || 0
+function speedLimitBps(kbps) {
+  const n = Number(kbps) || 0
   if (n <= 0) return 0
-  return Math.round(n * 1_000_000 / 8)
+  return n * 1000
 }
 
 function userExpiryTs(u) {
@@ -84,7 +86,7 @@ function UserFlags({ u }) {
   if (u.traffic_cap > 0 && billedBytes(u) >= u.traffic_cap) flags.push(<Badge key="cap" tone="danger">超量</Badge>)
   else if (u.quota_ratio >= 80) flags.push(<Badge key="q" tone="warn">{u.quota_ratio}%</Badge>)
   if (u.enabled === false) flags.push(<Badge key="off" tone="muted">停用</Badge>)
-  if (u.speed_limit > 0) flags.push(<Badge key="spd" tone="muted">{u.speed_limit} Mbps</Badge>)
+  if (u.speed_limit > 0) flags.push(<Badge key="spd" tone="muted">{formatSpeedLimit(u.speed_limit)}</Badge>)
   if (u.sub_rule_preset) flags.push(<Badge key="rule" tone="muted">独立规则</Badge>)
   const deny = denyBadgeText(u)
   if (deny) flags.push(<Badge key="deny" tone="muted">{deny}</Badge>)
@@ -208,7 +210,7 @@ function formatUserCard(u, pkgs = []) {
     const cap = u.traffic_cap || trafficCap(u, pkgs)
     if (cap > 0) lines.push(`流量：${fmtBytes(billedBytes(u))} / ${fmtBytes(cap)}`)
     else lines.push('流量：不限')
-    if (u.speed_limit > 0) lines.push(`限速：${u.speed_limit} Mbps`)
+    if (u.speed_limit > 0) lines.push(`限速：${formatSpeedLimit(u.speed_limit)}`)
     else lines.push('限速：不限')
   }
   if (u.sub_token) lines.push(`订阅：${origin}/api/sub/${u.sub_token}`)
@@ -484,6 +486,7 @@ export default function Users() {
   }
 
   const openEdit = (u) => {
+    const speed = speedFormFromKbps(u.speed_limit)
     setEditUser(u)
     setF({
       username: u.username || '',
@@ -495,7 +498,8 @@ export default function Users() {
       traffic_gb: gbFromBytes(u.traffic_limit),
       enabled: u.enabled !== false,
       traffic_reset_day: u.traffic_reset_day || 0,
-      speed_mbps: u.speed_limit > 0 ? String(u.speed_limit) : '',
+      speed_value: speed.value,
+      speed_unit: speed.unit,
     })
     setFormOpen(true)
   }
@@ -533,8 +537,8 @@ export default function Users() {
         const to = pkgs.find(p => Number(p.id) === next)?.name || '新套餐'
         if (!(await dialog.confirm({ title: '更换套餐', message: `将从「${from}」换到「${to}」，已用流量会清零。` }))) return
       }
-      const speed = f.speed_mbps === '' ? 0 : Number(f.speed_mbps)
-      if (!Number.isFinite(speed) || speed < 0 || speed > 10000) {
+      const speedKbps = kbpsFromForm(f.speed_value, f.speed_unit)
+      if (!Number.isFinite(speedKbps)) {
         toast('限速无效', 'error')
         return
       }
@@ -542,6 +546,7 @@ export default function Users() {
     setBusy(true)
     try {
       if (editUser) {
+        const speedKbps = kbpsFromForm(f.speed_value, f.speed_unit)
         const body = {
           username,
           remark: f.remark,
@@ -549,7 +554,7 @@ export default function Users() {
           expires_at: ymdToUnix(f.expires),
           traffic_limit: bytesFromGB(f.traffic_gb),
           traffic_reset_day: Number(f.traffic_reset_day) || 0,
-          speed_limit: f.speed_mbps === '' ? 0 : Math.round(Number(f.speed_mbps)),
+          speed_limit: speedKbps,
         }
         if (!f.package_id) body.unbind_package = true
         else body.package_id = Number(f.package_id)
@@ -565,6 +570,7 @@ export default function Users() {
             package_name: pkgName,
             password: f.password.trim(),
             enabled: f.enabled !== false,
+            speed_limit: kbpsFromForm(f.speed_value, f.speed_unit),
           }, pkgs)
           try {
             await copyText(card)
@@ -975,9 +981,12 @@ export default function Users() {
             </Field>
           )}
           {editing && (
-            <Field label="限速 Mbps" hint={f.speed_mbps === '' || Number(f.speed_mbps) === 0 ? '0 或不填 = 不限。直连 Xray / AnyTLS 上下行同一上限；中转、Mieru、SK5 不节流' : '直连 Xray / AnyTLS 上下行同一上限；中转、Mieru、SK5 不节流'}>
-              <input className="input-field" type="number" min="0" max="10000" step="1" placeholder="不限" value={f.speed_mbps} onChange={e => setF({ ...f, speed_mbps: e.target.value })} />
-            </Field>
+            <SpeedField
+              value={f.speed_value}
+              unit={f.speed_unit}
+              onChange={next => setF({ ...f, speed_value: next.value, speed_unit: next.unit })}
+              hint={f.speed_value === '' || Number(f.speed_value) === 0 ? '0 或不填 = 不限。直连 Xray / AnyTLS 上下行同一上限；中转、Mieru、SK5 不节流' : '直连 Xray / AnyTLS 上下行同一上限；中转、Mieru、SK5 不节流'}
+            />
           )}
           {editing && (
             <Field label="流量重置日" hint="0 跟随套餐 / 每月周期。1–31 表示每月这一天清零。">

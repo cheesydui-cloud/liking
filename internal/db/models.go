@@ -25,7 +25,7 @@ type User struct {
 	TOTPSecret         string   `json:"-"`
 	TrafficResetDay    int      `json:"traffic_reset_day"`
 	QuotaRatio         int      `json:"quota_ratio,omitempty"`
-	SpeedLimit         int64    `json:"speed_limit"`
+	SpeedLimit         int64    `json:"speed_limit"` // KB/s; 0 = unlimited; 1 Mbps = 125
 	NetUpBps           int64    `json:"net_up_bps"`
 	NetDownBps         int64    `json:"net_down_bps"`
 	SubRulePreset      string   `json:"sub_rule_preset"`
@@ -99,7 +99,7 @@ type Package struct {
 	InboundIDs         []int64   `json:"inbound_ids,omitempty"`
 	Multipliers        []float64 `json:"multipliers,omitempty"`
 	ServerIDs          []int64   `json:"server_ids"`
-	SpeedLimit         int64     `json:"speed_limit"`
+	SpeedLimit         int64     `json:"speed_limit"` // KB/s; 0 = unlimited; 1 Mbps = 125
 	SubRulePreset      string    `json:"sub_rule_preset"`
 	SubRuleCategories  []string  `json:"sub_rule_categories"`
 	SiteDenyCategories []string  `json:"site_deny_categories"`

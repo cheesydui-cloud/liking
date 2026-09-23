@@ -41,6 +41,10 @@ func TestNftSpeedTable(t *testing.T) {
 	if strings.Count(body, "limit rate over 6250 kbytes/second drop") != 2 {
 		t.Fatalf("drop rules %s", body)
 	}
+	small := nftSpeedTable([]wsproto.SpeedLimit{{Mark: mark, Mbps: 1, KBps: 100}})
+	if strings.Count(small, "limit rate over 100 kbytes/second drop") != 2 {
+		t.Fatalf("kbps rules %s", small)
+	}
 	if !strings.Contains(body, "chain output") || !strings.Contains(body, "chain input") {
 		t.Fatalf("chains %s", body)
 	}

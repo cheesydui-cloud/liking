@@ -6,10 +6,12 @@ import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, FilterTabs, Icon, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, StatusWord } from '../components/ui'
 import { NodePreviewList } from '../components/NodePreview'
 import { catsForPreset, SubRulePicker, userRulePresets } from '../components/SubRules'
+import { SpeedField } from '../components/SpeedField'
+import { formatSpeedLimit, kbpsFromForm, speedFormFromKbps } from '../lib/speed'
 
 const emptyForm = {
   name: '', gb: '', direction: 'oneway', inbound_ids: [], multipliers: {},
-  speed_mbps: '', sub_rule_preset: '', sub_rule_categories: [],
+  speed_value: '', speed_unit: 'mbps', sub_rule_preset: '', sub_rule_categories: [],
   site_filter_mode: '', site_deny_categories: [], site_deny_domains: '',
 }
 
@@ -41,7 +43,7 @@ function parseDenyLines(text) {
 
 function policyLine(p) {
   const bits = []
-  if (p.speed_limit > 0) bits.push(`默认 ${p.speed_limit} Mbps`)
+  if (p.speed_limit > 0) bits.push(`默认 ${formatSpeedLimit(p.speed_limit)}`)
   if (p.site_filter_mode === 'allow') bits.push('开户只允许指定站')
   else if (p.site_filter_mode === 'deny') bits.push('开户禁止指定站')
   if (p.sub_rule_preset) bits.push('独立分流')
@@ -187,6 +189,7 @@ export default function Packages() {
   }
 
   const startEdit = (p) => {
+    const speed = speedFormFromKbps(p.speed_limit)
     setEditId(p.id)
     setQ('')
     setF({
@@ -195,7 +198,8 @@ export default function Packages() {
       direction: p.direction || 'oneway',
       inbound_ids: selectedInboundIds(p, ins),
       multipliers: Object.fromEntries((selectedInboundIds(p, ins) || []).map((id, i) => [id, p.multipliers?.[i] ?? 1])),
-      speed_mbps: p.speed_limit > 0 ? String(p.speed_limit) : '',
+      speed_value: speed.value,
+      speed_unit: speed.unit,
       sub_rule_preset: p.sub_rule_preset || '',
       sub_rule_categories: Array.isArray(p.sub_rule_categories) ? p.sub_rule_categories : [],
       site_filter_mode: p.site_filter_mode || '',
@@ -221,8 +225,8 @@ export default function Packages() {
     const gbRaw = String(f.gb).trim()
     const gb = gbRaw === '' ? 0 : Number(gbRaw)
     if (!Number.isFinite(gb) || gb < 0) { toast('流量无效', 'error'); return }
-    const speed = f.speed_mbps === '' ? 0 : Number(f.speed_mbps)
-    if (!Number.isFinite(speed) || speed < 0 || speed > 10000) { toast('限速无效', 'error'); return }
+    const speed = kbpsFromForm(f.speed_value, f.speed_unit)
+    if (!Number.isFinite(speed)) { toast('限速无效', 'error'); return }
     const mode = f.site_filter_mode || ''
     const domains = mode ? parseDenyLines(f.site_deny_domains) : []
     if (mode && domains.length > 50) { toast('自定义域名最多 50 个', 'error'); return }
@@ -241,7 +245,7 @@ export default function Packages() {
         const n = Number(f.multipliers?.[id])
         return Number.isFinite(n) && n > 0 ? n : 1
       }),
-      speed_limit: Math.round(speed),
+      speed_limit: speed,
       sub_rule_preset: f.sub_rule_preset || '',
       sub_rule_categories: f.sub_rule_preset ? f.sub_rule_categories : [],
       site_filter_mode: mode,
@@ -504,9 +508,12 @@ export default function Packages() {
             <div className="text-[12px] font-medium text-ink-soft">开户默认</div>
             <p className="text-[12px] text-ink-mut mt-0.5 mb-3">只对之后开户或换套餐生效，不会改已经开好的用户。</p>
             <div className="space-y-4">
-              <Field label="限速 Mbps" hint="留空 = 不限">
-                <input className="input-field font-mono" type="number" min="0" max="10000" step="1" value={f.speed_mbps} onChange={e => setF({ ...f, speed_mbps: e.target.value })} />
-              </Field>
+              <SpeedField
+                value={f.speed_value}
+                unit={f.speed_unit}
+                onChange={next => setF({ ...f, speed_value: next.value, speed_unit: next.unit })}
+                hint="留空 = 不限"
+              />
               <div>
                 <div className="text-[12px] font-medium text-ink-soft mb-1.5">分流规则</div>
                 <p className="text-[12px] text-ink-mut mb-2">空则跟随「设置 · 分流」的全局规则。只影响 Clash Meta / sing-box。</p>

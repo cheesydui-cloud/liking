@@ -58,7 +58,7 @@ func TestBuildDirectSpeedLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	u, _ = db.GetUser(d, u.ID)
-	u.SpeedLimit = 50
+	u.SpeedLimit = 50 * KBpsPerMbps
 	if err := db.UpdateUser(d, u); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestBuildDirectSpeedLimit(t *testing.T) {
 		t.Fatalf("limits %+v", b.Apply.SpeedLimits)
 	}
 	mark := SpeedMark(u.ID)
-	if b.Apply.SpeedLimits[0].Mark != mark || b.Apply.SpeedLimits[0].Mbps != 50 {
+	if b.Apply.SpeedLimits[0].Mark != mark || b.Apply.SpeedLimits[0].Mbps != 50 || b.Apply.SpeedLimits[0].KBps != 50*KBpsPerMbps {
 		t.Fatalf("limit %+v mark %d", b.Apply.SpeedLimits[0], mark)
 	}
 
@@ -130,7 +130,7 @@ func TestBuildDirectSpeedLimit(t *testing.T) {
 	}
 
 	rev50 := b.Rev
-	u.SpeedLimit = 100
+	u.SpeedLimit = 100 * KBpsPerMbps
 	if err := db.UpdateUser(d, u); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestBuildDirectSpeedLimit(t *testing.T) {
 	if b2.Rev == rev50 {
 		t.Fatal("rev should change when only mbps changes")
 	}
-	if len(b2.Apply.SpeedLimits) != 1 || b2.Apply.SpeedLimits[0].Mbps != 100 {
+	if len(b2.Apply.SpeedLimits) != 1 || b2.Apply.SpeedLimits[0].Mbps != 100 || b2.Apply.SpeedLimits[0].KBps != 100*KBpsPerMbps {
 		t.Fatalf("limits %+v", b2.Apply.SpeedLimits)
 	}
 
@@ -283,7 +283,7 @@ func TestBuildSingboxSpeedLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	u, _ = db.GetUser(d, u.ID)
-	u.SpeedLimit = 20
+	u.SpeedLimit = 20 * KBpsPerMbps
 	if err := db.UpdateUser(d, u); err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestBuildSingboxSpeedLimit(t *testing.T) {
 		t.Fatal("singbox")
 	}
 	mark := SpeedMark(u.ID)
-	if len(b.Apply.SpeedLimits) != 1 || b.Apply.SpeedLimits[0].Mark != mark || b.Apply.SpeedLimits[0].Mbps != 20 {
+	if len(b.Apply.SpeedLimits) != 1 || b.Apply.SpeedLimits[0].Mark != mark || b.Apply.SpeedLimits[0].Mbps != 20 || b.Apply.SpeedLimits[0].KBps != 20*KBpsPerMbps {
 		t.Fatalf("limits %+v", b.Apply.SpeedLimits)
 	}
 	var cfg map[string]any
@@ -336,5 +336,17 @@ func TestBuildSingboxSpeedLimit(t *testing.T) {
 	}
 	if !hit {
 		t.Fatalf("missing auth_user rule in %+v", route["rules"])
+	}
+}
+
+func TestLegacyMbps(t *testing.T) {
+	if LegacyMbps(0) != 0 || LegacyMbps(-1) != 0 {
+		t.Fatal("zero")
+	}
+	if LegacyMbps(100) != 1 || LegacyMbps(125) != 1 || LegacyMbps(6250) != 50 {
+		t.Fatalf("100=%d 125=%d 6250=%d", LegacyMbps(100), LegacyMbps(125), LegacyMbps(6250))
+	}
+	if !ValidSpeedKBps(100) || !ValidSpeedKBps(MaxSpeedKBps) || ValidSpeedKBps(MaxSpeedKBps+1) {
+		t.Fatal("range")
 	}
 }

@@ -34,7 +34,7 @@ func applyPackagePolicyReq(p *db.Package, req packagePolicyReq) error {
 		return nil
 	}
 	if req.SpeedLimit != nil {
-		if *req.SpeedLimit < 0 || *req.SpeedLimit > 10000 {
+		if !corecfg.ValidSpeedKBps(*req.SpeedLimit) {
 			return errSpeedLimit
 		}
 		p.SpeedLimit = *req.SpeedLimit

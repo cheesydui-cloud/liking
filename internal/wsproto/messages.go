@@ -58,6 +58,9 @@ type HelloAck struct {
 type SpeedLimit struct {
 	Mark uint32 `json:"mark"`
 	Mbps int64  `json:"mbps"`
+	// KBps is exact kilobytes/second. Agents that only read Mbps
+	// treat a limit under 1 Mbps as 1 Mbps.
+	KBps int64 `json:"kbps,omitempty"`
 }
 
 type RejectCN struct {

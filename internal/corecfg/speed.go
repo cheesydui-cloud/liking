@@ -12,6 +12,29 @@ import (
 // SpeedMarkBase is 'L' in the high 8 bits. Low 24 bits are user id.
 const SpeedMarkBase uint32 = 0x4C000000
 
+// User and package SpeedLimit is kilobytes/second. 1 Mbps = 125 KB/s.
+const KBpsPerMbps int64 = 125
+
+// MaxSpeedKBps is 10000 Mbps.
+const MaxSpeedKBps int64 = 10000 * KBpsPerMbps
+
+func ValidSpeedKBps(n int64) bool {
+	return n >= 0 && n <= MaxSpeedKBps
+}
+
+// LegacyMbps is the whole-megabit value older agents still read.
+// Anything under 1 Mbps is sent as 1 so those agents still cap the user.
+func LegacyMbps(kbps int64) int64 {
+	if kbps < 1 {
+		return 0
+	}
+	mbps := kbps * 8 / 1000
+	if mbps < 1 {
+		return 1
+	}
+	return mbps
+}
+
 func SpeedMark(userID int64) uint32 {
 	if userID < 1 || userID > 0x00FFFFFF {
 		return 0
@@ -71,23 +94,23 @@ func collectSpeedLimits(ins []*db.Inbound, clients map[int64][]*db.Client, speed
 			if c == nil || !c.Enabled {
 				continue
 			}
-			mbps := speeds[c.UserID]
-			if mbps < 1 {
+			kbps := speeds[c.UserID]
+			if kbps < 1 {
 				continue
 			}
 			mark := SpeedMark(c.UserID)
 			if mark == 0 {
 				continue
 			}
-			byMark[mark] = mbps
+			byMark[mark] = kbps
 		}
 	}
 	if len(byMark) == 0 {
 		return nil
 	}
 	out := make([]wsproto.SpeedLimit, 0, len(byMark))
-	for mark, mbps := range byMark {
-		out = append(out, wsproto.SpeedLimit{Mark: mark, Mbps: mbps})
+	for mark, kbps := range byMark {
+		out = append(out, wsproto.SpeedLimit{Mark: mark, Mbps: LegacyMbps(kbps), KBps: kbps})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Mark < out[j].Mark })
 	return out

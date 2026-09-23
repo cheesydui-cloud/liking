@@ -301,6 +301,37 @@ body {
   outline-offset: 0;
 }
 .input-field:disabled { opacity: 0.5; cursor: not-allowed; }
+.speed-field { display: flex; gap: 8px; align-items: stretch; }
+.speed-field .input-field { flex: 1; min-width: 0; }
+.unit-switch {
+  display: flex;
+  flex-shrink: 0;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-ctl);
+  overflow: hidden;
+}
+.unit-switch button {
+  height: 36px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-ink-mut);
+  background: var(--color-surface);
+  border: 0;
+  cursor: pointer;
+}
+.unit-switch button + button { border-left: 1px solid var(--color-line); }
+.unit-switch button:hover { color: var(--color-ink); }
+.unit-switch button.is-on {
+  color: var(--color-ink);
+  background: var(--color-fill);
+  font-weight: 600;
+}
+.unit-switch button:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
 select.input-field { cursor: pointer; }
 textarea.input-field { height: auto; min-height: 7rem; padding-top: 0.55rem; padding-bottom: 0.55rem; resize: vertical; }
 
@@ -1774,6 +1805,7 @@ html.dark.page-aliyun .machine {
 @media (max-width: 639px) {
   .input-field { font-size: 16px; }
   .input-field:not(textarea):not(select) { min-height: 44px; height: 44px; }
+  .unit-switch button { min-height: 44px; height: 44px; }
   .btn-primary, .btn-ghost, .btn-danger { min-height: 44px; }
   .btn-ghost.w-8, .btn-ghost.w-9,
   .btn-primary.w-8, .btn-primary.w-9 { min-width: 44px; min-height: 44px; }

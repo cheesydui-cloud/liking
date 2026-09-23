@@ -224,14 +224,14 @@ func TestPackagePolicyCopiesOnCreateNotOnEdit(t *testing.T) {
 	}
 
 	bad, _ := json.Marshal(map[string]any{
-		"name": "bad", "server_ids": []int64{createdSrv.Server.ID}, "speed_limit": 10001,
+		"name": "bad", "server_ids": []int64{createdSrv.Server.ID}, "speed_limit": 10000*125 + 1,
 	})
 	res, err = c.Post(ts.URL+"/api/packages", "application/json", bytes.NewReader(bad))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.StatusCode == 200 {
-		t.Fatal("speed 10001")
+		t.Fatal("speed above 10000 Mbps")
 	}
 	io.ReadAll(res.Body)
 	res.Body.Close()

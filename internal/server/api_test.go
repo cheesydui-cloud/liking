@@ -1137,7 +1137,7 @@ func TestUserPasswordAndExtend(t *testing.T) {
 	if edited.User.UsedUp != 111 || edited.User.UsedDown != 222 {
 		t.Fatalf("same package wiped traffic %+v", edited.User)
 	}
-	badSpeed, _ := json.Marshal(map[string]any{"speed_limit": 10001})
+	badSpeed, _ := json.Marshal(map[string]any{"speed_limit": 10000*125 + 1})
 	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/users/"+strconv.FormatInt(created.User.ID, 10), bytes.NewReader(badSpeed))
 	if err != nil {
 		t.Fatal(err)
@@ -1148,7 +1148,7 @@ func TestUserPasswordAndExtend(t *testing.T) {
 		t.Fatal(err)
 	}
 	if res.StatusCode == 200 {
-		t.Fatal("speed_limit 10001 should fail")
+		t.Fatal("speed_limit above 10000 Mbps should fail")
 	}
 	io.ReadAll(res.Body)
 	res.Body.Close()

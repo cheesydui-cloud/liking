@@ -305,7 +305,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		u.TrafficResetDay = *req.TrafficResetDay
 	}
 	if req.SpeedLimit != nil {
-		if *req.SpeedLimit < 0 || *req.SpeedLimit > 10000 {
+		if !corecfg.ValidSpeedKBps(*req.SpeedLimit) {
 			jsonErr(w, http.StatusBadRequest, "限速无效")
 			return
 		}
