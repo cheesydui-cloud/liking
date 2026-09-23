@@ -26,8 +26,10 @@ require_val() {
   fi
 }
 
-[[ ${EUID:-$(id -u)} -eq 0 ]] || die "请以 root 运行（精简系统没有 sudo 时直接用 root）"
-command -v systemctl >/dev/null 2>&1 || die "需要 systemd"
+if [[ "${LIKING_INSTALL_TEST:-}" != 1 ]]; then
+  [[ ${EUID:-$(id -u)} -eq 0 ]] || die "请以 root 运行（精简系统没有 sudo 时直接用 root）"
+  command -v systemctl >/dev/null 2>&1 || die "需要 systemd"
+fi
 
 usage() {
   cat <<USAGE
@@ -304,6 +306,59 @@ match_sha() {
   [[ "$actual" == "$expected" ]]
 }
 
+# fetch_agent_asset downloads one release asset into dest and checks ELF, size, and sha256.
+# Failure removes dest and returns 1. Curl's stderr is kept so a bad download is visible.
+fetch_agent_asset() {
+  local base="$1" asset="$2" dest="$3" sums="$4"
+  local errf
+  errf="$(mktemp)"
+  rm -f "$dest"
+  if curl -fL --retry 5 --retry-delay 2 --connect-timeout 20 --max-time 180 \
+       -o "$dest" "$base/$asset" 2>"$errf" \
+     && is_elf "$dest" \
+     && [[ $(wc -c < "$dest" | tr -d ' ') -gt 1048576 ]] \
+     && match_sha "$dest" "$asset" "$sums"; then
+    rm -f "$errf"
+    note "    sha256: OK ($asset)"
+    return 0
+  fi
+  if [[ -s "$errf" ]]; then
+    warn "下载 $asset 失败: $(tr '\n' ' ' < "$errf" | head -c 240)"
+  else
+    warn "下载或校验失败: $asset"
+  fi
+  rm -f "$dest" "$errf"
+  return 1
+}
+
+# fetch_release_agents always installs the host arch. The other arch is best-effort.
+# amd64 releases also publish unsuffixed liking-agent with the same bytes; use it
+# when the arch-specific URL fails.
+fetch_release_agents() {
+  local base="$1" dir="$2"
+  local host_asset other_asset sums
+  host_asset="liking-agent-linux-${HOST_GOARCH}"
+  if [[ "$HOST_GOARCH" == "amd64" ]]; then
+    other_asset="liking-agent-linux-arm64"
+  else
+    other_asset="liking-agent-linux-amd64"
+  fi
+  sums="$dir/SHA256SUMS"
+  [[ -f "$sums" ]] || die "未取到 SHA256SUMS，无法校验 agent"
+
+  if ! fetch_agent_asset "$base" "$host_asset" "$dir/$host_asset" "$sums"; then
+    if [[ "$HOST_GOARCH" == "amd64" ]] && fetch_agent_asset "$base" "liking-agent" "$dir/$host_asset" "$sums"; then
+      note "    已用 liking-agent 代替 $host_asset"
+      note "    sha256: OK ($host_asset)"
+    else
+      die "没有下到 $host_asset。升级已中止，正在运行的面板没有被替换。请检查到 GitHub 的网络，或加上 --gh-proxy https://gh-proxy.com/"
+    fi
+  fi
+  if ! fetch_agent_asset "$base" "$other_asset" "$dir/$other_asset" "$sums"; then
+    warn "没下到 $other_asset。这个架构的节点暂时不能一键升级。"
+  fi
+}
+
 fetch_and_verify() {
   local base="$1" asset="$2" dest="$3"
   curl -fL --retry 5 --retry-delay 2 --connect-timeout 20 --progress-bar \
@@ -392,6 +447,26 @@ backup_db_before_upgrade() {
   note "升级前已备份数据库: $DATA_DIR/backups/pre-upgrade-$stamp.db"
 }
 
+warn_stale_agent() {
+  local server_ver agent_bin agent_ver f
+  for f in liking-agent-linux-amd64 liking-agent-linux-arm64; do
+    if [[ ! -f "$INSTALL_DIR/$f" ]]; then
+      warn "缺少 $f。这个架构的一键升级会失败。"
+    fi
+  done
+  server_ver="$("$INSTALL_DIR/liking-server" --version 2>/dev/null || true)"
+  agent_bin="$INSTALL_DIR/liking-agent-linux-${HOST_GOARCH}"
+  if [[ ! -x "$agent_bin" ]]; then
+    agent_bin="$INSTALL_DIR/liking-agent"
+  fi
+  if [[ -x "$agent_bin" && -n "$server_ver" ]]; then
+    agent_ver="$("$agent_bin" --version 2>/dev/null || true)"
+    if [[ -n "$agent_ver" && "$agent_ver" != "$server_ver" ]]; then
+      warn "agent 二进制是 $agent_ver，面板是 $server_ver。一键升级会下发旧版本。请确认上面有 sha256: OK (liking-agent-linux-${HOST_GOARCH})"
+    fi
+  fi
+}
+
 restart_local_agent() {
   if ! systemctl cat liking-agent.service >/dev/null 2>&1; then
     return 0
@@ -449,18 +524,17 @@ install_or_update() {
     note "下载 $base"
     download_named "$base" "liking-server" "$tmp/liking-server"
     is_elf "$tmp/liking-server" || die "下载的 liking-server 不是 ELF"
-    # 面板要给节点发 agent，两种架构都放下（失败不致命，有校验才保留）
-    for agent_asset in liking-agent-linux-amd64 liking-agent-linux-arm64 liking-agent; do
-      if curl -fL --retry 3 --retry-delay 2 --connect-timeout 20 -o "$tmp/$agent_asset" \
-           "$base/$agent_asset" 2>/dev/null \
-         && is_elf "$tmp/$agent_asset" \
-         && [[ $(wc -c < "$tmp/$agent_asset" | tr -d ' ') -gt 1048576 ]] \
-         && match_sha "$tmp/$agent_asset" "$agent_asset" "$tmp/SHA256SUMS"; then
-        note "    sha256: OK ($agent_asset)"
-      else
-        rm -f "$tmp/$agent_asset"
-      fi
-    done
+    [[ -f "$tmp/SHA256SUMS" ]] || die "未取到 SHA256SUMS"
+    fetch_release_agents "$base" "$tmp"
+  fi
+
+  if [[ "$HOST_GOARCH" == "amd64" && ! -f "$tmp/liking-agent-linux-amd64" && -f "$tmp/liking-agent" ]]; then
+    cp -f "$tmp/liking-agent" "$tmp/liking-agent-linux-amd64"
+    note "    已用 liking-agent 代替 liking-agent-linux-amd64"
+    note "    sha256: OK (liking-agent-linux-amd64)"
+  fi
+  if [[ ! -f "$tmp/liking-agent-linux-${HOST_GOARCH}" ]]; then
+    die "没有本机架构的 agent（liking-agent-linux-${HOST_GOARCH}）。升级已中止，正在运行的面板没有被替换。"
   fi
 
   if [[ -f "$INSTALL_DIR/liking-server" ]]; then
@@ -473,6 +547,7 @@ install_or_update() {
       install -m 0755 "$tmp/$f" "$INSTALL_DIR/$f"
     fi
   done
+  warn_stale_agent
 
   local first_install=0
   if [[ ! -f "$DATA_DIR/panel.db" ]]; then
@@ -589,10 +664,12 @@ if [[ "$self" == "liking-uninstall" && "$MODE" == "server" ]]; then
   MODE="uninstall"
 fi
 
-case "$MODE" in
-  server|update) install_or_update ;;
-  update-script) do_update_script ;;
-  uninstall) do_uninstall ;;
-  reset-password) do_reset_password ;;
-  *) die "未知模式 $MODE" ;;
-esac
+if [[ "${LIKING_INSTALL_TEST:-}" != 1 ]]; then
+  case "$MODE" in
+    server|update) install_or_update ;;
+    update-script) do_update_script ;;
+    uninstall) do_uninstall ;;
+    reset-password) do_reset_password ;;
+    *) die "未知模式 $MODE" ;;
+  esac
+fi

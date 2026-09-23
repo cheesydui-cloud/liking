@@ -46,7 +46,16 @@ func (s *Server) handleUpgradeAgent(w http.ResponseWriter, r *http.Request) {
 	arch = normalizeArch(arch)
 	p := findAgentBinary(osName, arch)
 	if p == "" {
-		jsonErr(w, http.StatusBadRequest, "面板没有对应架构的 agent 二进制")
+		jsonErr(w, http.StatusBadRequest, "面板没有对应架构的 agent 二进制。请在面板机再执行 liking-upgrade，确认有 sha256: OK (liking-agent-linux-"+arch+")")
+		return
+	}
+	match, err := agentBinaryHasVersion(p, version.Version)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "读取 agent 失败")
+		return
+	}
+	if !match {
+		jsonErr(w, http.StatusBadRequest, "面板旁边的 agent 文件不是 "+version.Version+"。请在面板机再执行 liking-upgrade，确认有 sha256: OK (liking-agent-linux-"+arch+") 后再点一键升级")
 		return
 	}
 	sum, err := sha256Path(p)
@@ -54,8 +63,7 @@ func (s *Server) handleUpgradeAgent(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "计算校验失败")
 		return
 	}
-	base := panelURL(s.DB, r)
-	dl := fmt.Sprintf("%s/v1/agent-bin?os=%s&arch=%s", base, osName, arch)
+	dl := agentBinDownloadURL(osName, arch)
 	raw, err := s.Hub.SendRPC(id, wsproto.TypeUpgrade, wsproto.Upgrade{
 		Version: version.Version,
 		SHA256:  sum,

@@ -53,28 +53,53 @@ jobs:
 
       - name: Build binaries
         run: |
+          set -euo pipefail
           VERSION="${{ steps.ver.outputs.version }}"
           VERSION="${VERSION#v}"
+          if ! grep -q "const Version = \"${VERSION}\"" internal/version/version.go; then
+            echo "internal/version/version.go is not ${VERSION}. ldflags cannot override a const." >&2
+            exit 1
+          fi
           LDFLAGS="-s -w -X liking/internal/version.Version=${VERSION}"
           mkdir -p dist
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -buildvcs=false -ldflags "$LDFLAGS" \
-              -o dist/liking-agent-linux-$arch ./cmd/agent
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "$LDFLAGS" \
-              -o dist/liking-server-linux-$arch ./cmd/server
+              -o "dist/liking-agent-linux-$arch" ./cmd/agent
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -buildvcs=false -ldflags "$LDFLAGS" \
+              -o "dist/liking-server-linux-$arch" ./cmd/server
           done
-          cp dist/liking-server-linux-amd64 dist/liking-server
-          cp dist/liking-agent-linux-amd64 dist/liking-agent
-          (cd dist && sha256sum liking-server liking-agent liking-server-linux-amd64 liking-agent-linux-amd64 liking-server-linux-arm64 liking-agent-linux-arm64 > SHA256SUMS)
-          cp install.sh CHANGELOG.md dist/
+          cp -f dist/liking-server-linux-amd64 dist/liking-server
+          cp -f dist/liking-agent-linux-amd64 dist/liking-agent
+          cp -f install.sh CHANGELOG.md dist/
+          files=(
+            liking-server
+            liking-agent
+            liking-server-linux-amd64
+            liking-agent-linux-amd64
+            liking-server-linux-arm64
+            liking-agent-linux-arm64
+            install.sh
+            CHANGELOG.md
+          )
+          (cd dist && sha256sum "${files[@]}" > SHA256SUMS)
+          (cd dist && sha256sum -c SHA256SUMS)
+          cmp dist/liking-agent dist/liking-agent-linux-amd64
+          cmp dist/liking-server dist/liking-server-linux-amd64
+          for f in dist/liking-agent-linux-amd64 dist/liking-agent-linux-arm64 \
+                   dist/liking-server-linux-amd64 dist/liking-server-linux-arm64; do
+            grep -a -F -q "$VERSION" "$f" || { echo "missing version ${VERSION} in ${f}" >&2; exit 1; }
+          done
 
+      # Upload with gh, as a draft, and publish only after GitHub's asset
+      # digests match the hashed files. v0.2.22's amd64 agent did not.
       - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.ver.outputs.version }}
-          name: ${{ steps.ver.outputs.version }}
-          body_path: release-notes.md
-          files: |
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.ver.outputs.version }}"
+          repo="${{ github.repository }}"
+          assets=(
             dist/liking-server
             dist/liking-agent
             dist/liking-server-linux-amd64
@@ -84,7 +109,37 @@ jobs:
             dist/SHA256SUMS
             dist/install.sh
             dist/CHANGELOG.md
-          generate_release_notes: false
-          make_latest: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          )
+          if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
+            gh release upload "$tag" "${assets[@]}" --repo "$repo" --clobber
+          else
+            gh release create "$tag" "${assets[@]}" --repo "$repo" \
+              --draft --title "$tag" --notes-file release-notes.md
+          fi
+
+          uploads=0
+          for attempt in 1 2 3 4 5 6 7 8; do
+            set +e
+            GH_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}" bash scripts/check-release-digests.sh dist/SHA256SUMS "$repo" "$tag"
+            rc=$?
+            set -e
+            if [[ "$rc" == 0 ]]; then
+              break
+            fi
+            if [[ "$attempt" == 8 ]]; then
+              echo "GitHub release assets do not match SHA256SUMS. Leaving the release unpublished." >&2
+              exit 1
+            fi
+            if [[ "$rc" == 2 && "$uploads" -lt 2 ]]; then
+              echo "re-uploading assets (attempt ${attempt})"
+              gh release upload "$tag" "${assets[@]}" --repo "$repo" --clobber
+              uploads=$((uploads + 1))
+            else
+              echo "waiting for asset digests (attempt ${attempt})"
+            fi
+            sleep 8
+          done
+
+          gh release edit "$tag" --repo "$repo" --draft=false --latest \
+            --title "$tag" --notes-file release-notes.md
+          echo "published ${tag}"

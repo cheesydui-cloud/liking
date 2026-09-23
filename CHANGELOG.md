@@ -2,6 +2,24 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.2.24 — 2026-09-23
+
+落地机一键升级会从自己已经连上的面板地址下载，不再整批失败。
+
+### 修复
+- 一键升级不再使用设置里的面板 URL。Agent 从自己的 `--connect` 主机下载，面板只听 `127.0.0.1` 或 URL 和节点不一致时不再报「下载地址与面板不一致」
+- 面板旁边的 agent 文件不是当前版本时直接报错，不再把旧文件下发后仍显示已升级
+- `liking-upgrade` 必须下到本机架构的 agent。`liking-agent-linux-amd64` 失败时改用同内容的 `liking-agent`。还是没有就中止升级，不替换正在跑的面板
+- v0.2.22 发布的 `liking-agent-linux-amd64` 和 SHA256SUMS 对不上，升级脚本把 amd64 丢掉了，一键升级一直在装 0.2.21。这次上传后会再对一遍 GitHub 上的文件，对不上就不作为最新版发布
+
+### 升级注意
+- 先在面板机执行 `liking-upgrade`。日志里必须有 `sha256: OK (liking-agent-linux-amd64)`（arm 面板则是 arm64）。没有这行就先 `liking-upgrade update-script` 再升一次
+- 面板升完后，回实例页点一键升级，三台落地机才会从 0.2.21 上去
+- 从 v0.2.22 直接升上来会把已保存的限速从 Mbps 换算成 KB/s（乘 125）。原来的 1 Mbps 仍是 125 KB/s
+- 低于 1 Mbps 的限速要这次新 Agent 才精确。旧 Agent 最小按 1 Mbps
+- 日本线不用升
+- 回滚到 v0.2.22 后限速数字会被当成 Mbps。确认要回滚再用 `liking-upgrade --release v0.2.22`
+
 ## v0.2.23 — 2026-09-23
 
 限速可以按 KB/s 设，不必再从 1 Mbps 起跳。
