@@ -11,7 +11,8 @@ tag="${3:-}"
 
 tmp="$(mktemp)"
 json=""
-cleanup() { rm -f "$tmp" ${json:+"$json"}; }
+list=""
+cleanup() { rm -f "$tmp" ${json:+"$json"} ${list:+"$list"}; }
 trap cleanup EXIT
 
 if [[ -n "${DIGEST_FILE:-}" ]]; then
@@ -24,7 +25,24 @@ else
   if [[ -n "$token" ]]; then
     hdr+=(-H "Authorization: Bearer ${token}")
   fi
-  curl -fsSL "${hdr[@]}" "https://api.github.com/repos/${repo}/releases/tags/${tag}" -o "$json"
+  # Draft releases 404 at /releases/tags/{tag}. List releases instead; an
+  # authenticated token can see drafts, and that is what CI publishes first.
+  code="$(curl -sS -o "$json" -w '%{http_code}' "${hdr[@]}" "https://api.github.com/repos/${repo}/releases/tags/${tag}" || true)"
+  if [[ "$code" != "200" ]]; then
+    list="$(mktemp)"
+    curl -fsSL "${hdr[@]}" "https://api.github.com/repos/${repo}/releases?per_page=100" -o "$list"
+    python3 - "$list" "$tag" "$json" <<'PY'
+import json, sys
+from pathlib import Path
+rels = json.load(open(sys.argv[1], encoding="utf-8"))
+tag = sys.argv[2]
+match = next((r for r in rels if r.get("tag_name") == tag), None)
+if match is None:
+    sys.stderr.write(f"release not listed yet: {tag}\n")
+    sys.exit(3)
+Path(sys.argv[3]).write_text(json.dumps(match), encoding="utf-8")
+PY
+  fi
   python3 - "$json" > "$tmp" <<'PY'
 import json
 import sys
