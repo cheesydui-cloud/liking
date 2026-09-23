@@ -115,7 +115,7 @@ func (c *Cores) Kick(emails []string) (int, error) {
 	aduFailed := false
 	for _, t := range targets {
 		email := xrayUserEmail(t.User)
-		out, err := runXrayAPI(xrayBin, xrayAPI, []string{"rmu", "-tag=" + t.Tag, "-email=" + email}, nil)
+		out, err := runXrayAPI(xrayBin, xrayAPI, []string{"rmu", "-tag=" + t.Tag, email}, nil)
 		if err != nil {
 			msg := strings.TrimSpace(string(out))
 			if msg == "" {

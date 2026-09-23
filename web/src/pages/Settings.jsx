@@ -157,7 +157,7 @@ function AccountForm() {
       const data = await api.put('/me', body)
       if (data) applySession(data)
       else await refreshUser()
-      toast('已保存')
+      toast(n ? '已保存。订阅链接已更换。' : '已保存')
       setOld(''); setN(''); setN2('')
     } catch (err) { toast(err.message, 'error') }
     finally { setBusy(false) }
@@ -282,6 +282,7 @@ function BackupPanel() {
   const [restoring, setRestoring] = useState(false)
   const [over, setOver] = useState(false)
   const [sched, setSched] = useState({ backup_hour: '3', backup_keep: 7, backup_password: '', backup_password_set: false })
+  const [schedLogin, setSchedLogin] = useState('')
   const [schedBusy, setSchedBusy] = useState(false)
 
   const loadLive = () => api.get('/backup/summary').then(setLive).catch(e => toast(e.message, 'error'))
@@ -310,9 +311,21 @@ function BackupPanel() {
     setSchedBusy(true)
     try {
       const body = { backup_hour: String(sched.backup_hour || '3'), backup_keep: Number(sched.backup_keep) || 7 }
-      if (sched.backup_password !== '') body.backup_password = sched.backup_password
+      if (sched.backup_password !== '') {
+        if (sched.backup_password.length < 8) {
+          toast('备份密码至少 8 位', 'error')
+          return
+        }
+        if (!schedLogin) {
+          toast('修改备份密码需要当前登录密码', 'error')
+          return
+        }
+        body.backup_password = sched.backup_password
+        body.current_password = schedLogin
+      }
       await api.put('/settings', body)
       toast('已保存定时备份')
+      setSchedLogin('')
       setSched(x => ({ ...x, backup_password: '' }))
       loadSched()
     } catch (err) { toast(err.message, 'error') }
@@ -398,14 +411,14 @@ function BackupPanel() {
         <Field label="当前密码" hint="下载备份需要确认身份">
           <input className="input-field max-w-md" type="password" autoComplete="current-password" value={confirmPass} onChange={e => setConfirmPass(e.target.value)} />
         </Field>
-        <Field label="加密密码" hint="选填。填写后下载 .lkb1，恢复时要同一密码。">
-          <input className="input-field max-w-md" type="password" autoComplete="new-password" value={encPass} onChange={e => setEncPass(e.target.value)} placeholder="留空则不加密" />
+        <Field label="加密密码" hint="留空则用已保存的定时加密密码。两边都空时不能下载明文。">
+          <input className="input-field max-w-md" type="password" autoComplete="new-password" value={encPass} onChange={e => setEncPass(e.target.value)} placeholder="留空用已保存的密码" />
         </Field>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className="btn-primary" disabled={busy} onClick={download}>
-            <Icon name="download" size={15} /> {busy ? '正在打包…' : (encPass.trim() ? '下载加密备份' : '下载备份')}
+            <Icon name="download" size={15} /> {busy ? '正在打包…' : '下载加密备份'}
           </button>
-          <span className="text-[12px] text-ink-mut">{encPass.trim() ? '文件名 liking-backup-日期.lkb1' : '文件名 liking-backup-日期.lkbak'}</span>
+          <span className="text-[12px] text-ink-mut">文件名 liking-backup-日期.lkb1</span>
         </div>
       </div>
 
@@ -423,10 +436,15 @@ function BackupPanel() {
           <Field label="保留份数">
             <input className="input-field" type="number" min="1" max="30" value={sched.backup_keep} onChange={e => setSched({ ...sched, backup_keep: e.target.value })} />
           </Field>
-          <Field label="定时加密密码" hint={sched.backup_password_set ? '已保存。留空不改。' : '可选'}>
+          <Field label="定时加密密码" hint={sched.backup_password_set ? '已保存。留空不改。至少 8 位。没设密码则跳过定时备份。' : '至少 8 位。没设密码则跳过定时备份。'}>
             <input className="input-field" type="password" autoComplete="new-password" value={sched.backup_password} onChange={e => setSched({ ...sched, backup_password: e.target.value })} placeholder={sched.backup_password_set ? '••••••••' : ''} />
           </Field>
         </div>
+        {sched.backup_password !== '' ? (
+          <Field label="当前登录密码" hint="改备份密码需要再确认一次。">
+            <input className="input-field max-w-md" type="password" autoComplete="current-password" value={schedLogin} onChange={e => setSchedLogin(e.target.value)} />
+          </Field>
+        ) : null}
         <button className="btn-primary" disabled={schedBusy}>{schedBusy ? '保存中…' : '保存'}</button>
       </form>
 

@@ -76,8 +76,17 @@ func TestTrustedForwardedIgnoresPublicSpoof(t *testing.T) {
 	req.Header.Set("X-Real-IP", "8.8.8.8")
 	req.Header.Set("X-Forwarded-For", "1.2.3.4")
 	h.ServeHTTP(httptest.NewRecorder(), req)
-	if !strings.HasPrefix(got, "8.8.8.8:") {
-		t.Fatalf("loopback X-Real-IP: %s", got)
+	if !strings.HasPrefix(got, "127.0.0.1:") {
+		t.Fatalf("disagreeing forwarded headers should be ignored: %s", got)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set("X-Real-IP", "1.2.3.4")
+	req.Header.Set("X-Forwarded-For", "9.9.9.9, 1.2.3.4")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if !strings.HasPrefix(got, "1.2.3.4:") {
+		t.Fatalf("matching forwarded headers: %s", got)
 	}
 }
 

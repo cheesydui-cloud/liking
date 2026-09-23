@@ -77,7 +77,7 @@ func (s *Server) handleKickUser(w http.ResponseWriter, r *http.Request) {
 			out = append(out, rec)
 			continue
 		}
-		raw, err := s.Hub.SendRPC(sid, wsproto.TypeKick, wsproto.Kick{Emails: emails}, 8*time.Second)
+		raw, err := s.Hub.SendRPC(sid, wsproto.TypeKick, wsproto.Kick{Emails: emails}, 30*time.Second)
 		if err != nil {
 			rec.Error = err.Error()
 			out = append(out, rec)

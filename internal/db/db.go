@@ -25,14 +25,14 @@ func Open(path string) (*sql.DB, error) {
 		// share one catalog. Bare ":memory:" is per-connection and needs MaxOpenConns(1),
 		// which deadlocks if a Query holds the only conn while a nested QueryRow waits.
 		n := memSeq.Add(1)
-		dsn = fmt.Sprintf("file:liking-mem-%d?mode=memory&cache=shared&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)", n)
+		dsn = fmt.Sprintf("file:liking-mem-%d?mode=memory&cache=shared&_txlock=immediate&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)", n)
 	} else {
 		if dir := filepath.Dir(path); dir != "" && dir != "." && dir != "/" {
 			if err := ensureDir(dir); err != nil {
 				return nil, err
 			}
 		}
-		dsn = path + "?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
+		dsn = path + "?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
 	}
 	d, err := sql.Open("sqlite", dsn)
 	if err != nil {

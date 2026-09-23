@@ -37,10 +37,7 @@ func SingboxOutbound(in *db.Inbound, c *db.Client) (map[string]any, error) {
 		}
 		return ob, nil
 	case ProfileVLESSXHTTP:
-		sni := st.String("sni")
-		if sni == "" {
-			sni = host
-		}
+		sni := tlsServerName(st.String("sni"), host)
 		return map[string]any{
 			"type":        "vless",
 			"tag":         tag,
@@ -48,16 +45,10 @@ func SingboxOutbound(in *db.Inbound, c *db.Client) (map[string]any, error) {
 			"server_port": in.Port,
 			"uuid":        c.UUID,
 			"tls":         singClientTLS(st, sni),
-			"transport": map[string]any{
-				"type": "httpupgrade",
-				"path": st.String("path"),
-			},
+			"transport":   singXHTTPTransport(st.String("path"), st.String("mode"), st.String("host")),
 		}, nil
 	case ProfileTrojanTLS:
-		sni := st.String("sni")
-		if sni == "" {
-			sni = host
-		}
+		sni := tlsServerName(st.String("sni"), host)
 		return map[string]any{
 			"type":        "trojan",
 			"tag":         tag,
@@ -76,10 +67,7 @@ func SingboxOutbound(in *db.Inbound, c *db.Client) (map[string]any, error) {
 			"password":    st.String("server_password") + ":" + c.Password,
 		}, nil
 	case ProfileAnyTLS:
-		sni := st.String("sni")
-		if sni == "" {
-			sni = host
-		}
+		sni := tlsServerName(st.String("sni"), host)
 		return map[string]any{
 			"type":        "anytls",
 			"tag":         tag,

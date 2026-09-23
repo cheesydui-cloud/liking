@@ -46,7 +46,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	req.Username = strings.TrimSpace(req.Username)
 	u, err := db.GetUserByName(s.DB, req.Username)
 	if err != nil || u == nil || !checkPassword(u.PasswordHash, req.Password) {
-		s.loginLimiter.Fail(ip)
 		jsonErr(w, http.StatusUnauthorized, "用户名或密码错误")
 		return
 	}
@@ -54,22 +53,20 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusForbidden, "账号已被禁用")
 		return
 	}
-	if u.Role == "admin" && !s.adminIPAllowed(r) {
-		jsonErr(w, http.StatusForbidden, "不在管理员 IP 白名单")
-		return
-	}
 	if u.TOTPEnabled {
 		code := totp.ParseCode(req.TOTP)
 		if code == "" {
-			s.loginLimiter.Fail(ip)
 			jsonErrExtra(w, http.StatusUnauthorized, "需要两步验证码", map[string]any{"need_totp": true})
 			return
 		}
 		if !totp.Verify(u.TOTPSecret, code) {
-			s.loginLimiter.Fail(ip)
 			jsonErrExtra(w, http.StatusUnauthorized, "两步验证码错误", map[string]any{"need_totp": true})
 			return
 		}
+	}
+	if u.Role == "admin" && !s.adminIPAllowed(r) {
+		jsonErr(w, http.StatusForbidden, "不在管理员 IP 白名单")
+		return
 	}
 	tok, err := db.RandomHex(24)
 	if err != nil {
@@ -87,9 +84,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, newSessionCookie(r, tok, int(ttl.Seconds())))
 	s.loginLimiter.Clear(ip)
-	if u.Role != "admin" {
-		_ = db.ClearUserPasswordPlain(s.DB, u.ID)
-	}
+	_ = db.ClearUserPasswordPlain(s.DB, u.ID)
 	db.AddAudit(s.DB, &u.ID, "login", u.Username)
 	jsonOK(w, s.sessionPayload(u, r))
 }
@@ -136,7 +131,14 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = db.ClearUserPasswordPlain(s.DB, u.ID)
 	_ = db.DeleteSessionsForUserExcept(s.DB, u.ID, currentSessionToken(r))
-	jsonOK(w, map[string]any{"ok": true})
+	if _, err := db.RotateSubToken(s.DB, u.ID); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "内部错误")
+		return
+	}
+	if fresh, err := db.GetUser(s.DB, u.ID); err == nil && fresh != nil {
+		u = fresh
+	}
+	jsonOK(w, s.sessionPayload(u, r))
 }
 
 func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
@@ -216,6 +218,10 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = db.ClearUserPasswordPlain(s.DB, u.ID)
 		_ = db.DeleteSessionsForUserExcept(s.DB, u.ID, currentSessionToken(r))
+		if _, err := db.RotateSubToken(s.DB, u.ID); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "内部错误")
+			return
+		}
 		changed = true
 	}
 	if !changed {

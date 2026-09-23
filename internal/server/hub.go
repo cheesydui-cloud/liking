@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"strconv"
@@ -499,11 +500,34 @@ func (h *Hub) noteLive(ac *agentConn, st wsproto.Stats) {
 
 type liveBytes struct{ up, down int64 }
 
+func billBytes(n int64, mult float64) (int64, bool) {
+	const maxSample = int64(1) << 40
+	if n < 0 || n > maxSample {
+		return 0, false
+	}
+	if n == 0 {
+		return 0, true
+	}
+	if math.IsNaN(mult) || math.IsInf(mult, 0) || mult <= 0 {
+		return 0, false
+	}
+	if mult > 1000 {
+		mult = 1000
+	}
+	prod := float64(n) * mult
+	if math.IsNaN(prod) || math.IsInf(prod, 0) || prod < 0 || prod >= 9223372036854775808 {
+		return 0, false
+	}
+	return int64(prod), true
+}
+
 func (h *Hub) applyStats(serverID int64, samples []wsproto.Sample) {
 	day := db.ClockDay(h.DB)
 	touched := map[int64]struct{}{}
 	live := map[int64]map[int64]liveBytes{}
 	var items []db.TrafficWrite
+	pkgCache := map[int64]*db.Package{}
+	pkgSeen := map[int64]struct{}{}
 	for _, s := range samples {
 		if s.Email == "" || strings.HasPrefix(s.Email, "relay.") {
 			continue
@@ -527,6 +551,22 @@ func (h *Hub) applyStats(serverID int64, samples []wsproto.Sample) {
 		if err != nil || u == nil {
 			continue
 		}
+		mult := 1.0
+		if u.PackageID != nil {
+			pid := *u.PackageID
+			if _, ok := pkgSeen[pid]; !ok {
+				pkgSeen[pid] = struct{}{}
+				if p, err := db.GetPackage(h.DB, pid); err == nil {
+					pkgCache[pid] = p
+				}
+			}
+			mult = db.PackageMultiplier(pkgCache[pid], in.ID)
+		}
+		upB, okUp := billBytes(up, mult)
+		downB, okDown := billBytes(down, mult)
+		if !okUp || !okDown {
+			continue
+		}
 		byIn := live[c.UserID]
 		if byIn == nil {
 			byIn = map[int64]liveBytes{}
@@ -536,14 +576,6 @@ func (h *Hub) applyStats(serverID int64, samples []wsproto.Sample) {
 		a.up += up
 		a.down += down
 		byIn[c.InboundID] = a
-		mult := 1.0
-		if u.PackageID != nil {
-			if p, err := db.GetPackage(h.DB, *u.PackageID); err == nil {
-				mult = db.PackageMultiplier(p, in.ID)
-			}
-		}
-		upB := int64(float64(up) * mult)
-		downB := int64(float64(down) * mult)
 		items = append(items, db.TrafficWrite{
 			UserID:     u.ID,
 			InboundID:  in.ID,

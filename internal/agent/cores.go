@@ -37,6 +37,8 @@ type Cores struct {
 	singboxAPI string
 	clashLast  map[string]clashSnap
 	mitaLast   map[string]bytePair
+	xrayLast   map[string]bytePair
+	applyGen   uint64
 	crashes    map[string][]time.Time
 	stopWatch  chan struct{}
 	stopOnce   sync.Once
@@ -45,7 +47,7 @@ type Cores struct {
 func NewCores(dir string) *Cores {
 	c := &Cores{
 		dir: dir, procs: map[string]*proc{}, last: map[string]json.RawMessage{}, lastReq: map[string]json.RawMessage{},
-		clashLast: map[string]clashSnap{}, mitaLast: map[string]bytePair{},
+		clashLast: map[string]clashSnap{}, mitaLast: map[string]bytePair{}, xrayLast: map[string]bytePair{},
 		crashes:   map[string][]time.Time{},
 		stopWatch: make(chan struct{}),
 	}
@@ -111,9 +113,19 @@ func (c *Cores) Remove(name string) {
 }
 
 func (c *Cores) Apply(cfg wsproto.ApplyConfig) error {
-	ensureApplyBins(cfg)
-	applyDisableIPv6(cfg.DisableIPv6)
 	c.mu.Lock()
+	c.applyGen++
+	gen := c.applyGen
+	c.mu.Unlock()
+
+	ensureApplyBins(cfg)
+
+	c.mu.Lock()
+	if gen != c.applyGen {
+		c.mu.Unlock()
+		return nil
+	}
+	applyDisableIPv6(cfg.DisableIPv6)
 	defer c.mu.Unlock()
 	c.xrayAPI = cfg.XrayAPI
 	c.singboxAPI = cfg.SingboxAPI
@@ -507,6 +519,7 @@ func (c *Cores) StopAll() {
 		_ = exec.Command(bin, "stop").Run()
 	}
 	applySpeedLimits(nil)
+	clearRejectCN()
 }
 
 func (c *Cores) Close() {

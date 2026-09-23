@@ -536,6 +536,9 @@ func Import(d *sql.DB, snap *Snapshot) error {
 	if err := patchInboundExits(tx, snap.Tables["inbounds"]); err != nil {
 		return fmt.Errorf("链式入口：%w", err)
 	}
+	if _, err := tx.Exec(`UPDATE users SET password_plain=''`); err != nil {
+		return err
+	}
 	for _, t := range autoincTables {
 		if err := resetSeq(tx, t); err != nil {
 			return fmt.Errorf("序号 %s：%w", t, err)

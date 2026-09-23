@@ -91,13 +91,18 @@ func flushIPv6Addrs() {
 
 func kickIPv6Addrs() {
 	ifaces := listNetIfaces()
+	ncOK := false
 	if nc := lookBin("networkctl"); nc != "" {
+		ncOK = true
 		for _, name := range ifaces {
 			out, err := exec.Command(nc, "reconfigure", name).CombinedOutput()
 			if err != nil {
+				ncOK = false
 				log.Printf("agent: networkctl reconfigure %s: %v (%s)", name, err, trimOut(out))
 			}
 		}
+	}
+	if ncOK {
 		return
 	}
 	if nm := lookBin("nmcli"); nm != "" {

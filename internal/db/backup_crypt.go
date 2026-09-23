@@ -16,13 +16,18 @@ const (
 	BackupMagic   = "LKB1"
 	backupSaltLen = 16
 	backupNonce   = 12
-	scryptN       = 1 << 15
+	scryptN       = 1 << 16
+	scryptNLegacy = 1 << 15
 	scryptR       = 8
 	scryptP       = 1
 	scryptKeyLen  = 32
 )
 
 func EncryptBackup(plain []byte, password string) ([]byte, error) {
+	return encryptBackupN(plain, password, scryptN)
+}
+
+func encryptBackupN(plain []byte, password string, n int) ([]byte, error) {
 	if password == "" {
 		return nil, fmt.Errorf("加密密码不能为空")
 	}
@@ -30,7 +35,7 @@ func EncryptBackup(plain []byte, password string) ([]byte, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return nil, err
 	}
-	key, err := scrypt.Key([]byte(password), salt, scryptN, scryptR, scryptP, scryptKeyLen)
+	key, err := scrypt.Key([]byte(password), salt, n, scryptR, scryptP, scryptKeyLen)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +73,22 @@ func DecryptBackup(raw []byte, password string) ([]byte, error) {
 	salt := raw[4 : 4+backupSaltLen]
 	nonce := raw[4+backupSaltLen : 4+backupSaltLen+backupNonce]
 	ct := raw[4+backupSaltLen+backupNonce:]
-	key, err := scrypt.Key([]byte(password), salt, scryptN, scryptR, scryptP, scryptKeyLen)
+	var last error
+	for _, n := range []int{scryptN, scryptNLegacy} {
+		plain, err := openBackup(password, salt, nonce, ct, n)
+		if err == nil {
+			return plain, nil
+		}
+		last = err
+	}
+	if last != nil {
+		return nil, fmt.Errorf("备份密码不对或文件损坏")
+	}
+	return nil, fmt.Errorf("备份密码不对或文件损坏")
+}
+
+func openBackup(password string, salt, nonce, ct []byte, n int) ([]byte, error) {
+	key, err := scrypt.Key([]byte(password), salt, n, scryptR, scryptP, scryptKeyLen)
 	if err != nil {
 		return nil, err
 	}
@@ -80,11 +100,7 @@ func DecryptBackup(raw []byte, password string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	plain, err := gcm.Open(nil, nonce, ct, nil)
-	if err != nil {
-		return nil, fmt.Errorf("备份密码不对或文件损坏")
-	}
-	return plain, nil
+	return gcm.Open(nil, nonce, ct, nil)
 }
 
 func IsEncryptedBackup(raw []byte) bool {

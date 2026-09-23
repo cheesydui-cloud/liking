@@ -32,8 +32,11 @@ func TestParseClashAndDeltas(t *testing.T) {
 		t.Fatalf("conns %d", len(conns))
 	}
 	samples, next := clashDeltas(nil, conns, now)
-	if len(samples) != 1 || samples[0].Email != "u1.i3" || samples[0].Up != 40 || samples[0].Down != 80 {
-		t.Fatalf("first %+v", samples)
+	if len(samples) != 0 {
+		t.Fatalf("first sight should baseline, got %+v", samples)
+	}
+	if _, ok := next["a"]; !ok {
+		t.Fatal("young conn should be tracked")
 	}
 	if _, ok := next["b"]; !ok {
 		t.Fatal("old conn should be tracked")
@@ -41,7 +44,7 @@ func TestParseClashAndDeltas(t *testing.T) {
 	conns[0].Up = 50
 	conns[0].Down = 90
 	samples, _ = clashDeltas(next, conns, now)
-	if len(samples) != 1 || samples[0].Up != 10 || samples[0].Down != 10 {
+	if len(samples) != 1 || samples[0].Email != "u1.i3" || samples[0].Up != 10 || samples[0].Down != 10 {
 		t.Fatalf("delta %+v", samples)
 	}
 }

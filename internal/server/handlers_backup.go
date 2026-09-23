@@ -40,21 +40,22 @@ func (s *Server) handleBackupDownload(w http.ResponseWriter, r *http.Request) {
 	_ = decodeJSON(r, &req)
 	confirm := strings.TrimSpace(req.Password)
 	if confirm == "" {
-		jsonErr(w, http.StatusBadRequest, "请填写当前密码或备份密码")
+		jsonErr(w, http.StatusBadRequest, "请填写当前密码")
 		return
 	}
-	ok := checkPassword(u.PasswordHash, confirm)
-	bak, _ := db.GetSetting(s.DB, "backup_password")
-	bak = strings.TrimSpace(bak)
-	if !ok {
-		if bak == "" || confirm != bak {
-			jsonErr(w, http.StatusForbidden, "密码不对")
-			return
-		}
+	if !checkPassword(u.PasswordHash, confirm) {
+		jsonErr(w, http.StatusForbidden, "密码不对")
+		return
 	}
 	encrypt := strings.TrimSpace(req.EncryptPassword)
-	if encrypt == "" && bak != "" && confirm == bak {
+	bak, _ := db.GetSetting(s.DB, "backup_password")
+	bak = strings.TrimSpace(bak)
+	if encrypt == "" {
 		encrypt = bak
+	}
+	if encrypt == "" {
+		jsonErr(w, http.StatusBadRequest, "请设置备份加密密码，不能下载明文备份")
+		return
 	}
 	s.backupMu.Lock()
 	defer s.backupMu.Unlock()
@@ -248,7 +249,12 @@ func (s *Server) maybeScheduledBackup() {
 		return
 	}
 	pw, _ := db.GetSetting(s.DB, "backup_password")
-	raw, name, err := s.encodeBackup(strings.TrimSpace(pw))
+	pw = strings.TrimSpace(pw)
+	if pw == "" {
+		log.Printf("scheduled backup: skipped, backup password is empty")
+		return
+	}
+	raw, name, err := s.encodeBackup(pw)
 	if err != nil {
 		log.Printf("scheduled backup: %v", err)
 		return

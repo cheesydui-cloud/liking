@@ -119,8 +119,16 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		ServerIDs    []int64   `json:"server_ids"`
 		packagePolicyReq
 	}
-	if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
+	if err := decodeJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效请求")
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
 		jsonErr(w, http.StatusBadRequest, "需要套餐名")
+		return
+	}
+	if req.TrafficBytes < 0 {
+		jsonErr(w, http.StatusBadRequest, "流量无效")
 		return
 	}
 	if len(req.ServerIDs) == 0 && len(req.InboundIDs) == 0 {
@@ -205,6 +213,10 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 		p.Name = strings.TrimSpace(req.Name)
 	}
 	if req.TrafficBytes != nil {
+		if *req.TrafficBytes < 0 {
+			jsonErr(w, http.StatusBadRequest, "流量无效")
+			return
+		}
 		p.TrafficBytes = *req.TrafficBytes
 	}
 	if req.CycleDays != nil {

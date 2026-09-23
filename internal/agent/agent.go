@@ -11,8 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -79,6 +79,8 @@ func Run(ctx context.Context, cfg Config) error {
 }
 
 func (a *Agent) session(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	u, err := url.Parse(a.cfg.ConnectURL)
 	if err != nil {
 		return err
@@ -95,8 +97,8 @@ func (a *Agent) session(ctx context.Context) error {
 		return fmt.Errorf("不支持的 connect URL: %s", a.cfg.ConnectURL)
 	}
 
-	dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
+	dialCtx, dialCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer dialCancel()
 	opts := &websocket.DialOptions{}
 	if a.cfg.Insecure {
 		opts.HTTPClient = &http.Client{
@@ -150,7 +152,10 @@ func (a *Agent) session(ctx context.Context) error {
 		for {
 			env, err := readEnv(ctx, ws, 60*time.Second)
 			if err != nil {
-				errCh <- err
+				select {
+				case errCh <- err:
+				case <-ctx.Done():
+				}
 				return
 			}
 			select {
@@ -221,7 +226,7 @@ func (a *Agent) session(ctx context.Context) error {
 				return err
 			}
 		case <-stats.C:
-			samples := a.cores.Collect()
+			samples, finishStats := a.cores.BeginCollect()
 			up, down, hasNet := snapshotNet()
 			diskFree, diskTotal := snapshotDisk()
 			memAvail, memTotal := snapshotMem()
@@ -240,8 +245,10 @@ func (a *Agent) session(ctx context.Context) error {
 				Conns:        countEstablished(a.cores.ListenPorts()),
 			})
 			if err := a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeStats, Payload: st}); err != nil {
+				finishStats(false)
 				return err
 			}
+			finishStats(true)
 		}
 	}
 }

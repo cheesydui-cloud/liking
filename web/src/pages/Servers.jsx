@@ -112,25 +112,38 @@ export default function Servers() {
   const [edit, setEdit] = useState({ name: '', host: '', min: '', max: '', gb: '', expires: '', resetDay: '0', disableIpv6: false })
   const [coreSrv, setCoreSrv] = useState(null)
   const [corePick, setCorePick] = useState('xray')
+  const [loadErr, setLoadErr] = useState('')
+  const listSeq = useRef(0)
 
   const load = async () => {
+    const seq = ++listSeq.current
     try {
       const g = cacheGen()
       const [a, b] = await Promise.all([api.get('/servers'), api.get('/inbounds')])
+      if (seq !== listSeq.current) return
       setList(putList('servers', asArray(a.servers), g))
       setIns(putList('inbounds', asArray(b.inbounds), g))
-    } catch (e) { toast(e.message, 'error') }
-    finally { setReady(true) }
+      setLoadErr('')
+      setReady(true)
+    } catch (e) {
+      if (seq !== listSeq.current) return
+      setLoadErr(e.message || '加载失败')
+      toast(e.message, 'error')
+      setReady(true)
+    }
   }
   useEffect(() => {
     load()
     return startPoll(async (signal) => {
+      const seq = ++listSeq.current
       const g = cacheGen()
       try {
         const [a, b] = await Promise.all([api.get('/servers', signal), api.get('/inbounds', signal)])
+        if (seq !== listSeq.current) return
         setList(putList('servers', asArray(a.servers), g))
         setIns(putList('inbounds', asArray(b.inbounds), g))
         setPollErr('')
+        setLoadErr('')
       } catch (e) {
         if (isAbort(e)) return
         setPollErr('实时刷新失败，显示的是上次成功数据')
@@ -537,6 +550,12 @@ export default function Servers() {
       )}
       {!ready ? (
         <div className="card overflow-hidden"><SkeletonRows /></div>
+      ) : loadErr && list.length === 0 ? (
+        <div className="card overflow-hidden">
+          <Empty title="实例加载失败" hint={loadErr} action={
+            <button type="button" className="btn-primary" onClick={load}>重试</button>
+          } />
+        </div>
       ) : list.length === 0 ? (
         <div className="card overflow-hidden">
           <Empty title="还没有实例" hint="先起一个名字，添加后把安装命令拿到机器上以 root 执行，再到节点页挂协议。" action={

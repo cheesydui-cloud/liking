@@ -343,10 +343,7 @@ func singShareTLS(t *ShareTarget) map[string]any {
 	if sec != "tls" && sec != "reality" {
 		return nil
 	}
-	sni := t.SNI
-	if sni == "" {
-		sni = t.Host
-	}
+	sni := tlsServerName(t.SNI, t.Host)
 	st := Settings{}
 	if t.Fingerprint != "" {
 		st["fingerprint"] = t.Fingerprint
@@ -385,12 +382,14 @@ func singShareTransport(t *ShareTarget) map[string]any {
 		return tr
 	case "grpc":
 		return map[string]any{"type": "grpc", "service_name": t.ServiceName}
-	case "httpupgrade", "xhttp":
+	case "httpupgrade":
 		tr := map[string]any{"type": "httpupgrade", "path": nz(t.Path, "/")}
 		if t.HostHeader != "" {
 			tr["host"] = t.HostHeader
 		}
 		return tr
+	case "xhttp":
+		return singXHTTPTransport(t.Path, t.Mode, t.HostHeader)
 	case "http":
 		tr := map[string]any{"type": "http"}
 		if t.Path != "" {
@@ -442,10 +441,7 @@ func singLandOutbound(tag string, land *db.Inbound, st Settings) (map[string]any
 		}
 		return ob, nil
 	case ProfileVLESSXHTTP:
-		sni := lst.String("sni")
-		if sni == "" {
-			sni = host
-		}
+		sni := tlsServerName(lst.String("sni"), host)
 		return map[string]any{
 			"type":        "vless",
 			"tag":         tag,
@@ -453,16 +449,10 @@ func singLandOutbound(tag string, land *db.Inbound, st Settings) (map[string]any
 			"server_port": land.Port,
 			"uuid":        st.String("relay_uuid"),
 			"tls":         singClientTLS(lst, sni),
-			"transport": map[string]any{
-				"type": "httpupgrade",
-				"path": lst.String("path"),
-			},
+			"transport":   singXHTTPTransport(lst.String("path"), lst.String("mode"), lst.String("host")),
 		}, nil
 	case ProfileTrojanTLS:
-		sni := lst.String("sni")
-		if sni == "" {
-			sni = host
-		}
+		sni := tlsServerName(lst.String("sni"), host)
 		return map[string]any{
 			"type":        "trojan",
 			"tag":         tag,
@@ -499,11 +489,14 @@ func singLandOutbound(tag string, land *db.Inbound, st Settings) (map[string]any
 }
 
 func singClientTLS(st Settings, sni string) map[string]any {
-	return map[string]any{
+	tls := map[string]any{
 		"enabled":     true,
-		"server_name": sni,
 		"min_version": nz(st.String("min_version"), "1.3"),
 		"alpn":        st.ALPN(),
 		"utls":        map[string]any{"enabled": true, "fingerprint": nz(st.String("fingerprint"), "chrome")},
 	}
+	if sni != "" {
+		tls["server_name"] = sni
+	}
+	return tls
 }

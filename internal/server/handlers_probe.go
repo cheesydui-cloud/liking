@@ -261,7 +261,7 @@ func (s *Server) handleDestProbe(w http.ResponseWriter, r *http.Request) {
 				out[i] = row{Dest: dest, Error: "无效"}
 				return
 			}
-			raw, err := s.Hub.SendRPC(id, wsproto.TypeProbe, wsproto.Probe{Host: host, Port: port}, 3*time.Second)
+			raw, err := s.Hub.SendRPC(id, wsproto.TypeProbe, wsproto.Probe{Host: host, Port: port}, 6*time.Second)
 			if err != nil {
 				out[i] = row{Dest: dest, Host: host, Port: port, Error: err.Error()}
 				return

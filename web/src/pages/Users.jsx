@@ -447,23 +447,42 @@ export default function Users() {
   const [denyUser, setDenyUser] = useState(null)
   const [selected, setSelected] = useState(() => new Set())
   const [batchBusy, setBatchBusy] = useState(false)
+  const [loadErr, setLoadErr] = useState('')
+  const [bulkResult, setBulkResult] = useState('')
+  const heldPw = useRef(new Map())
+  const listSeq = useRef(0)
+
+  const mergeHeld = (rows) => rows.map(u => {
+    const pw = heldPw.current.get(u.id)
+    return pw ? { ...u, password: pw } : u
+  })
 
   const load = async () => {
+    const seq = ++listSeq.current
     try {
       const g = cacheGen()
       const [a, b] = await Promise.all([api.get('/users'), api.get('/packages')])
-      setList(putList('users', asArray(a.users), g))
+      if (seq !== listSeq.current) return
+      setList(putList('users', mergeHeld(asArray(a.users)), g))
       setPkgs(putList('packages', asArray(b.packages), g))
-    } catch (e) { toast(e.message, 'error') }
-    finally { setReady(true) }
+      setLoadErr('')
+      setReady(true)
+    } catch (e) {
+      if (seq !== listSeq.current) return
+      setLoadErr(e.message || '加载失败')
+      toast(e.message, 'error')
+      setReady(true)
+    }
   }
   useEffect(() => {
     load()
     return startPoll(async (signal) => {
+      const seq = ++listSeq.current
       const g = cacheGen()
       try {
         const a = await api.get('/users', signal)
-        setList(putList('users', asArray(a.users), g))
+        if (seq !== listSeq.current) return
+        setList(putList('users', mergeHeld(asArray(a.users)), g))
         setPollErr('')
       } catch (e) {
         if (isAbort(e)) return
@@ -521,6 +540,18 @@ export default function Users() {
       toast('用户名不能为空', 'error')
       return
     }
+    const pwTyped = f.password.trim()
+    if (pwTyped && pwTyped.length < 6) {
+      toast('密码至少 6 位', 'error')
+      return
+    }
+    if (!editUser) {
+      const days = Number(f.days) || 0
+      if (days < 0 || days > 36500) {
+        toast('天数无效', 'error')
+        return
+      }
+    }
     if (editUser) {
       if (editUser.enabled !== false && f.enabled === false) {
         if (!(await dialog.confirm({
@@ -558,9 +589,9 @@ export default function Users() {
         }
         if (!f.package_id) body.unbind_package = true
         else body.package_id = Number(f.package_id)
-        if (f.password.trim()) body.password = f.password.trim()
+        if (pwTyped) body.password = pwTyped
         await api.put(`/users/${editUser.id}`, body)
-        if (f.password.trim()) {
+        if (pwTyped) {
           const pkgName = pkgs.find(p => Number(p.id) === Number(f.package_id))?.name || ''
           const card = formatUserCard({
             ...editUser,
@@ -568,15 +599,20 @@ export default function Users() {
             remark: f.remark,
             expires_at: ymdToUnix(f.expires),
             package_name: pkgName,
-            password: f.password.trim(),
+            password: pwTyped,
             enabled: f.enabled !== false,
             speed_limit: kbpsFromForm(f.speed_value, f.speed_unit),
           }, pkgs)
           try {
             await copyText(card)
             try { await api.post(`/users/${editUser.id}/forget-password`) } catch { /* keep going */ }
-            toast('已保存，名片已复制。密码只这一次。')
-          } catch { toast('已保存') }
+            toast('已保存，名片已复制。密码只这一次，订阅链接已更换。')
+          } catch {
+            toast('已保存。浏览器不允许自动复制，请复制密码后再关闭。', 'error')
+            setBusy(false)
+            load()
+            return
+          }
         } else toast('已保存')
       } else {
         const body = { username, remark: f.remark, days: Number(f.days) || 0 }
@@ -660,6 +696,7 @@ export default function Users() {
       await copyText(formatUserCard(u, pkgs))
       if (u.password) {
         try { await api.post(`/users/${u.id}/forget-password`) } catch { /* keep going */ }
+        heldPw.current.delete(u.id)
         setList(cur => cur.map(x => x.id === u.id ? { ...x, password: '' } : x))
         toast('已复制名片。密码只这一次，下次请重置。')
       } else {
@@ -674,15 +711,17 @@ export default function Users() {
     if (!(await dialog.confirm({ title: '重置密码', message: '会生成新密码，旧密码和其它登录立刻失效。', danger: true }))) return
     try {
       const d = await api.post(`/users/${u.id}/password`, { password: '' })
-      const next = { ...u, password: d.password || '' }
+      const next = { ...u, password: d.password || '', sub_token: d.sub_token || u.sub_token }
+      if (next.password) heldPw.current.set(u.id, next.password)
+      setList(cur => cur.map(x => x.id === u.id ? { ...x, password: next.password, sub_token: next.sub_token } : x))
       try {
         await copyText(formatUserCard(next, pkgs))
+        heldPw.current.delete(u.id)
         try { await api.post(`/users/${u.id}/forget-password`) } catch { /* keep going */ }
-        toast('已重置并复制名片。密码只这一次。')
+        setList(cur => cur.map(x => x.id === u.id ? { ...x, password: '' } : x))
+        toast('已重置并复制名片。密码只这一次，订阅链接已更换。')
       } catch {
-        toast('已重置。浏览器不允许自动复制，请再点复制名片。')
-        setList(cur => cur.map(x => x.id === u.id ? next : x))
-        return
+        toast('已重置。浏览器不允许自动复制，密码还留在这张名片上。', 'error')
       }
       load()
     } catch (e) { toast(e.message, 'error') }
@@ -840,6 +879,12 @@ export default function Users() {
 
       {!ready ? (
         <div className="card overflow-hidden"><SkeletonRows /></div>
+      ) : loadErr && list.length === 0 ? (
+        <div className="card overflow-hidden">
+          <Empty title="用户加载失败" hint={loadErr} action={
+            <button type="button" className="btn-primary" onClick={load}>重试</button>
+          } />
+        </div>
       ) : !hasCustomers ? (
         <div className="card overflow-hidden">
           <Empty title="暂无用户" hint="先建套餐并勾选节点，再开账号。" action={
@@ -972,7 +1017,7 @@ export default function Users() {
             </div>
           ) : (
             <Field label="天数" hint="从今天起算">
-              <input className="input-field" type="number" min="0" value={f.days} onChange={e => setF({ ...f, days: e.target.value })} />
+              <input className="input-field" type="number" min="0" max="36500" value={f.days} onChange={e => setF({ ...f, days: e.target.value })} />
             </Field>
           )}
           {editing && (
@@ -1078,30 +1123,40 @@ export default function Users() {
           </div>
         )}
       </Modal>
-      <Modal open={bulkOpen} title="批量开户" onClose={() => setBulkOpen(false)} size="lg" footer={
+      <Modal open={bulkOpen} title="批量开户" onClose={() => { setBulkOpen(false); setBulkResult('') }} size="lg" footer={
         <>
-          <button type="button" className="btn-ghost" onClick={() => setBulkOpen(false)}>取消</button>
+          <button type="button" className="btn-ghost" onClick={() => { setBulkOpen(false); setBulkResult('') }}>{bulkResult ? '关闭' : '取消'}</button>
+          {!bulkResult ? (
           <button type="button" className="btn-primary" disabled={bulkBusy} onClick={async () => {
             const lines = bulkText.split('\n').map(x => x.trim()).filter(Boolean)
             if (!lines.length) { toast('请填写用户名，一行一个', 'error'); return }
+            const days = Number(bulkDays) || 0
+            if (days < 0 || days > 36500) { toast('天数无效', 'error'); return }
             setBulkBusy(true)
             try {
               const users = lines.map(line => {
                 const [username, password] = line.split(/[\s,]+/).filter(Boolean)
-                return { username, password: password || '', package_id: bulkPkg ? Number(bulkPkg) : undefined, days: Number(bulkDays) || 0 }
+                return { username, password: password || '', package_id: bulkPkg ? Number(bulkPkg) : undefined, days }
               })
               const d = await api.post('/users/bulk', { users })
               const pw = (d.users || []).filter(x => x.ok && x.password).map(x => `${x.username} ${x.password}`).join('\n')
               toast(`成功 ${d.ok}/${d.total}`)
-              if (pw) {
-                try { await copyText(pw); toast('随机密码已复制') } catch {}
-              }
-              setBulkOpen(false)
               setBulkText('')
+              if (pw) {
+                setBulkResult(pw)
+                try { await copyText(pw); toast('密码已复制，关闭前请再核对一遍') }
+                catch { toast('复制失败，请从列表里手动复制', 'error') }
+              }
               load()
             } catch (e) { toast(e.message, 'error') }
             finally { setBulkBusy(false) }
           }}>{bulkBusy ? '创建中…' : '创建'}</button>
+          ) : (
+            <button type="button" className="btn-primary" onClick={async () => {
+              try { await copyText(bulkResult); toast('已复制') }
+              catch { toast('复制失败，请手动选择', 'error') }
+            }}>再复制一次</button>
+          )}
         </>
       }>
         <div className="space-y-3">
@@ -1115,10 +1170,15 @@ export default function Users() {
                 {pkgs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </Field>
-            <Field label="天数" hint="0 表示不限期">
-              <input className="input-field" type="number" min="0" value={bulkDays} onChange={e => setBulkDays(e.target.value)} />
+            <Field label="天数" hint="0 表示不限期，最多 36500">
+              <input className="input-field" type="number" min="0" max="36500" value={bulkDays} onChange={e => setBulkDays(e.target.value)} />
             </Field>
           </div>
+          {bulkResult ? (
+            <Field label="本次密码" hint="关闭后不再显示。复制失败也请从这里选中。">
+              <textarea className="input-field font-mono text-[12px] min-h-32" readOnly value={bulkResult} />
+            </Field>
+          ) : null}
         </div>
       </Modal>
     </div>

@@ -2166,7 +2166,7 @@ func TestBackupRestore(t *testing.T) {
 		t.Fatalf("GET backup still works %d", res.StatusCode)
 	}
 
-	bakBody, _ := json.Marshal(map[string]string{"password": "secret12"})
+	bakBody, _ := json.Marshal(map[string]string{"password": "secret12", "encrypt_password": "backup-pw"})
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/backup", bytes.NewReader(bakBody))
 	if err != nil {
 		t.Fatal(err)
@@ -2181,7 +2181,7 @@ func TestBackupRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.StatusCode != 200 || len(raw) < 32 {
+	if res.StatusCode != 200 || len(raw) < 32 || !bytes.HasPrefix(raw, []byte("LKB1")) {
 		t.Fatalf("download %d %d", res.StatusCode, len(raw))
 	}
 
@@ -2192,11 +2192,11 @@ func TestBackupRestore(t *testing.T) {
 	}
 	decodeRes(t, res, nil)
 
-	postFile := func(path, password string, payload []byte) *http.Response {
+	postFile := func(path, password, filePassword string, payload []byte) *http.Response {
 		t.Helper()
 		var buf bytes.Buffer
 		mw := multipart.NewWriter(&buf)
-		fw, err := mw.CreateFormFile("file", "x.lkbak")
+		fw, err := mw.CreateFormFile("file", "x.lkb1")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2205,6 +2205,11 @@ func TestBackupRestore(t *testing.T) {
 		}
 		if password != "" {
 			if err := mw.WriteField("password", password); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if filePassword != "" {
+			if err := mw.WriteField("file_password", filePassword); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -2223,14 +2228,14 @@ func TestBackupRestore(t *testing.T) {
 		return res
 	}
 
-	res = postFile("/api/backup/preview", "", raw)
+	res = postFile("/api/backup/preview", "", "backup-pw", raw)
 	var prev db.BackupSummary
 	decodeRes(t, res, &prev)
 	if prev.Servers != 1 || prev.Users != 1 {
 		t.Fatalf("preview %+v", prev)
 	}
 
-	res = postFile("/api/backup/restore", "wrong", raw)
+	res = postFile("/api/backup/restore", "wrong", "backup-pw", raw)
 	if res.StatusCode != 403 {
 		b, _ := io.ReadAll(res.Body)
 		res.Body.Close()
@@ -2238,7 +2243,7 @@ func TestBackupRestore(t *testing.T) {
 	}
 	res.Body.Close()
 
-	res = postFile("/api/backup/restore", "secret12", raw)
+	res = postFile("/api/backup/restore", "secret12", "backup-pw", raw)
 	var out map[string]any
 	decodeRes(t, res, &out)
 	if out["relogin"] != true {

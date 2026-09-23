@@ -23,7 +23,13 @@ func (a *Agent) httpClient() *http.Client {
 	if a.cfg.Insecure {
 		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
 	}
-	return &http.Client{Transport: tr, Timeout: 3 * time.Minute}
+	return &http.Client{
+		Transport: tr,
+		Timeout:   3 * time.Minute,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return fmt.Errorf("下载不能跳转")
+		},
+	}
 }
 
 func (a *Agent) resolveURL(raw string) (string, error) {
@@ -105,7 +111,11 @@ func (a *Agent) replaceSelf(ctx context.Context, req wsproto.Upgrade) error {
 		return err
 	}
 	want := strings.ToLower(strings.TrimSpace(req.SHA256))
-	if want != "" && want != sum {
+	if want == "" {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("缺少校验")
+	}
+	if want != sum {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("校验失败")
 	}

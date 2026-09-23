@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useToast } from '../components/Layout'
@@ -14,24 +14,26 @@ export default function Traffic() {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   const [pollErr, setPollErr] = useState('')
+  const seq = useRef(0)
 
   useEffect(() => {
-    let live = true
+    const n = ++seq.current
     setErr('')
     api.get(`/traffic?days=${daysN}`).then(data => {
-      if (!live) return
+      if (n !== seq.current) return
       setD(data)
     }).catch(e => {
-      if (!live || isAbort(e)) return
+      if (n !== seq.current || isAbort(e)) return
       setErr(e.message)
       toast(e.message, 'error')
     })
-    return () => { live = false }
   }, [daysN])
 
   useEffect(() => startPoll(async (signal) => {
+    const n = ++seq.current
     try {
       const data = await api.get(`/traffic?days=${daysN}`, signal)
+      if (n !== seq.current) return
       setD(data)
       setPollErr('')
       setErr('')

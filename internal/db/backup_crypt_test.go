@@ -24,4 +24,15 @@ func TestEncryptBackupRoundTrip(t *testing.T) {
 	if _, err := DecryptBackup(enc, "wrong"); err == nil {
 		t.Fatal("expected fail")
 	}
+	legacy, err := encryptBackupN(plain, "pw-secret", scryptNLegacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = DecryptBackup(legacy, "pw-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Fatal("legacy mismatch")
+	}
 }

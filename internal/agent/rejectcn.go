@@ -47,6 +47,13 @@ var (
 
 func haveNFT() bool { return nftBin() != "" }
 
+func clearRejectCN() {
+	if rejectCNGOOS != "linux" {
+		return
+	}
+	_ = nftRun("delete", "table", "inet", nftCNTable)
+}
+
 func applyRejectCN(dir string, spec wsproto.RejectCN) error {
 	if rejectCNGOOS != "linux" {
 		return nil
@@ -300,20 +307,14 @@ func writeNFTSet(b *strings.Builder, name, typ string, elems []string) {
 func loadCNLists(dir string) (v4, v6 []string, err error) {
 	v4, err4 := loadCNList(filepath.Join(dir, "cn-ip4.txt"), true)
 	v6, err6 := loadCNList(filepath.Join(dir, "cn-ip6.txt"), false)
-	if len(v4) == 0 && len(v6) == 0 {
-		if err4 != nil {
-			return nil, nil, err4
-		}
-		if err6 != nil {
-			return nil, nil, err6
-		}
-		return nil, nil, fmt.Errorf("没有中国 IP 段")
-	}
 	if err4 != nil {
-		log.Printf("agent: cn ipv4 list: %v", err4)
+		return nil, nil, err4
 	}
 	if err6 != nil {
-		log.Printf("agent: cn ipv6 list: %v", err6)
+		return nil, nil, err6
+	}
+	if len(v4) == 0 && len(v6) == 0 {
+		return nil, nil, fmt.Errorf("没有中国 IP 段")
 	}
 	return v4, v6, nil
 }

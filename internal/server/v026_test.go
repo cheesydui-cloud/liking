@@ -163,8 +163,17 @@ func TestLoginLimiterPrunesEmpty(t *testing.T) {
 	if !l.Allow("1.1.1.1") {
 		t.Fatal("old fails should allow")
 	}
-	if _, ok := l.fails["1.1.1.1"]; ok {
-		t.Fatal("empty key kept")
+	if len(l.fails["1.1.1.1"]) != 1 {
+		t.Fatal("allow should record the attempt")
+	}
+	l2 := newLoginLimiter()
+	for i := 0; i < 8; i++ {
+		if !l2.Allow("2.2.2.2") {
+			t.Fatalf("attempt %d", i)
+		}
+	}
+	if l2.Allow("2.2.2.2") {
+		t.Fatal("ninth attempt should be limited")
 	}
 }
 

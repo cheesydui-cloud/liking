@@ -875,8 +875,12 @@ func SetPackageInbounds(d *sql.DB, pkgID int64, inboundIDs []int64, multipliers 
 	}
 	for i, iid := range inboundIDs {
 		m := 1.0
-		if i < len(multipliers) && multipliers[i] > 0 {
-			m = multipliers[i]
+		if i < len(multipliers) {
+			got, err := normalizeMultiplier(multipliers[i])
+			if err != nil {
+				return err
+			}
+			m = got
 		}
 		if _, err := tx.Exec(`INSERT INTO package_inbounds(package_id,inbound_id,multiplier) VALUES(?,?,?)`, pkgID, iid, m); err != nil {
 			return err
@@ -963,14 +967,34 @@ func UnbindUserPackage(d *sql.DB, userID int64) error {
 }
 
 func CreateInbound(d *sql.DB, in *Inbound) (*Inbound, error) {
-	res, err := d.Exec(`INSERT INTO inbounds(server_id,name,profile,protocol,network,security,core,listen,port,enabled,settings,cert_id,line_kind,exit_inbound_id,exit_uri,reject_cn,created_at)
+	tx, err := d.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if in.Port != 0 {
+		var n int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM inbounds WHERE server_id=? AND port=?`, in.ServerID, in.Port).Scan(&n); err != nil {
+			return nil, err
+		}
+		if n > 0 {
+			return nil, fmt.Errorf("该服务器上端口已被占用")
+		}
+	}
+	res, err := tx.Exec(`INSERT INTO inbounds(server_id,name,profile,protocol,network,security,core,listen,port,enabled,settings,cert_id,line_kind,exit_inbound_id,exit_uri,reject_cn,created_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		in.ServerID, in.Name, in.Profile, in.Protocol, in.Network, in.Security, in.Core, in.Listen, in.Port, boolInt(in.Enabled),
 		in.Settings, in.CertID, nz(in.LineKind, "direct"), in.ExitInboundID, in.ExitURI, boolInt(in.RejectCN), now())
 	if err != nil {
 		return nil, err
 	}
-	id, _ := res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
 	return GetInbound(d, id)
 }
 
@@ -1390,7 +1414,8 @@ func UserAccessOK(u *User, pkg *Package) bool {
 	if u.PkgExpires > 0 && u.PkgExpires < now() {
 		return false
 	}
-	if pkg == nil && u.PackageID == nil {
+	// Missing package row (deleted or lookup failed) must not fail open.
+	if pkg == nil {
 		return false
 	}
 	lim := UserLimitBytes(u, pkg)
@@ -1582,6 +1607,19 @@ func ListAudit(d *sql.DB, limit int) ([]*Audit, error) {
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+func normalizeMultiplier(m float64) (float64, error) {
+	if math.IsNaN(m) || math.IsInf(m, 0) {
+		return 0, fmt.Errorf("倍率无效")
+	}
+	if m <= 0 {
+		return 1, nil
+	}
+	if m > 1000 {
+		return 0, fmt.Errorf("倍率不能超过 1000")
+	}
+	return m, nil
 }
 
 func PackageMultiplier(p *Package, inboundID int64) float64 {

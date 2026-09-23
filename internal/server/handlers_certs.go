@@ -396,12 +396,30 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		BackupHour        *string   `json:"backup_hour"`
 		BackupKeep        *int      `json:"backup_keep"`
 		BackupPassword    *string   `json:"backup_password"`
+		CurrentPassword   *string   `json:"current_password"`
 		SubRulePreset     *string   `json:"sub_rule_preset"`
 		SubRuleCategories *[]string `json:"sub_rule_categories"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
 		return
+	}
+	if req.BackupPassword != nil {
+		actor := userFromCtx(r.Context())
+		cur := ""
+		if req.CurrentPassword != nil {
+			cur = *req.CurrentPassword
+		}
+		if actor == nil || !checkPassword(actor.PasswordHash, cur) {
+			jsonErr(w, http.StatusForbidden, "修改备份密码需要当前登录密码")
+			return
+		}
+		pw := strings.TrimSpace(*req.BackupPassword)
+		if pw != "" && len(pw) < 8 {
+			jsonErr(w, http.StatusBadRequest, "备份密码至少 8 位")
+			return
+		}
+		*req.BackupPassword = pw
 	}
 	if req.PanelName != nil {
 		_ = db.SetSetting(s.DB, "panel_name", strings.TrimSpace(*req.PanelName))

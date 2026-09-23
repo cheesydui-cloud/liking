@@ -136,6 +136,7 @@ export default function Packages() {
   const [ruleCatalog, setRuleCatalog] = useState([])
   const [denyCatalog, setDenyCatalog] = useState([])
   const [globalCats, setGlobalCats] = useState([])
+  const [loadErr, setLoadErr] = useState('')
 
   const load = async () => {
     try {
@@ -145,8 +146,13 @@ export default function Packages() {
       setServers(putList('servers', asArray(b.servers), g))
       setIns(putList('inbounds', asArray(c.inbounds), g))
       setUsers(putList('users', asArray(d.users), g))
-    } catch (e) { toast(e.message, 'error') }
-    finally { setReady(true) }
+      setLoadErr('')
+      setReady(true)
+    } catch (e) {
+      setLoadErr(e.message || '加载失败')
+      toast(e.message, 'error')
+      setReady(true)
+    }
   }
   useEffect(() => { load() }, [])
   useEffect(() => {
@@ -331,6 +337,12 @@ export default function Packages() {
       />
       {!ready ? (
         <div className="card overflow-hidden"><SkeletonRows /></div>
+      ) : loadErr && list.length === 0 ? (
+        <div className="card overflow-hidden">
+          <Empty title="套餐加载失败" hint={loadErr} action={
+            <button type="button" className="btn-primary" onClick={load}>重试</button>
+          } />
+        </div>
       ) : list.length === 0 ? (
         <div className="card overflow-hidden">
           <Empty title="暂无套餐" hint="勾选节点，再把套餐绑给用户。" action={

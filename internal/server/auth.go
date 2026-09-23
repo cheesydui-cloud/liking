@@ -98,24 +98,41 @@ func trustedForwarded(next http.Handler) http.Handler {
 	})
 }
 
-func forwardedClientIP(r *http.Request) string {
-	if v := strings.TrimSpace(r.Header.Get("X-Real-IP")); v != "" {
-		if ip := net.ParseIP(v); ip != nil {
-			return ip.String()
-		}
+func headerIP(v string) string {
+	ip := net.ParseIP(strings.TrimSpace(v))
+	if ip == nil {
+		return ""
 	}
-	xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For"))
+	return ip.String()
+}
+
+func rightmostForwarded(xff string) string {
+	xff = strings.TrimSpace(xff)
 	if xff == "" {
 		return ""
 	}
 	parts := strings.Split(xff, ",")
 	for i := len(parts) - 1; i >= 0; i-- {
-		p := strings.TrimSpace(parts[i])
-		if ip := net.ParseIP(p); ip != nil {
-			return ip.String()
+		if ip := headerIP(parts[i]); ip != "" {
+			return ip
 		}
 	}
 	return ""
+}
+
+// forwardedClientIP trusts a loopback peer's forwarded address only when
+// X-Real-IP and the rightmost X-Forwarded-For agree, or only one of them is set.
+// If both are set and differ, neither is trusted (nginx must overwrite both).
+func forwardedClientIP(r *http.Request) string {
+	real := headerIP(r.Header.Get("X-Real-IP"))
+	xff := rightmostForwarded(r.Header.Get("X-Forwarded-For"))
+	if real != "" && xff != "" && real != xff {
+		return ""
+	}
+	if real != "" {
+		return real
+	}
+	return xff
 }
 
 func secureHeaders(next http.Handler) http.Handler {
@@ -159,6 +176,10 @@ func (s *Server) requireAPIAuth(next http.Handler) http.Handler {
 		}
 		if !u.Enabled {
 			jsonErr(w, http.StatusForbidden, "账号已被禁用")
+			return
+		}
+		if u.Role == "admin" && !s.adminIPAllowed(r) {
+			jsonErr(w, http.StatusForbidden, "不在管理员 IP 白名单")
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(withUser(r.Context(), u)))

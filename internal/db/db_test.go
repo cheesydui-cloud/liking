@@ -364,6 +364,18 @@ func TestUserAccessExpired(t *testing.T) {
 	}
 }
 
+func TestUserAccessPackageLookupFailClosed(t *testing.T) {
+	pid := int64(9)
+	u := &User{Enabled: true, Role: "user", PackageID: &pid}
+	if UserAccessOK(u, nil) {
+		t.Fatal("missing package must deny")
+	}
+	u.PackageID = nil
+	if UserAccessOK(u, nil) {
+		t.Fatal("no package must deny")
+	}
+}
+
 func TestMarkServerOnlineFillsEmptyPublicHost(t *testing.T) {
 	d, err := Open(":memory:")
 	if err != nil {

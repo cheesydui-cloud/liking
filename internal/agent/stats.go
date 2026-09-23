@@ -30,78 +30,118 @@ type clashConn struct {
 }
 
 func (c *Cores) Collect() []wsproto.Sample {
-	if !c.collectMu.TryLock() {
-		return nil
-	}
-	defer c.collectMu.Unlock()
-	var all []wsproto.Sample
-	all = append(all, c.collectXray()...)
-	all = append(all, c.collectSingbox()...)
-	all = append(all, c.collectMita()...)
-	return mergeSamples(all)
+	samples, finish := c.BeginCollect()
+	finish(true)
+	return samples
 }
 
-func (c *Cores) collectXray() []wsproto.Sample {
+// BeginCollect snapshots counters without moving the cursor. Commit only after
+// the stats frame is written, so a failed send does not drop the interval.
+// A skipped lock returns a no-op finish and must not be treated as zero traffic.
+func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
+	if !c.collectMu.TryLock() {
+		return nil, func(bool) {}
+	}
+	var all []wsproto.Sample
+	var xrayNext map[string]bytePair
+	var clashNext map[string]clashSnap
+	var mitaNext map[string]bytePair
+	xrayOK, clashOK, mitaOK := false, false, false
+	if samples, next, ok := c.peekXray(); ok {
+		all = append(all, samples...)
+		xrayNext, xrayOK = next, true
+	}
+	if samples, next, ok := c.peekClash(); ok {
+		all = append(all, samples...)
+		clashNext, clashOK = next, true
+	}
+	if samples, next, ok := c.peekMita(); ok {
+		all = append(all, samples...)
+		mitaNext, mitaOK = next, true
+	}
+	merged := mergeSamples(all)
+	finished := false
+	finish := func(commit bool) {
+		if finished {
+			return
+		}
+		finished = true
+		if commit {
+			if xrayOK {
+				c.xrayLast = xrayNext
+			}
+			if clashOK {
+				c.clashLast = clashNext
+			}
+			if mitaOK {
+				c.mitaLast = mitaNext
+			}
+		}
+		c.collectMu.Unlock()
+	}
+	return merged, finish
+}
+
+func (c *Cores) peekXray() ([]wsproto.Sample, map[string]bytePair, bool) {
 	c.mu.Lock()
 	bin, api := c.xrayBin, c.xrayAPI
 	c.mu.Unlock()
 	if bin == "" || api == "" {
-		return nil
+		return nil, nil, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "api", "statsquery", "--server="+api, "-reset")
+	cmd := exec.CommandContext(ctx, bin, "api", "statsquery", "--server="+api)
 	out, err := cmd.Output()
 	if err != nil {
-		return nil
+		return nil, nil, false
 	}
-	return parseXrayStats(out)
+	samples, next := mitaDeltas(c.xrayLast, parseXrayStats(out))
+	return samples, next, true
 }
 
-func (c *Cores) collectSingbox() []wsproto.Sample {
+func (c *Cores) peekClash() ([]wsproto.Sample, map[string]clashSnap, bool) {
 	c.mu.Lock()
 	api := c.singboxAPI
 	c.mu.Unlock()
 	if api == "" {
-		return nil
+		return nil, nil, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+api+"/connections", nil)
 	if err != nil {
-		return nil
+		return nil, nil, false
 	}
 	res, err := clashHTTP.Do(req)
 	if err != nil {
-		return nil
+		return nil, nil, false
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return nil
+		return nil, nil, false
 	}
 	raw, err := io.ReadAll(io.LimitReader(res.Body, 8<<20))
 	if err != nil {
-		return nil
+		return nil, nil, false
 	}
 	samples, next := clashDeltas(c.clashLast, parseClashConnections(raw), time.Now())
-	c.clashLast = next
-	return samples
+	return samples, next, true
 }
 
-func (c *Cores) collectMita() []wsproto.Sample {
+func (c *Cores) peekMita() ([]wsproto.Sample, map[string]bytePair, bool) {
 	bin := lookBin("mita")
 	if bin == "" || !mitaIsRunning(bin) {
-		return nil
+		return nil, nil, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, bin, "get", "metrics").Output()
 	if err != nil {
-		return nil
+		return nil, nil, false
 	}
 	samples, next := mitaDeltas(c.mitaLast, parseMitaMetrics(out))
-	c.mitaLast = next
-	return samples
+	return samples, next, true
 }
 
 func parseXrayStats(raw []byte) []wsproto.Sample {
@@ -205,9 +245,6 @@ func clashDeltas(prev map[string]clashSnap, conns []clashConn, now time.Time) ([
 		next[conn.ID] = snap
 		old, ok := prev[conn.ID]
 		if !ok {
-			if conn.Start.IsZero() || now.Sub(conn.Start) <= 20*time.Second {
-				add(conn.User, conn.Up, conn.Down)
-			}
 			continue
 		}
 		up, down := conn.Up, conn.Down

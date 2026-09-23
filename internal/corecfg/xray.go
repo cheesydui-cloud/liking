@@ -328,12 +328,15 @@ func xrayTLS(in *db.Inbound, st Settings, certs map[int64]*db.Certificate) (map[
 }
 
 func xrayClientTLS(st Settings, sni string) map[string]any {
-	return map[string]any{
-		"serverName":    sni,
+	tls := map[string]any{
 		"allowInsecure": false,
 		"fingerprint":   nz(st.String("fingerprint"), "chrome"),
 		"alpn":          st.ALPN(),
 	}
+	if sni != "" {
+		tls["serverName"] = sni
+	}
+	return tls
 }
 
 func xrayXHTTPSettings(st Settings) map[string]any {
@@ -510,10 +513,7 @@ func xrayShareStream(t *ShareTarget) map[string]any {
 		return nil
 	}
 	stream := map[string]any{"network": netw}
-	sni := t.SNI
-	if sni == "" {
-		sni = t.Host
-	}
+	sni := tlsServerName(t.SNI, t.Host)
 	st := Settings{}
 	if t.Fingerprint != "" {
 		st["fingerprint"] = t.Fingerprint
@@ -597,10 +597,7 @@ func xrayLandOutbound(tag string, land *db.Inbound, st Settings) (map[string]any
 		}
 		stream := map[string]any{}
 		if land.Profile == ProfileVLESSXHTTP {
-			sni := lst.String("sni")
-			if sni == "" {
-				sni = host
-			}
+			sni := tlsServerName(lst.String("sni"), host)
 			stream = map[string]any{
 				"network":       "xhttp",
 				"security":      "tls",
@@ -638,10 +635,7 @@ func xrayLandOutbound(tag string, land *db.Inbound, st Settings) (map[string]any
 			"streamSettings": stream,
 		}, nil
 	case ProfileTrojanTLS:
-		sni := lst.String("sni")
-		if sni == "" {
-			sni = host
-		}
+		sni := tlsServerName(lst.String("sni"), host)
 		return map[string]any{
 			"tag":      tag,
 			"protocol": "trojan",

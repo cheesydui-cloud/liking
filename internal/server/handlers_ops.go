@@ -81,7 +81,13 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		exp := int64(0)
 		if item.Days > 0 {
-			exp = time.Now().Add(time.Duration(item.Days) * 24 * time.Hour).Unix()
+			got, err := expiryFromDays(item.Days)
+			if err != nil {
+				rec.Error = err.Error()
+				out = append(out, rec)
+				continue
+			}
+			exp = got
 		}
 		if item.PackageID != nil {
 			if err := db.BindUserPackage(s.DB, u.ID, *item.PackageID, exp); err != nil {

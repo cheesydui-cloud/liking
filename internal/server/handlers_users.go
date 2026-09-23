@@ -166,7 +166,12 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	exp := req.ExpiresAt
 	if req.Days > 0 {
-		exp = time.Now().Add(time.Duration(req.Days) * 24 * time.Hour).Unix()
+		got, err := expiryFromDays(req.Days)
+		if err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		exp = got
 	}
 	if req.PackageID != nil {
 		if err := db.BindUserPackage(s.DB, u.ID, *req.PackageID, exp); err != nil {
@@ -276,10 +281,19 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		if *req.Days <= 0 {
 			u.ExpiresAt = 0
 		} else {
-			u.ExpiresAt = time.Now().Add(time.Duration(*req.Days) * 24 * time.Hour).Unix()
+			got, err := expiryFromDays(*req.Days)
+			if err != nil {
+				jsonErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			u.ExpiresAt = got
 		}
 	}
 	if req.ExtendDays != nil && *req.ExtendDays > 0 {
+		if *req.ExtendDays > maxUserDays {
+			jsonErr(w, http.StatusBadRequest, "天数无效")
+			return
+		}
 		base := u.ExpiresAt
 		now := time.Now().Unix()
 		if base < now {
@@ -374,17 +388,14 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			u.SiteDenyDomains = deny.Domains
 		}
 	}
-	if err := db.UpdateUser(s.DB, u); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			jsonErr(w, http.StatusConflict, "用户名已存在")
-			return
-		}
-		jsonErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	var pendingHash string
 	if req.Password != nil {
 		pw := strings.TrimSpace(*req.Password)
 		if pw != "" {
+			if u.Role == "admin" {
+				jsonErr(w, http.StatusBadRequest, "管理员请在账号页修改密码")
+				return
+			}
 			if len(pw) < 6 {
 				jsonErr(w, http.StatusBadRequest, "密码至少 6 位")
 				return
@@ -394,12 +405,27 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-			if err := db.SetUserPassword(s.DB, u.ID, hash); err != nil {
-				jsonErr(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			_ = db.ClearUserPasswordPlain(s.DB, u.ID)
-			_ = db.DeleteSessionsForUser(s.DB, u.ID)
+			pendingHash = hash
+		}
+	}
+	if err := db.UpdateUser(s.DB, u); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			jsonErr(w, http.StatusConflict, "用户名已存在")
+			return
+		}
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if pendingHash != "" {
+		if err := db.SetUserPassword(s.DB, u.ID, pendingHash); err != nil {
+			jsonErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		_ = db.ClearUserPasswordPlain(s.DB, u.ID)
+		_ = db.DeleteSessionsForUser(s.DB, u.ID)
+		if _, err := db.RotateSubToken(s.DB, u.ID); err != nil {
+			jsonErr(w, http.StatusInternalServerError, err.Error())
+			return
 		}
 	}
 	if req.Unbind {
@@ -550,7 +576,7 @@ func (s *Server) handleBatchUsers(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "操作无效")
 		return
 	}
-	if action == "extend" && req.Days <= 0 {
+	if action == "extend" && (req.Days <= 0 || req.Days > maxUserDays) {
 		jsonErr(w, http.StatusBadRequest, "天数无效")
 		return
 	}
@@ -640,6 +666,15 @@ func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "无效 ID")
 		return
 	}
+	target, err := db.GetUser(s.DB, id)
+	if err != nil || target == nil {
+		jsonErr(w, http.StatusNotFound, "用户不存在")
+		return
+	}
+	if target.Role == "admin" {
+		jsonErr(w, http.StatusBadRequest, "管理员请在账号页修改密码")
+		return
+	}
 	var req struct {
 		Password string `json:"password"`
 	}
@@ -672,7 +707,12 @@ func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = db.ClearUserPasswordPlain(s.DB, id)
 	_ = db.DeleteSessionsForUser(s.DB, id)
-	out := map[string]any{"ok": true, "password": req.Password}
+	tok, err := db.RotateSubToken(s.DB, id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := map[string]any{"ok": true, "password": req.Password, "sub_token": tok}
 	if generated != "" {
 		out["password"] = generated
 	}

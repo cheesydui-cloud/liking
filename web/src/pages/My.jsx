@@ -50,8 +50,8 @@ export default function My() {
     setReady(true)
   }, 5000), [])
 
-  const used = billedBytes(user)
-  const cap = user?.traffic_cap || 0
+  const used = traffic ? (Number(traffic.billed_bytes) || 0) : billedBytes(user)
+  const cap = traffic ? (Number(traffic.traffic_cap) || 0) : (user?.traffic_cap || 0)
   const ratio = cap > 0 ? Math.min(100, Math.round(used * 100 / cap)) : 0
   const nodes = asArray(payload.nodes)
   const period = sumDays(traffic?.days)

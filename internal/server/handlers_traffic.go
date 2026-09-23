@@ -132,10 +132,25 @@ func (s *Server) writeUserTraffic(w http.ResponseWriter, r *http.Request, userID
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	var billed, cap, usedUp, usedDown int64
+	if u, err := db.GetUser(s.DB, userID); err == nil && u != nil {
+		var pkg *db.Package
+		if u.PackageID != nil {
+			pkg, _ = db.GetPackage(s.DB, *u.PackageID)
+		}
+		billed = db.UserBilledBytes(u, pkg)
+		cap = db.UserLimitBytes(u, pkg)
+		usedUp = u.UsedUp
+		usedDown = u.UsedDown
+	}
 	jsonOK(w, map[string]any{
-		"from":     from,
-		"to":       to,
-		"days":     db.FillTrafficDays(from, to, days),
-		"inbounds": ins,
+		"from":         from,
+		"to":           to,
+		"days":         db.FillTrafficDays(from, to, days),
+		"inbounds":     ins,
+		"billed_bytes": billed,
+		"traffic_cap":  cap,
+		"used_up":      usedUp,
+		"used_down":    usedDown,
 	})
 }

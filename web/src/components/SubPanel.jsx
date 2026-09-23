@@ -43,10 +43,28 @@ function qrOpts() {
 
 function QRBlock({ label, value }) {
   const [src, setSrc] = useState('')
+  const [failed, setFailed] = useState(false)
   useEffect(() => {
-    if (!value) { setSrc(''); return }
-    QRCode.toDataURL(value, qrOpts()).then(setSrc).catch(() => setSrc(''))
+    if (!value) { setSrc(''); setFailed(false); return }
+    let live = true
+    setFailed(false)
+    QRCode.toDataURL(value, qrOpts()).then(url => {
+      if (live) setSrc(url)
+    }).catch(() => {
+      if (!live) return
+      setSrc('')
+      setFailed(true)
+    })
+    return () => { live = false }
   }, [value])
+  if (failed) {
+    return (
+      <div className="shrink-0 text-center w-[148px]">
+        <div className="text-[12px]" style={{ color: 'var(--color-danger)' }}>二维码生成失败</div>
+        <div className="text-[11px] text-ink-mut mt-2">{label}</div>
+      </div>
+    )
+  }
   if (!src) return null
   return (
     <div className="shrink-0 text-center">
@@ -60,11 +78,12 @@ export function SubPanel({ token, onCopied, onRotate, rotating }) {
   const [downloading, setDownloading] = useState('')
   const auto = subURL(token)
   const uri = subURL(token, 'uri')
+  const rocket = shadowrocketQRPayload(token)
   const rows = [
     ['自动识别', auto],
     ['Clash Meta', subURL(token, 'clash')],
     ['sing-box', subURL(token, 'singbox')],
-    ['小火箭', uri],
+    ['小火箭', rocket],
     ['v2rayN', uri],
   ]
 

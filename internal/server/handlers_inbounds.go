@@ -115,6 +115,10 @@ func (s *Server) handleCreateInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	created, err := db.CreateInbound(s.DB, in)
 	if err != nil {
+		if strings.Contains(err.Error(), "端口已被占用") {
+			jsonErr(w, http.StatusConflict, err.Error())
+			return
+		}
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
