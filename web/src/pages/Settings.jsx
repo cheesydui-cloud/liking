@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import QRCode from 'qrcode'
 import { api } from '../lib/api'
 import { useToast, useDialog, useUser } from '../components/Layout'
 import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, Tabs, fmtBytes, fmtDate, fmtDateShort } from '../components/ui'
-import { SubscribeRulesPanel } from './Subscribe'
 
 const emptyIssue = { channel: 'acme-cf', name: '', domains: '', cert_pem: '', key_pem: '' }
 
@@ -525,7 +524,6 @@ function BackupPanel() {
 
 const settingTabs = [
   { id: 'panel', label: '面板' },
-  { id: 'rules', label: '分流' },
   { id: 'certs', label: '证书' },
   { id: 'backup', label: '备份' },
   { id: 'security', label: '安全' },
@@ -540,8 +538,7 @@ export default function Settings({ accountOnly = false }) {
   const dialog = useDialog()
   const { refreshUser } = useUser()
   const [searchParams, setSearchParams] = useSearchParams()
-  const requestedRaw = searchParams.get('tab')
-  const requested = requestedRaw === 'subscribe' ? 'rules' : requestedRaw
+  const requested = searchParams.get('tab')
   const tab = accountOnly ? 'account' : (settingTabs.some(t => t.id === requested) ? requested : 'panel')
   const [f, setF] = useState({
     panel_name: '', panel_url: '', acme_email: '', cf_api_token: '',
@@ -578,11 +575,6 @@ export default function Settings({ accountOnly = false }) {
     loadSettings()
     loadCerts()
   }, [accountOnly])
-
-  useEffect(() => {
-    if (accountOnly) return
-    if (searchParams.get('tab') === 'subscribe') setSearchParams({ tab: 'rules' }, { replace: true })
-  }, [accountOnly, searchParams, setSearchParams])
 
   const goTab = (id) => setSearchParams(id === 'panel' ? {} : { tab: id }, { replace: true })
 
@@ -676,12 +668,14 @@ export default function Settings({ accountOnly = false }) {
     ? (issueBusy ? '正在向 Let\'s Encrypt 申请，大约 1–2 分钟…' : '申请')
     : (issueBusy ? '保存中…' : '保存')
 
+  if (!accountOnly && (requested === 'rules' || requested === 'subscribe')) {
+    return <Navigate to="/subscribe" replace />
+  }
+
   return (
     <div>
       <PageHead title="设置" />
       {!accountOnly && <Tabs value={tab} onChange={goTab} items={settingTabs} />}
-
-      {tab === 'rules' && <SubscribeRulesPanel />}
 
       {tab === 'panel' && (
       <form onSubmit={savePanel} className="card p-5 max-w-3xl space-y-4">

@@ -10,6 +10,7 @@ import Packages from './pages/Packages'
 import Forwards from './pages/Forwards'
 import Traffic from './pages/Traffic'
 import Settings from './pages/Settings'
+import Subscribe from './pages/Subscribe'
 import My from './pages/My'
 import MyNodes from './pages/MyNodes'
 import MyForwards from './pages/MyForwards'
@@ -72,7 +73,7 @@ export default function App() {
               <Route path="/packages" element={<Packages />} />
               <Route path="/forwards" element={<Forwards />} />
               <Route path="/traffic" element={<Traffic />} />
-              <Route path="/subscribe" element={<Navigate to="/settings?tab=rules" replace />} />
+              <Route path="/subscribe" element={<Subscribe />} />
               <Route path="/certs" element={<Navigate to="/settings?tab=certs" replace />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/password" element={<Navigate to="/settings?tab=account" replace />} />

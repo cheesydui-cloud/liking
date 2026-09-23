@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { useToast } from '../components/Layout'
+import { PageHead } from '../components/ui'
 import { catsForPreset, SubRulePicker } from '../components/SubRules'
 
 export function SubscribeRulesPanel() {
@@ -52,5 +53,14 @@ export function SubscribeRulesPanel() {
       <SubRulePicker preset={preset} cats={cats} catalog={catalog} onPreset={pickPreset} onToggle={toggle} />
       <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
     </form>
+  )
+}
+
+export default function Subscribe() {
+  return (
+    <div>
+      <PageHead title="分流" />
+      <SubscribeRulesPanel />
+    </div>
   )
 }

@@ -297,7 +297,7 @@ function UserRulesModal({ user, onClose, onSaved }) {
     }>
       <div className="space-y-4">
         <p className="text-[12.5px] text-ink-mut leading-relaxed">
-          只改这个用户的 Clash Meta 与 sing-box 订阅。跟随全局则用「设置 · 分流」里的规则。节点仍由套餐决定，通用 URI 不受影响。
+          只改这个用户的 Clash Meta 与 sing-box 订阅。跟随全局则用「分流」里的规则。节点仍由套餐决定，通用 URI 不受影响。
         </p>
         {!preset ? (
           <p className="text-[12px] text-ink-mut">当前全局：{presetLabel(globalPreset)}，{globalCats.length} 类。点规则会变成这个用户自己的自定义。</p>

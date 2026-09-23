@@ -516,7 +516,7 @@ export default function Packages() {
               />
               <div>
                 <div className="text-[12px] font-medium text-ink-soft mb-1.5">分流规则</div>
-                <p className="text-[12px] text-ink-mut mb-2">空则跟随「设置 · 分流」的全局规则。只影响 Clash Meta / sing-box。</p>
+                <p className="text-[12px] text-ink-mut mb-2">空则跟随「分流」的全局规则。只影响 Clash Meta / sing-box。</p>
                 <SubRulePicker
                   preset={f.sub_rule_preset}
                   cats={f.sub_rule_preset ? f.sub_rule_categories : globalCats}

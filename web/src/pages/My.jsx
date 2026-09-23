@@ -63,7 +63,7 @@ export default function My() {
         title={isAdmin ? '订阅' : '我的订阅'}
         desc={isAdmin
           ? '包含全部节点。用管理员自己的身份，不占用用户额度。单条复制和常用节点在「节点」。'
-          : '把链接导入 Clash Meta、sing-box 或通用客户端，也可以扫码。流量按 GiB（1024³ 字节）计。'}
+          : '把链接导入 Clash Meta、sing-box、小火箭或 v2rayN，也可以扫码。流量按 GiB（1024³ 字节）计。'}
       />
       <div className="stat-row">
         {isAdmin ? (
