@@ -81,7 +81,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(secureHeaders)
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		jsonOK(w, map[string]any{"ok": true, "version": version.Version})
+		jsonOK(w, map[string]any{"ok": true, "version": version.Version, "started": panelBootedAt.Unix()})
 	})
 	r.Get("/v1/agents", s.Hub.ServeWS)
 	r.Get("/v1/install-agent", s.handleInstallAgent)
@@ -173,6 +173,8 @@ func (s *Server) Router() http.Handler {
 
 			r.Get("/api/settings", s.handleGetSettings)
 			r.Put("/api/settings", s.handlePutSettings)
+			r.Get("/api/panel/upgrade", s.handlePanelUpgradeInfo)
+			r.Post("/api/panel/upgrade", s.handlePanelUpgrade)
 			r.Post("/api/backup", s.handleBackupDownload)
 			r.Get("/api/backup/summary", s.handleBackupSummary)
 			r.Post("/api/backup/preview", s.handleBackupPreview)

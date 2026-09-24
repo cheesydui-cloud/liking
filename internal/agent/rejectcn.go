@@ -29,8 +29,16 @@ var cnListURLs = []struct {
 	v4, v6 string
 }{
 	{
-		v4: "https://github.com/mayaxcn/china-ip-list/raw/master/chnroute.txt",
-		v6: "https://github.com/mayaxcn/china-ip-list/raw/master/chnroute6.txt",
+		v4: "https://raw.githubusercontent.com/mayaxcn/china-ip-list/master/chnroute.txt",
+		v6: "https://raw.githubusercontent.com/mayaxcn/china-ip-list/master/chnroute_v6.txt",
+	},
+	{
+		v4: "https://cdn.jsdelivr.net/gh/mayaxcn/china-ip-list@master/chnroute.txt",
+		v6: "https://cdn.jsdelivr.net/gh/mayaxcn/china-ip-list@master/chnroute_v6.txt",
+	},
+	{
+		v4: "https://cdn.jsdelivr.net/gh/gaoyifan/china-operator-ip@ip-lists/china.txt",
+		v6: "https://cdn.jsdelivr.net/gh/gaoyifan/china-operator-ip@ip-lists/china6.txt",
 	},
 }
 
@@ -412,7 +420,24 @@ func parseCIDRList(body string, want4 bool) []string {
 }
 
 func httpGetBody(u string) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodGet, withGHProxy(u), nil)
+	return httpGetWithFallback(u, httpGetOnce)
+}
+
+func httpGetWithFallback(u string, get func(string) ([]byte, error)) ([]byte, error) {
+	proxied := withGHProxy(u)
+	body, err := get(proxied)
+	if err == nil || proxied == u {
+		return body, err
+	}
+	direct, err2 := get(u)
+	if err2 == nil {
+		return direct, nil
+	}
+	return nil, err
+}
+
+func httpGetOnce(u string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}

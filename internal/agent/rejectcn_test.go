@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,6 +74,54 @@ func TestApplyRejectCNClearsWhenOff(t *testing.T) {
 	}
 	if len(got) != 1 || strings.Join(got[0], " ") != "delete table inet liking_cn" {
 		t.Fatalf("%v", got)
+	}
+}
+
+func TestCNListV6FileExists(t *testing.T) {
+	saw := false
+	for _, u := range cnListURLs {
+		if strings.Contains(u.v6, "chnroute6.txt") {
+			t.Fatalf("missing file %s", u.v6)
+		}
+		if strings.Contains(u.v6, "chnroute_v6.txt") {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Fatal("no ipv6 list")
+	}
+}
+
+func TestLoadCNListTriesNextURL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cn-ip6.txt")
+	var calls int
+	cnHTTPGet = func(u string) ([]byte, error) {
+		calls++
+		if calls == 1 {
+			return nil, fmt.Errorf("下载中国 IP 段: HTTP 404")
+		}
+		return []byte("2001:250::/35\n"), nil
+	}
+	defer func() { cnHTTPGet = httpGetBody }()
+	got, err := loadCNList(path, false)
+	if err != nil || len(got) != 1 || got[0] != "2001:250::/35" {
+		t.Fatalf("%v %v calls=%d", got, err, calls)
+	}
+}
+
+func TestHTTPGetWithFallbackSkipsProxy404(t *testing.T) {
+	t.Setenv("LIKING_GITHUB_PROXY", "https://gh-proxy.example")
+	var got []string
+	body, err := httpGetWithFallback("https://example.com/list.txt", func(u string) ([]byte, error) {
+		got = append(got, u)
+		if strings.Contains(u, "gh-proxy.example") {
+			return nil, fmt.Errorf("下载中国 IP 段: HTTP 404")
+		}
+		return []byte("1.2.3.0/24\n"), nil
+	})
+	if err != nil || string(body) != "1.2.3.0/24\n" || len(got) != 2 {
+		t.Fatalf("%v %q %v", err, body, got)
 	}
 }
 

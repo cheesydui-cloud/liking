@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
 import QRCode from 'qrcode'
 import { api } from '../lib/api'
@@ -540,6 +540,105 @@ function BackupPanel() {
   )
 }
 
+function PanelUpgradeCard() {
+  const toast = useToast()
+  const [info, setInfo] = useState(null)
+  const [pw, setPw] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [waiting, setWaiting] = useState(false)
+  const waitRef = useRef(0)
+
+  useEffect(() => () => window.clearTimeout(waitRef.current), [])
+
+  const load = () => api.get('/panel/upgrade').then(setInfo).catch(e => toast(e.message, 'error'))
+
+  useEffect(() => { load() }, [])
+
+  const watchRestart = (beforeVer, beforeStarted) => {
+    setWaiting(true)
+    const started = Date.now()
+    const tick = async () => {
+      if (Date.now() - started > 180000) {
+        setWaiting(false)
+        toast('还没看到面板回来。到面板机看 liking-upgrade 的输出', 'error')
+        return
+      }
+      try {
+        const res = await fetch('/healthz', { cache: 'no-store' })
+        if (!res.ok) throw new Error('down')
+        const d = await res.json()
+        const verChanged = d.version && beforeVer && d.version !== beforeVer
+        const bootChanged = d.started && beforeStarted && d.started !== beforeStarted
+        if (verChanged || bootChanged) {
+          toast(verChanged ? `已升到 ${d.version}` : '面板已重新启动')
+          window.setTimeout(() => window.location.reload(), 600)
+          return
+        }
+      } catch { /* 面板正在重启 */ }
+      waitRef.current = window.setTimeout(tick, 2000)
+    }
+    waitRef.current = window.setTimeout(tick, 2000)
+  }
+
+  const run = async (e) => {
+    e.preventDefault()
+    if (!pw.trim()) { toast('请填写当前密码', 'error'); return }
+    setBusy(true)
+    const beforeVer = info?.version || ''
+    const beforeStarted = info?.started || 0
+    try {
+      await api.post('/panel/upgrade', { password: pw })
+      setPw('')
+      toast('已开始升级。面板会断开几十秒，完成后自动刷新')
+      watchRestart(beforeVer, beforeStarted)
+    } catch (err) {
+      const dropped = err.message === '网络错误' || err.status === 502 || err.status === 503 || err.status === 504
+      if (dropped) {
+        toast('连接中断，正在等面板回来')
+        watchRestart(beforeVer, beforeStarted)
+      } else {
+        toast(err.message, 'error')
+      }
+    } finally { setBusy(false) }
+  }
+
+  const latest = info?.latest
+  const can = info?.script && !waiting
+  let status = '正在检查…'
+  if (info?.latest_error) status = info.latest_error
+  else if (latest && info?.update) status = `可升到 ${latest}`
+  else if (latest) status = `已是最新 ${latest}`
+
+  return (
+    <form onSubmit={run} className="card p-5 max-w-3xl space-y-4 mb-5">
+      <div>
+        <div className="text-[15px] font-medium">升级面板</div>
+        <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
+          下载 GitHub 上的发布版并重启本机面板。同机 Agent 会一起重启。其它实例不会自动升，仍在实例页点一键升级。页面会断开几十秒。
+        </p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="当前版本">
+          <input className="input-field font-mono" value={info?.version || '—'} readOnly />
+        </Field>
+        <Field label="最新版本">
+          <input className="input-field font-mono" value={status} readOnly />
+        </Field>
+      </div>
+      {info && !info.script ? (
+        <p className="text-[12.5px] text-[var(--color-danger)]">这台机器没有 liking-upgrade，不能在页面里升级。</p>
+      ) : null}
+      <Field label="当前登录密码">
+        <input className="input-field" type="password" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} disabled={!can} />
+      </Field>
+      <div className="flex flex-wrap gap-2">
+        <button className="btn-primary" disabled={busy || !can}>{busy || waiting ? '升级中…' : (info?.update ? `升级到 ${latest}` : (latest ? '重新安装当前版本' : '升级到最新'))}</button>
+        <button type="button" className="btn-ghost" disabled={busy || waiting} onClick={load}>重新检查</button>
+      </div>
+    </form>
+  )
+}
+
 const settingTabs = [
   { id: 'panel', label: '面板' },
   { id: 'certs', label: '证书' },
@@ -696,6 +795,8 @@ export default function Settings({ accountOnly = false }) {
       {!accountOnly && <Tabs value={tab} onChange={goTab} items={settingTabs} />}
 
       {tab === 'panel' && (
+      <>
+      <PanelUpgradeCard />
       <form onSubmit={savePanel} className="card p-5 max-w-3xl space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="面板名称">
@@ -724,6 +825,7 @@ export default function Settings({ accountOnly = false }) {
         </Field>
         <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
       </form>
+      </>
       )}
 
       {tab === 'certs' && (
