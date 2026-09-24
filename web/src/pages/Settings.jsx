@@ -641,6 +641,7 @@ function PanelUpgradeCard() {
 
 const settingTabs = [
   { id: 'panel', label: '面板' },
+  { id: 'upgrade', label: '升级' },
   { id: 'certs', label: '证书' },
   { id: 'backup', label: '备份' },
   { id: 'security', label: '安全' },
@@ -794,9 +795,9 @@ export default function Settings({ accountOnly = false }) {
       <PageHead title="设置" />
       {!accountOnly && <Tabs value={tab} onChange={goTab} items={settingTabs} />}
 
+      {tab === 'upgrade' && <PanelUpgradeCard />}
+
       {tab === 'panel' && (
-      <>
-      <PanelUpgradeCard />
       <form onSubmit={savePanel} className="card p-5 max-w-3xl space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="面板名称">
@@ -825,7 +826,6 @@ export default function Settings({ accountOnly = false }) {
         </Field>
         <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
       </form>
-      </>
       )}
 
       {tab === 'certs' && (
