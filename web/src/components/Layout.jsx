@@ -330,7 +330,7 @@ export function Layout({ children }) {
           </button>
         </div>
         <div ref={scrollRef} className="scroll-pane flex-1 overflow-y-auto px-3 sm:px-5 py-4 sm:py-5">
-          <div className="max-w-[1280px]">
+          <div className="w-full min-w-0">
             {announceText ? (
               <div className={`notice mb-4${announceLong ? '' : ' sm:hidden'}`}>{announceText}</div>
             ) : null}
