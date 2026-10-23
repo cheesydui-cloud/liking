@@ -104,12 +104,14 @@ export default function Dashboard() {
         </div>
       )}
       {hasDayBars && (
-        <div className="mt-5">
-          <div className="flex items-center justify-between mb-1">
-            <div className="text-[14px] font-semibold">近 30 日</div>
+        <div className="card overflow-hidden mt-5">
+          <div className="panel-head">
+            <div>近 30 日</div>
             <Link to="/traffic" className="btn-ghost h-8">明细</Link>
           </div>
-          <DayBars days={d.days} />
+          <div className="px-4 pt-3 pb-4">
+            <DayBars days={d.days} />
+          </div>
         </div>
       )}
       {showSetup ? (

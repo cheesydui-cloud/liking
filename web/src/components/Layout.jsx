@@ -273,7 +273,7 @@ export function Layout({ children }) {
         <button type="button" className="fixed inset-0 modal-scrim z-30 lg:hidden" aria-label="关闭菜单" onClick={() => setOpen(false)} />
       )}
       <aside
-        className={`sidebar-pane fixed lg:static z-40 h-full w-[200px] flex flex-col ${open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+        className={`sidebar-pane fixed lg:static z-40 h-full w-[216px] flex flex-col ${open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
         style={{ transition: 'transform var(--duration-med) ease', overscrollBehavior: 'contain' }}
         aria-label="主导航"
       >
@@ -295,7 +295,7 @@ export function Layout({ children }) {
             </div>
           ))}
         </nav>
-        <div className="p-3 border-t" style={{ borderColor: 'var(--color-line)' }}>
+        <div className="sidebar-foot">
           <div className="flex items-center gap-2 px-1">
             <span className="user-mark">
               {(user?.username || '?').slice(0, 1).toUpperCase()}
@@ -329,7 +329,7 @@ export function Layout({ children }) {
             <Icon name={dark ? 'sun' : 'moon'} size={15} />
           </button>
         </div>
-        <div ref={scrollRef} className="scroll-pane flex-1 overflow-y-auto px-3 sm:px-5 py-4 sm:py-5">
+        <div ref={scrollRef} className="scroll-pane flex-1 overflow-y-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
           <div className="w-full min-w-0">
             {announceText ? (
               <div className={`notice mb-4${announceLong ? '' : ' sm:hidden'}`}>{announceText}</div>
