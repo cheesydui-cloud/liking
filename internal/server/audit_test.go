@@ -209,6 +209,30 @@ func TestForgetPasswordAndLoginClearsPlain(t *testing.T) {
 		t.Fatalf("created %+v", created)
 	}
 
+	res, err = admin.Get(ts.URL + "/api/users")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed struct {
+		Users []struct {
+			ID       int64  `json:"id"`
+			Password string `json:"password"`
+		} `json:"users"`
+	}
+	decodeRes(t, res, &listed)
+	sawCarol := false
+	for _, u := range listed.Users {
+		if u.ID == created.User.ID {
+			sawCarol = true
+			if u.Password != "carol12" {
+				t.Fatalf("list password %q", u.Password)
+			}
+		}
+	}
+	if !sawCarol {
+		t.Fatal("carol not listed")
+	}
+
 	forget, _ := json.Marshal(map[string]any{})
 	res, err = admin.Post(ts.URL+"/api/users/"+strconv.FormatInt(created.User.ID, 10)+"/forget-password", "application/json", bytes.NewReader(forget))
 	if err != nil {
@@ -220,12 +244,7 @@ func TestForgetPasswordAndLoginClearsPlain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var listed struct {
-		Users []struct {
-			ID       int64  `json:"id"`
-			Password string `json:"password"`
-		} `json:"users"`
-	}
+	listed.Users = nil
 	decodeRes(t, res, &listed)
 	for _, u := range listed.Users {
 		if u.ID == created.User.ID && u.Password != "" {
@@ -255,10 +274,17 @@ func TestForgetPasswordAndLoginClearsPlain(t *testing.T) {
 	}
 	listed.Users = nil
 	decodeRes(t, res, &listed)
+	sawDave := false
 	for _, u := range listed.Users {
-		if u.ID == created.User.ID && u.Password != "" {
-			t.Fatalf("plain survived login %q", u.Password)
+		if u.ID == created.User.ID {
+			sawDave = true
+			if u.Password != "dave123" {
+				t.Fatalf("plain after login %q", u.Password)
+			}
 		}
+	}
+	if !sawDave {
+		t.Fatal("dave not listed")
 	}
 }
 

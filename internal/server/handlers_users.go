@@ -33,7 +33,11 @@ func randomPassword(n int) (string, error) {
 // adminUserView exposes the stored login password to admin APIs for 名片 copy.
 // Session /me never uses this wrapper.
 func adminUserView(u *db.User) any {
-	return adminUserViewPW(u, "")
+	pw := ""
+	if u != nil && u.Role != "admin" {
+		pw = u.PasswordPlain
+	}
+	return adminUserViewPW(u, pw)
 }
 
 type userLiveNode struct {
@@ -106,7 +110,7 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 			u.NetUpBps = up
 			u.NetDownBps = down
 		}
-		out = append(out, adminUserViewLive(u, "", s.userLiveNodes(u.ID)))
+		out = append(out, adminUserViewLive(u, u.PasswordPlain, s.userLiveNodes(u.ID)))
 	}
 	jsonOK(w, map[string]any{"users": out})
 }
@@ -162,6 +166,10 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	u, err := db.CreateUser(s.DB, req.Username, hash, req.Role, req.Remark)
 	if err != nil {
 		jsonErr(w, http.StatusConflict, "用户名已存在")
+		return
+	}
+	if err := db.SetUserPasswordPlain(s.DB, u.ID, req.Password); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	exp := req.ExpiresAt
@@ -388,7 +396,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			u.SiteDenyDomains = deny.Domains
 		}
 	}
-	var pendingHash string
+	var pendingHash, pendingPlain string
 	if req.Password != nil {
 		pw := strings.TrimSpace(*req.Password)
 		if pw != "" {
@@ -406,6 +414,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			pendingHash = hash
+			pendingPlain = pw
 		}
 	}
 	if err := db.UpdateUser(s.DB, u); err != nil {
@@ -421,7 +430,10 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		_ = db.ClearUserPasswordPlain(s.DB, u.ID)
+		if err := db.SetUserPasswordPlain(s.DB, u.ID, pendingPlain); err != nil {
+			jsonErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		_ = db.DeleteSessionsForUser(s.DB, u.ID)
 		if _, err := db.RotateSubToken(s.DB, u.ID); err != nil {
 			jsonErr(w, http.StatusInternalServerError, err.Error())
@@ -705,7 +717,10 @@ func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	_ = db.ClearUserPasswordPlain(s.DB, id)
+	if err := db.SetUserPasswordPlain(s.DB, id, req.Password); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	_ = db.DeleteSessionsForUser(s.DB, id)
 	tok, err := db.RotateSubToken(s.DB, id)
 	if err != nil {

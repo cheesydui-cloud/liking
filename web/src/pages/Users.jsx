@@ -605,8 +605,7 @@ export default function Users() {
           }, pkgs)
           try {
             await copyText(card)
-            try { await api.post(`/users/${editUser.id}/forget-password`) } catch { /* keep going */ }
-            toast('已保存，名片已复制。密码只这一次，订阅链接已更换。')
+            toast('已保存，名片已复制。订阅链接已更换。')
           } catch {
             toast('已保存。浏览器不允许自动复制，请复制密码后再关闭。', 'error')
             setBusy(false)
@@ -624,10 +623,7 @@ export default function Users() {
         if (created) {
           try {
             await copyText(formatUserCard(created, pkgs))
-            if (created.id) {
-              try { await api.post(`/users/${created.id}/forget-password`) } catch { /* keep going */ }
-            }
-            toast('已创建，名片已复制。密码只这一次。')
+            toast('已创建，名片已复制。')
           } catch { toast(pw ? `已创建，密码 ${pw}` : '已创建') }
         } else if (pw) {
           try { await copyText(pw); toast('已创建，密码已复制') } catch { toast(`已创建，密码 ${pw}`) }
@@ -694,14 +690,8 @@ export default function Users() {
   const copyCard = async (u) => {
     try {
       await copyText(formatUserCard(u, pkgs))
-      if (u.password) {
-        try { await api.post(`/users/${u.id}/forget-password`) } catch { /* keep going */ }
-        heldPw.current.delete(u.id)
-        setList(cur => cur.map(x => x.id === u.id ? { ...x, password: '' } : x))
-        toast('已复制名片。密码只这一次，下次请重置。')
-      } else {
-        toast('已复制名片。没有保存的密码，可用「重置密码」生成一次。')
-      }
+      if (u.password) toast('已复制名片')
+      else toast('已复制名片。没有保存的密码，请先「重置密码」。')
     } catch {
       toast('浏览器不允许自动复制', 'error')
     }
@@ -717,11 +707,9 @@ export default function Users() {
       try {
         await copyText(formatUserCard(next, pkgs))
         heldPw.current.delete(u.id)
-        try { await api.post(`/users/${u.id}/forget-password`) } catch { /* keep going */ }
-        setList(cur => cur.map(x => x.id === u.id ? { ...x, password: '' } : x))
-        toast('已重置并复制名片。密码只这一次，订阅链接已更换。')
+        toast('已重置并复制名片。订阅链接已更换。')
       } catch {
-        toast('已重置。浏览器不允许自动复制，密码还留在这张名片上。', 'error')
+        toast('已重置。浏览器不允许自动复制，请再点一次「复制名片」。', 'error')
       }
       load()
     } catch (e) { toast(e.message, 'error') }

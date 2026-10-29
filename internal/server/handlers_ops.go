@@ -79,6 +79,11 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 			out = append(out, rec)
 			continue
 		}
+		if err := db.SetUserPasswordPlain(s.DB, u.ID, pw); err != nil {
+			rec.Error = err.Error()
+			out = append(out, rec)
+			continue
+		}
 		exp := int64(0)
 		if item.Days > 0 {
 			got, err := expiryFromDays(item.Days)

@@ -50,7 +50,8 @@ func New(d *sql.DB) (*Server, error) {
 	if tz, _ := db.GetSetting(d, "timezone"); strings.TrimSpace(tz) == "" {
 		_ = db.SetSetting(d, "timezone", db.DefaultTimezone)
 	}
-	_, _ = d.Exec(`UPDATE users SET password_plain='' WHERE COALESCE(password_plain,'') != ''`)
+	// 管理员密码不留明文。普通用户的密码留给复制名片。
+	_, _ = d.Exec(`UPDATE users SET password_plain='' WHERE role='admin' AND COALESCE(password_plain,'') != ''`)
 	hub.OnTrafficUpdate = func(userID int64) {
 		u, err := db.GetUser(d, userID)
 		if err != nil {

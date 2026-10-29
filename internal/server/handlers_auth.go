@@ -13,6 +13,18 @@ import (
 	"liking/internal/version"
 )
 
+// rememberPasswordPlain keeps a customer password so 复制名片 can include it again.
+// Admin passwords stay hashed only.
+func rememberPasswordPlain(d *sql.DB, u *db.User, plain string) error {
+	if u == nil {
+		return nil
+	}
+	if u.Role == "admin" {
+		return db.ClearUserPasswordPlain(d, u.ID)
+	}
+	return db.SetUserPasswordPlain(d, u.ID, plain)
+}
+
 func normalizeUsername(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -84,7 +96,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, newSessionCookie(r, tok, int(ttl.Seconds())))
 	s.loginLimiter.Clear(ip)
-	_ = db.ClearUserPasswordPlain(s.DB, u.ID)
 	db.AddAudit(s.DB, &u.ID, "login", u.Username)
 	jsonOK(w, s.sessionPayload(u, r))
 }
@@ -129,7 +140,10 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "内部错误")
 		return
 	}
-	_ = db.ClearUserPasswordPlain(s.DB, u.ID)
+	if err := rememberPasswordPlain(s.DB, u, req.New); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "内部错误")
+		return
+	}
 	_ = db.DeleteSessionsForUserExcept(s.DB, u.ID, currentSessionToken(r))
 	if _, err := db.RotateSubToken(s.DB, u.ID); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "内部错误")
@@ -216,7 +230,10 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, "内部错误")
 			return
 		}
-		_ = db.ClearUserPasswordPlain(s.DB, u.ID)
+		if err := rememberPasswordPlain(s.DB, u, req.NewPassword); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "内部错误")
+			return
+		}
 		_ = db.DeleteSessionsForUserExcept(s.DB, u.ID, currentSessionToken(r))
 		if _, err := db.RotateSubToken(s.DB, u.ID); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "内部错误")
