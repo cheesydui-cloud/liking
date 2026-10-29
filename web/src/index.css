@@ -1501,14 +1501,8 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
 
 .machine-grid {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 12px;
-}
-@media (min-width: 720px) {
-  .machine-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@media (min-width: 1100px) {
-  .machine-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 10px;
 }
 
 .machine {
@@ -1568,7 +1562,7 @@ html.dark.page-aliyun .machine {
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
-  padding: 12px 12px 8px;
+  padding: 10px 10px 6px;
 }
 .machine-title {
   display: flex;
@@ -1577,7 +1571,7 @@ html.dark.page-aliyun .machine {
   gap: 6px;
 }
 .machine-name {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: 0;
   line-height: 1.25;
@@ -1610,11 +1604,11 @@ html.dark.page-aliyun .machine {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0;
-  padding: 0 12px;
+  padding: 0 10px;
   border-top: 1px solid var(--color-line);
 }
 .metric {
-  padding: 8px 10px 8px 0;
+  padding: 6px 8px 6px 0;
   min-width: 0;
 }
 .metric-k {
@@ -1671,7 +1665,7 @@ html.dark.page-aliyun .machine {
 }
 .machine-date-v.is-expired { color: var(--color-danger); }
 .machine-meter {
-  padding: 2px 12px 8px;
+  padding: 2px 10px 6px;
 }
 .machine-fault {
   padding: 0 12px 8px;
@@ -1729,7 +1723,7 @@ html.dark.page-aliyun .machine {
   justify-content: space-between;
   gap: 8px;
   margin-top: auto;
-  padding: 8px 12px 10px;
+  padding: 6px 10px 8px;
   border-top: 1px solid var(--color-line-soft);
 }
 .machine-ports {
