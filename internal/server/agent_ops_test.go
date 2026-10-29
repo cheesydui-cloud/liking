@@ -564,3 +564,182 @@ func TestPushNftOK(t *testing.T) {
 		t.Fatalf("push %+v", pushed)
 	}
 }
+
+func TestAllowPortTooOld(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	row, err := db.CreateServer(d, "land", "1.2.3.4", "tokentokentoken")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ts := httptest.NewServer(s.Router())
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/v1/agents"
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	ws, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close(websocket.StatusNormalClosure, "")
+
+	hello, _ := json.Marshal(wsproto.Hello{
+		Token: row.Token, AgentVersion: "0.2.30", OS: "linux", Arch: "amd64",
+		Cores: []string{"xray"}, Caps: []string{wsproto.CapCores},
+	})
+	b, _ := json.Marshal(wsproto.Envelope{Type: wsproto.TypeHello, ID: "1", Payload: hello})
+	if err := ws.Write(ctx, websocket.MessageText, b); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ws.Read(ctx); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.Hub.IsOnline(row.ID) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !s.Hub.IsOnline(row.ID) {
+		t.Fatal("not online")
+	}
+
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar, Timeout: 3 * time.Second}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	body := []byte(`{"port":40611,"proto":"tcp"}`)
+	res, err = c.Post(ts.URL+"/api/servers/"+strconv.FormatInt(row.ID, 10)+"/allow-port", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d %s", res.StatusCode, raw)
+	}
+	if !bytes.Contains(raw, []byte(`"code":"agent_too_old"`)) {
+		t.Fatalf("body %s", raw)
+	}
+}
+
+func TestAllowPortOK(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	row, err := db.CreateServer(d, "land", "1.2.3.4", "tokentokentoken")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ts := httptest.NewServer(s.Router())
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/v1/agents"
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	ws, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close(websocket.StatusNormalClosure, "")
+
+	hello, _ := json.Marshal(wsproto.Hello{
+		Token: row.Token, AgentVersion: "0.2.31", OS: "linux", Arch: "amd64",
+		Cores: []string{"xray"}, Caps: []string{wsproto.CapAllowPort},
+	})
+	b, _ := json.Marshal(wsproto.Envelope{Type: wsproto.TypeHello, ID: "1", Payload: hello})
+	if err := ws.Write(ctx, websocket.MessageText, b); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ws.Read(ctx); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for {
+			_, raw, err := ws.Read(ctx)
+			if err != nil {
+				return
+			}
+			var env wsproto.Envelope
+			if err := json.Unmarshal(raw, &env); err != nil {
+				continue
+			}
+			if env.Type != wsproto.TypeAllowPort {
+				continue
+			}
+			ack, _ := json.Marshal(wsproto.AllowPortAck{OK: true, Port: 40611, How: "ufw"})
+			out, _ := json.Marshal(wsproto.Envelope{Type: wsproto.TypeAllowPortAck, ID: env.ID, Payload: ack})
+			_ = ws.Write(ctx, websocket.MessageText, out)
+		}
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.Hub.IsOnline(row.ID) && s.Hub.HasCap(row.ID, wsproto.CapAllowPort) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !s.Hub.HasCap(row.ID, wsproto.CapAllowPort) {
+		t.Fatal("missing cap")
+	}
+
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar, Timeout: 5 * time.Second}
+	login, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret12"})
+	res, err := c.Post(ts.URL+"/api/login", "application/json", bytes.NewReader(login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeRes(t, res, nil)
+
+	body := []byte(`{"port":40611,"proto":"tcp"}`)
+	res, err = c.Post(ts.URL+"/api/servers/"+strconv.FormatInt(row.ID, 10)+"/allow-port", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var opened struct {
+		OK   bool   `json:"ok"`
+		Port int    `json:"port"`
+		How  string `json:"how"`
+	}
+	decodeRes(t, res, &opened)
+	if !opened.OK || opened.Port != 40611 || opened.How != "ufw" {
+		t.Fatalf("allow %+v", opened)
+	}
+}

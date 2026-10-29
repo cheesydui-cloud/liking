@@ -111,7 +111,7 @@ export function FilterTabs({ value, onChange, items }) {
 export function fmtBytes(n) {
   const x = Number(n)
   if (!Number.isFinite(x) || x <= 0) return '0 B'
-  const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']
+  const u = ['B', 'kb', 'M', 'G', 'T', 'P']
   let i = 0, v = x
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
   return (i ? v.toFixed(1) : String(Math.round(v))) + ' ' + u[i]
@@ -119,7 +119,7 @@ export function fmtBytes(n) {
 
 export function fmtBps(n) {
   const x = Math.max(0, Number(n) || 0)
-  const u = ['B/s', 'KiB/s', 'MiB/s', 'GiB/s']
+  const u = ['B/s', 'kb/s', 'M/s', 'G/s']
   let i = 0, v = x
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
   const num = i === 0 ? String(Math.round(v)) : (v >= 10 ? v.toFixed(1) : v.toFixed(2))

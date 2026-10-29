@@ -104,7 +104,7 @@ function trafficLabel(bytes) {
   if (!bytes) return '不限'
   const gb = bytes / 1024 / 1024 / 1024
   const n = Math.round(gb * 1000) / 1000
-  return `${n} GB`
+  return `${n} G`
 }
 
 function Metric({ label, value }) {
@@ -411,7 +411,7 @@ export default function Packages() {
             <Field label="名称">
               <input className="input-field" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} required autoFocus />
             </Field>
-            <Field label="流量 GB" hint="留空 = 不限">
+            <Field label="流量 G" hint="留空 = 不限">
               <input className="input-field font-mono" type="number" min="0" step="0.1" value={f.gb} onChange={e => setF({ ...f, gb: e.target.value })} />
             </Field>
             <div>

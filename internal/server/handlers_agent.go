@@ -183,6 +183,70 @@ func (s *Server) handlePushNft(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, out)
 }
 
+func (s *Server) handleAllowPort(w http.ResponseWriter, r *http.Request) {
+	id, err := chiID(r, "id")
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	srv, err := db.GetServer(s.DB, id)
+	if err != nil {
+		jsonErr(w, http.StatusNotFound, "服务器不存在")
+		return
+	}
+	var req struct {
+		Port  int    `json:"port"`
+		Proto string `json:"proto"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效请求")
+		return
+	}
+	if req.Port < 1 || req.Port > 65535 {
+		jsonErr(w, http.StatusBadRequest, "端口无效")
+		return
+	}
+	proto := strings.ToLower(strings.TrimSpace(req.Proto))
+	if proto == "" {
+		proto = "both"
+	}
+	if proto != "tcp" && proto != "udp" && proto != "both" {
+		jsonErr(w, http.StatusBadRequest, "协议只能是 tcp、udp 或 both")
+		return
+	}
+	if !s.Hub.IsOnline(id) {
+		jsonErr(w, http.StatusBadRequest, "Agent 不在线")
+		return
+	}
+	osName, _, _ := s.Hub.ConnMeta(id)
+	if osName != "" && osName != "linux" {
+		jsonErr(w, http.StatusBadRequest, "需要 Linux")
+		return
+	}
+	if !s.Hub.HasCap(id, wsproto.CapAllowPort) {
+		jsonErrExtra(w, http.StatusBadRequest, "该 Agent 还不支持放行端口。请先一键升级。", map[string]any{"code": "agent_too_old"})
+		return
+	}
+	raw, err := s.Hub.SendRPC(id, wsproto.TypeAllowPort, wsproto.AllowPort{Port: req.Port, Proto: proto}, 45*time.Second)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var ack wsproto.AllowPortAck
+	_ = json.Unmarshal(raw, &ack)
+	if !ack.OK {
+		msg := strings.TrimSpace(ack.Error)
+		if msg == "" {
+			msg = "放行失败"
+		}
+		jsonErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	u := userFromCtx(r.Context())
+	db.AddAudit(s.DB, &u.ID, "agent.allow_port", fmt.Sprintf("%s %d/%s %s", srv.Name, req.Port, proto, ack.How))
+	jsonOK(w, map[string]any{"ok": true, "port": req.Port, "how": ack.How})
+}
+
 func (s *Server) handlePushCore(w http.ResponseWriter, r *http.Request) {
 	s.handleCoreOp(w, r, wsproto.TypeEnsureCore, "推送")
 }

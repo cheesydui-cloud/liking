@@ -26,11 +26,14 @@ const (
 	TypeKickAck       = "kick_ack"
 	TypeEnsureNFT     = "ensure_nft"
 	TypeEnsureNFTAck  = "ensure_nft_ack"
+	TypeAllowPort     = "allow_port"
+	TypeAllowPortAck  = "allow_port_ack"
 
-	CapCores = "cores"
-	CapProbe = "probe"
-	CapKick  = "kick"
-	CapNFT   = "nft"
+	CapCores     = "cores"
+	CapProbe     = "probe"
+	CapKick      = "kick"
+	CapNFT       = "nft"
+	CapAllowPort = "allow_port"
 )
 
 type Envelope struct {
@@ -161,6 +164,18 @@ type EnsureNFTAck struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
 	Have  bool   `json:"have"`
+}
+
+type AllowPort struct {
+	Port  int    `json:"port"`
+	Proto string `json:"proto"`
+}
+
+type AllowPortAck struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+	Port  int    `json:"port,omitempty"`
+	How   string `json:"how,omitempty"`
 }
 
 type Ping struct {

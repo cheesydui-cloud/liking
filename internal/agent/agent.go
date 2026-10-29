@@ -49,6 +49,11 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := os.MkdirAll(cfg.Dir, 0o750); err != nil {
 		return err
 	}
+	if n, err := reapplySavedAllows(cfg.Dir); err != nil {
+		log.Printf("agent: 恢复放行端口: %v", err)
+	} else if n > 0 {
+		log.Printf("agent: 已恢复 %d 个放行端口", n)
+	}
 	a := &Agent{cfg: cfg, cores: NewCores(cfg.Dir), exit: os.Exit}
 	defer a.cores.Close()
 	backoff := time.Second
@@ -122,7 +127,7 @@ func (a *Agent) session(ctx context.Context) error {
 		Arch:         runtime.GOARCH,
 		LastRev:      lastRev,
 		Cores:        detectedCores(),
-		Caps:         []string{wsproto.CapCores, wsproto.CapProbe, wsproto.CapKick, wsproto.CapNFT},
+		Caps:         []string{wsproto.CapCores, wsproto.CapProbe, wsproto.CapKick, wsproto.CapNFT, wsproto.CapAllowPort},
 	})
 	if err := a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeHello, ID: "hello", Payload: hello}); err != nil {
 		return err
@@ -173,7 +178,7 @@ func (a *Agent) session(ctx context.Context) error {
 		case err := <-errCh:
 			return err
 		case env := <-envCh:
-			if env.Type == wsproto.TypeApply || env.Type == wsproto.TypeEnsureCore || env.Type == wsproto.TypeRemoveCore || env.Type == wsproto.TypeProbe || env.Type == wsproto.TypeKick || env.Type == wsproto.TypeEnsureNFT {
+			if env.Type == wsproto.TypeApply || env.Type == wsproto.TypeEnsureCore || env.Type == wsproto.TypeRemoveCore || env.Type == wsproto.TypeProbe || env.Type == wsproto.TypeKick || env.Type == wsproto.TypeEnsureNFT || env.Type == wsproto.TypeAllowPort {
 				go func(env wsproto.Envelope) {
 					var err error
 					switch env.Type {
@@ -189,6 +194,8 @@ func (a *Agent) session(ctx context.Context) error {
 						err = a.handleKick(ctx, ws, env)
 					case wsproto.TypeEnsureNFT:
 						err = a.handleEnsureNFT(ctx, ws, env)
+					case wsproto.TypeAllowPort:
+						err = a.handleAllowPort(ctx, ws, env)
 					}
 					if err != nil {
 						log.Printf("agent %s: %v", env.Type, err)
@@ -403,6 +410,24 @@ func (a *Agent) handleKick(ctx context.Context, ws *websocket.Conn, env wsproto.
 func (a *Agent) ackKick(ctx context.Context, ws *websocket.Conn, id string, ok bool, errMsg string, closed int) error {
 	p, _ := json.Marshal(wsproto.KickAck{OK: ok, Error: errMsg, Closed: closed})
 	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeKickAck, ID: id, Payload: p})
+}
+
+func (a *Agent) handleAllowPort(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {
+	var req wsproto.AllowPort
+	ack := wsproto.AllowPortAck{}
+	if err := json.Unmarshal(env.Payload, &req); err != nil {
+		ack.Error = "无效请求"
+	} else {
+		how, err := openAllow(a.cfg.Dir, req.Port, req.Proto)
+		ack.Port = req.Port
+		ack.How = how
+		ack.OK = err == nil
+		if err != nil {
+			ack.Error = err.Error()
+		}
+	}
+	p, _ := json.Marshal(ack)
+	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeAllowPortAck, ID: env.ID, Payload: p})
 }
 
 func (a *Agent) handleEnsureNFT(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {

@@ -5,7 +5,7 @@ export function formatSpeedLimit(kbps) {
   const n = Number(kbps) || 0
   if (n <= 0) return ''
   if (n % KB_PER_MBPS === 0) return `${n / KB_PER_MBPS} Mbps`
-  return `${n} KB/s`
+  return `${n} kb/s`
 }
 
 export function speedFormFromKbps(kbps) {

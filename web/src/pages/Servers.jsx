@@ -112,6 +112,9 @@ export default function Servers() {
   const [edit, setEdit] = useState({ name: '', host: '', min: '', max: '', gb: '', expires: '', resetDay: '0', disableIpv6: false })
   const [coreSrv, setCoreSrv] = useState(null)
   const [corePick, setCorePick] = useState('xray')
+  const [allowSrv, setAllowSrv] = useState(null)
+  const [allowPort, setAllowPort] = useState('')
+  const [allowProto, setAllowProto] = useState('both')
   const [loadErr, setLoadErr] = useState('')
   const listSeq = useRef(0)
 
@@ -293,6 +296,40 @@ export default function Servers() {
     } finally { setBusyId(0) }
   }
 
+  const openAllow = (s) => {
+    if (!s?.online) {
+      toast('Agent 不在线，无法放行端口', 'error')
+      return
+    }
+    if (!s.can_allow_port) {
+      toast('该 Agent 还不支持放行端口。请先一键升级', 'error')
+      return
+    }
+    const first = nodesOf(s.id).find(x => Number(x.port) > 0)
+    setAllowPort(first ? String(first.port) : '')
+    setAllowProto('both')
+    setAllowSrv(s)
+  }
+
+  const submitAllow = async (e) => {
+    e.preventDefault()
+    if (!allowSrv) return
+    const port = parsePort(allowPort)
+    if (!port) {
+      toast('端口无效', 'error')
+      return
+    }
+    setBusy(true)
+    try {
+      const d = await api.post(`/servers/${allowSrv.id}/allow-port`, { port, proto: allowProto })
+      toast(`已放行 ${port}${d.how ? `（${d.how}）` : ''}`)
+      setAllowSrv(null)
+    } catch (err) {
+      toast(err.message, 'error')
+      if (err.code === 'agent_too_old') showInstall(allowSrv.id)
+    } finally { setBusy(false) }
+  }
+
   const nftCta = async (s) => {
     if (!s.can_push_nft) {
       await upgradeAgent(s)
@@ -410,7 +447,7 @@ export default function Servers() {
   const saveLimit = async (s) => {
     const v = await dialog.prompt({
       title: `${s.name} 流量上限`,
-      message: '单位 GB。留空表示不限。已用流量按这台机器上的线路累计。',
+      message: '单位 G。留空表示不限。已用流量按这台机器上的线路累计。',
       defaultValue: gbFromLimit(s.traffic_limit),
       okText: '保存',
     })
@@ -606,6 +643,12 @@ export default function Servers() {
                       { label: '从 CF 同步', onSelect: () => openCF(s) },
                       { label: '改公开地址', onSelect: () => saveHost(s) },
                       { label: '编辑', hint: '名称、端口区间、到期、流量、IPv6', onSelect: () => openEdit(s) },
+                      {
+                        label: '放行端口',
+                        hint: s.can_allow_port ? '放行这台机器自己的防火墙' : (s.online ? '需先升级 Agent' : '需在线'),
+                        disabled: !s.online || busyId === s.id,
+                        onSelect: () => openAllow(s),
+                      },
                       { label: '推送核心', hint: s.can_push_cores ? '安装或卸载 Xray / sing-box / Mita' : (s.online ? '需先升级 Agent' : '需在线'), onSelect: () => openCores(s) },
                       {
                         label: '安装 nftables',
@@ -754,7 +797,7 @@ export default function Servers() {
               <input className="input-field font-mono" inputMode="numeric" value={edit.max} onChange={e => setEdit({ ...edit, max: e.target.value })} />
             </div>
           </Field>
-          <Field label="流量上限 GB" hint="留空 = 不限。已用流量按这台机器上的线路累计。">
+          <Field label="流量上限 G" hint="留空 = 不限。已用流量按这台机器上的线路累计。">
             <input className="input-field font-mono" type="number" min="0" step="0.1" value={edit.gb} onChange={e => setEdit({ ...edit, gb: e.target.value })} />
           </Field>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -773,6 +816,39 @@ export default function Servers() {
             </span>
           </label>
         </form>
+      </Modal>
+
+      <Modal open={!!allowSrv} title="放行端口" onClose={() => setAllowSrv(null)} footer={
+        <>
+          <button type="button" className="btn-ghost" onClick={() => setAllowSrv(null)}>取消</button>
+          <button type="submit" form="srv-allow-form" className="btn-primary" disabled={busy}>{busy ? '放行中…' : '放行'}</button>
+        </>
+      }>
+        {allowSrv ? (
+          <form id="srv-allow-form" onSubmit={submitAllow} className="space-y-3">
+            <p className="text-[13px] text-ink-mut leading-relaxed">
+              只改 {allowSrv.name} 自己的防火墙：已启用的 ufw、firewalld，或策略是 DROP 的 iptables / nftables。
+              服务商安全组（例如 Hostdare）不在这台机器上，面板改不到，要去服务商后台放行。
+            </p>
+            {nodesOf(allowSrv.id).some(x => Number(x.port) > 0) ? (
+              <div className="flex flex-wrap gap-1.5">
+                {[...new Set(nodesOf(allowSrv.id).map(x => Number(x.port)).filter(p => p > 0))].map(p => (
+                  <button key={p} type="button" className={`chip${String(p) === String(allowPort) ? ' is-on' : ''}`} onClick={() => setAllowPort(String(p))}>{p}</button>
+                ))}
+              </div>
+            ) : null}
+            <Field label="端口">
+              <input className="input-field font-mono" inputMode="numeric" value={allowPort} onChange={e => setAllowPort(e.target.value)} placeholder="40611" required autoFocus />
+            </Field>
+            <Field label="协议">
+              <select className="input-field" value={allowProto} onChange={e => setAllowProto(e.target.value)}>
+                <option value="both">TCP 和 UDP</option>
+                <option value="tcp">仅 TCP</option>
+                <option value="udp">仅 UDP</option>
+              </select>
+            </Field>
+          </form>
+        ) : null}
       </Modal>
 
       <Modal open={!!coreSrv} title="推送核心" onClose={() => setCoreSrv(null)} footer={

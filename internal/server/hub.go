@@ -293,7 +293,7 @@ func (h *Hub) readerLoop(parent context.Context, ac *agentConn) {
 			}
 			h.noteLive(ac, st)
 			h.applyStats(ac.serverID, st.Samples)
-		case wsproto.TypeApplyAck, wsproto.TypeHelloAck, wsproto.TypeUpgradeAck, wsproto.TypeUninstallAck, wsproto.TypeEnsureCoreAck, wsproto.TypeRemoveCoreAck, wsproto.TypeProbeAck, wsproto.TypeKickAck, wsproto.TypeEnsureNFTAck:
+		case wsproto.TypeApplyAck, wsproto.TypeHelloAck, wsproto.TypeUpgradeAck, wsproto.TypeUninstallAck, wsproto.TypeEnsureCoreAck, wsproto.TypeRemoveCoreAck, wsproto.TypeProbeAck, wsproto.TypeKickAck, wsproto.TypeEnsureNFTAck, wsproto.TypeAllowPortAck:
 			ac.dispatchAck(env)
 		default:
 			log.Printf("hub: server %d unknown frame %q", ac.serverID, env.Type)

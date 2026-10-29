@@ -1021,7 +1021,7 @@ export default function Users() {
             </Field>
           )}
           {editing && (
-            <Field label="流量上限 GB" hint={f.traffic_gb === '' ? (selectedPkg?.traffic_bytes ? `留空跟随套餐 ${fmtBytes(selectedPkg.traffic_bytes)}` : '留空跟随套餐，0 为不限') : (Number(f.traffic_gb) === 0 ? '0 = 不限流量' : '覆盖套餐额度')}>
+            <Field label="流量上限 G" hint={f.traffic_gb === '' ? (selectedPkg?.traffic_bytes ? `留空跟随套餐 ${fmtBytes(selectedPkg.traffic_bytes)}` : '留空跟随套餐，0 为不限') : (Number(f.traffic_gb) === 0 ? '0 = 不限流量' : '覆盖套餐额度')}>
               <input className="input-field" type="number" min="0" step="0.1" placeholder="跟随套餐" value={f.traffic_gb} onChange={e => setF({ ...f, traffic_gb: e.target.value })} />
             </Field>
           )}

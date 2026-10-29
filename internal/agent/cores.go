@@ -520,6 +520,7 @@ func (c *Cores) StopAll() {
 	}
 	applySpeedLimits(nil)
 	clearRejectCN()
+	clearAllowNFT()
 }
 
 func (c *Cores) Close() {
