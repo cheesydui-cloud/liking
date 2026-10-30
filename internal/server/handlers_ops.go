@@ -38,10 +38,17 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	admin := userFromCtx(r.Context())
 	type row struct {
-		Username string `json:"username"`
-		Password string `json:"password,omitempty"`
-		Error    string `json:"error,omitempty"`
-		OK       bool   `json:"ok"`
+		Username    string `json:"username"`
+		Password    string `json:"password,omitempty"`
+		SubToken    string `json:"sub_token,omitempty"`
+		ExpiresAt   int64  `json:"expires_at,omitempty"`
+		PkgExpires  int64  `json:"package_expires_at,omitempty"`
+		PackageName string `json:"package_name,omitempty"`
+		Remark      string `json:"remark,omitempty"`
+		SpeedLimit  int64  `json:"speed_limit,omitempty"`
+		TrafficCap  int64  `json:"traffic_cap,omitempty"`
+		Error       string `json:"error,omitempty"`
+		OK          bool   `json:"ok"`
 	}
 	out := make([]row, 0, len(req.Users))
 	okN := 0
@@ -115,6 +122,13 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 		s.provisionAndSyncUser(u)
 		rec.OK = true
 		rec.Password = pw
+		rec.SubToken = u.SubToken
+		rec.ExpiresAt = u.ExpiresAt
+		rec.PkgExpires = u.PkgExpires
+		rec.PackageName = u.PackageName
+		rec.Remark = u.Remark
+		rec.SpeedLimit = u.SpeedLimit
+		rec.TrafficCap = u.TrafficCap
 		okN++
 		out = append(out, rec)
 	}

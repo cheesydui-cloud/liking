@@ -110,7 +110,7 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 			u.NetUpBps = up
 			u.NetDownBps = down
 		}
-		out = append(out, adminUserViewLive(u, u.PasswordPlain, s.userLiveNodes(u.ID)))
+		out = append(out, adminUserViewLive(u, "", s.userLiveNodes(u.ID)))
 	}
 	jsonOK(w, map[string]any{"users": out})
 }
@@ -732,6 +732,70 @@ func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {
 		out["password"] = generated
 	}
 	jsonOK(w, out)
+}
+
+func (s *Server) handleUserCard(w http.ResponseWriter, r *http.Request) {
+	id, err := chiID(r, "id")
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	u, err := db.GetUser(s.DB, id)
+	if err != nil || u == nil {
+		jsonErr(w, http.StatusNotFound, "用户不存在")
+		return
+	}
+	pw := ""
+	if u.Role != "admin" {
+		pw = u.PasswordPlain
+	}
+	jsonOK(w, map[string]any{
+		"password":  pw,
+		"panel_url": panelURL(s.DB, r),
+		"sub_token": u.SubToken,
+		"user":      adminUserView(u),
+	})
+}
+
+func (s *Server) handleRememberPassword(w http.ResponseWriter, r *http.Request) {
+	id, err := chiID(r, "id")
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	u, err := db.GetUser(s.DB, id)
+	if err != nil || u == nil {
+		jsonErr(w, http.StatusNotFound, "用户不存在")
+		return
+	}
+	if u.Role == "admin" {
+		jsonErr(w, http.StatusBadRequest, "管理员不保存明文密码")
+		return
+	}
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效请求")
+		return
+	}
+	pw := strings.TrimSpace(req.Password)
+	if len(pw) < 6 {
+		jsonErr(w, http.StatusBadRequest, "密码至少 6 位")
+		return
+	}
+	if !checkPassword(u.PasswordHash, pw) {
+		jsonErr(w, http.StatusBadRequest, "密码不对，订阅没有更换")
+		return
+	}
+	if err := db.SetUserPasswordPlain(s.DB, id, pw); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if admin := userFromCtx(r.Context()); admin != nil {
+		db.AddAudit(s.DB, &admin.ID, "user.remember_password", u.Username)
+	}
+	jsonOK(w, map[string]any{"ok": true, "password": pw, "sub_token": u.SubToken})
 }
 
 func (s *Server) handleForgetPassword(w http.ResponseWriter, r *http.Request) {

@@ -119,7 +119,7 @@ func writeClashGroups(b *strings.Builder, names, selected []string) {
 	if len(auto) == 0 {
 		auto = []string{"DIRECT"}
 	}
-	selectProxies := append([]string{"DIRECT", "REJECT", GroupAuto}, names...)
+	selectProxies := append(append([]string{GroupAuto}, names...), "DIRECT", "REJECT")
 	b.WriteString("proxy-groups:\n")
 	writeClashGroup(b, GroupSelect, "select", nil, selectProxies)
 	writeClashGroup(b, GroupAuto, "url-test", func(b *strings.Builder) {

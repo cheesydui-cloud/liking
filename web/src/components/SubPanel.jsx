@@ -2,19 +2,28 @@ import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
 import { copyText } from '../lib/copy'
 import { Icon } from './ui'
+import { useUser } from './Layout'
 
-export function subURL(token, fmt) {
-  const base = `${window.location.origin}/api/sub/${token}`
-  if (fmt) return `${base}/${fmt}`
-  return base
+export function panelBase(panelUrl) {
+  const raw = String(panelUrl || '').trim().replace(/\/+$/, '')
+  if (/^https?:\/\//i.test(raw)) return raw
+  if (typeof window !== 'undefined') return window.location.origin
+  return ''
 }
 
-export function clashImportURL(token) {
-  return `clash://install-config?url=${encodeURIComponent(subURL(token, 'clash'))}`
+export function subURL(token, fmt, base) {
+  const origin = panelBase(base)
+  const path = `${origin}/api/sub/${token}`
+  if (fmt) return `${path}/${fmt}`
+  return path
 }
 
-export function singboxImportURL(token) {
-  return `sing-box://import-remote-profile?url=${encodeURIComponent(subURL(token, 'singbox'))}`
+export function clashImportURL(token, base) {
+  return `clash://install-config?url=${encodeURIComponent(subURL(token, 'clash', base))}`
+}
+
+export function singboxImportURL(token, base) {
+  return `sing-box://import-remote-profile?url=${encodeURIComponent(subURL(token, 'singbox', base))}`
 }
 
 export function toBase64(str) {
@@ -24,12 +33,12 @@ export function toBase64(str) {
   return btoa(bin)
 }
 
-export function shadowrocketQRPayload(token) {
-  return `sub://${toBase64(subURL(token, 'uri'))}`
+export function shadowrocketQRPayload(token, base) {
+  return `sub://${toBase64(subURL(token, 'uri', base))}`
 }
 
-export function shadowrocketImportURL(token) {
-  return `shadowrocket://add/sub://${toBase64(subURL(token, 'uri'))}`
+export function shadowrocketImportURL(token, base) {
+  return `shadowrocket://add/sub://${toBase64(subURL(token, 'uri', base))}`
 }
 
 function qrOpts() {
@@ -75,14 +84,16 @@ function QRBlock({ label, value }) {
 }
 
 export function SubPanel({ token, onCopied, onRotate, rotating }) {
+  const { panelUrl } = useUser() || {}
+  const base = panelBase(panelUrl)
   const [downloading, setDownloading] = useState('')
-  const auto = subURL(token)
-  const uri = subURL(token, 'uri')
-  const rocket = shadowrocketQRPayload(token)
+  const auto = subURL(token, '', base)
+  const uri = subURL(token, 'uri', base)
+  const rocket = shadowrocketQRPayload(token, base)
   const rows = [
     ['自动识别', auto],
-    ['Clash Meta', subURL(token, 'clash')],
-    ['sing-box', subURL(token, 'singbox')],
+    ['Clash Meta', subURL(token, 'clash', base)],
+    ['sing-box', subURL(token, 'singbox', base)],
     ['小火箭', rocket],
     ['v2rayN', uri],
   ]
@@ -122,7 +133,7 @@ export function SubPanel({ token, onCopied, onRotate, rotating }) {
     <div className="flex flex-col md:flex-row gap-5">
       <div className="flex flex-wrap gap-4 shrink-0 justify-center md:justify-start">
         <QRBlock label="扫码导入" value={auto} />
-        <QRBlock label="小火箭" value={shadowrocketQRPayload(token)} />
+        <QRBlock label="小火箭" value={rocket} />
         <QRBlock label="v2rayN" value={uri} />
       </div>
       <div className="flex-1 space-y-3 min-w-0">
@@ -138,10 +149,10 @@ export function SubPanel({ token, onCopied, onRotate, rotating }) {
           </div>
         ))}
         <div className="flex flex-wrap gap-2 pt-1">
-          <button type="button" className="btn-primary h-8" onClick={() => copy(subURL(token, 'clash'), '已复制 Clash 订阅')}>复制 Clash 订阅</button>
-          <a className="btn-ghost h-8" href={clashImportURL(token)}>打开 Clash</a>
-          <a className="btn-ghost h-8" href={singboxImportURL(token)}>打开 sing-box</a>
-          <a className="btn-ghost h-8" href={shadowrocketImportURL(token)}>打开小火箭</a>
+          <button type="button" className="btn-primary h-8" onClick={() => copy(subURL(token, 'clash', base), '已复制 Clash 订阅')}>复制 Clash 订阅</button>
+          <a className="btn-ghost h-8" href={clashImportURL(token, base)}>打开 Clash</a>
+          <a className="btn-ghost h-8" href={singboxImportURL(token, base)}>打开 sing-box</a>
+          <a className="btn-ghost h-8" href={shadowrocketImportURL(token, base)}>打开小火箭</a>
           <button type="button" className="btn-ghost h-8" onClick={() => copy(uri, '已复制 v2rayN 订阅')}>复制 v2rayN 订阅</button>
           <button type="button" className="btn-ghost h-8" disabled={!!downloading} onClick={() => download('clash', 'liking.yaml')}>
             {downloading === 'clash' ? '下载中…' : '下载 Clash'}

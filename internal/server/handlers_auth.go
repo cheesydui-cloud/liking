@@ -266,6 +266,7 @@ func (s *Server) sessionPayload(u *db.User, r *http.Request) map[string]any {
 	out := map[string]any{
 		"user":       view,
 		"panel_name": name,
+		"panel_url":  panelURL(s.DB, r),
 		"version":    version.Version,
 	}
 	announce, _ := db.GetSetting(s.DB, "announce")

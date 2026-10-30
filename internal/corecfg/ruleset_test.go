@@ -142,6 +142,10 @@ func TestClashDocumentRules(t *testing.T) {
 	if strings.Contains(doc, "广告拦截") {
 		t.Fatal("ads should not be in balanced")
 	}
+	wantSelect := "name: \"节点选择\"\n    type: select\n    proxies:\n      - \"自动选择\"\n"
+	if !strings.Contains(doc, wantSelect) {
+		t.Fatalf("select should default to auto\n%s", doc)
+	}
 }
 
 func TestClashDocumentAdsRejectFirst(t *testing.T) {

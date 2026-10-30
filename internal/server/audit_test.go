@@ -209,6 +209,17 @@ func TestForgetPasswordAndLoginClearsPlain(t *testing.T) {
 		t.Fatalf("created %+v", created)
 	}
 
+	res, err = admin.Get(ts.URL + "/api/users/" + strconv.FormatInt(created.User.ID, 10) + "/card")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var card struct {
+		Password string `json:"password"`
+	}
+	decodeRes(t, res, &card)
+	if card.Password != "carol12" {
+		t.Fatalf("card password %q", card.Password)
+	}
 	res, err = admin.Get(ts.URL + "/api/users")
 	if err != nil {
 		t.Fatal(err)
@@ -220,17 +231,10 @@ func TestForgetPasswordAndLoginClearsPlain(t *testing.T) {
 		} `json:"users"`
 	}
 	decodeRes(t, res, &listed)
-	sawCarol := false
 	for _, u := range listed.Users {
-		if u.ID == created.User.ID {
-			sawCarol = true
-			if u.Password != "carol12" {
-				t.Fatalf("list password %q", u.Password)
-			}
+		if u.ID == created.User.ID && u.Password != "" {
+			t.Fatalf("list leaked password %q", u.Password)
 		}
-	}
-	if !sawCarol {
-		t.Fatal("carol not listed")
 	}
 
 	forget, _ := json.Marshal(map[string]any{})
@@ -240,16 +244,14 @@ func TestForgetPasswordAndLoginClearsPlain(t *testing.T) {
 	}
 	decodeRes(t, res, nil)
 
-	res, err = admin.Get(ts.URL + "/api/users")
+	res, err = admin.Get(ts.URL + "/api/users/" + strconv.FormatInt(created.User.ID, 10) + "/card")
 	if err != nil {
 		t.Fatal(err)
 	}
-	listed.Users = nil
-	decodeRes(t, res, &listed)
-	for _, u := range listed.Users {
-		if u.ID == created.User.ID && u.Password != "" {
-			t.Fatalf("plain still listed %q", u.Password)
-		}
+	card.Password = "stale"
+	decodeRes(t, res, &card)
+	if card.Password != "" {
+		t.Fatalf("plain still on card %q", card.Password)
 	}
 
 	uBody, _ = json.Marshal(map[string]any{"username": "dave", "password": "dave123"})
@@ -268,23 +270,14 @@ func TestForgetPasswordAndLoginClearsPlain(t *testing.T) {
 	}
 	decodeRes(t, res, nil)
 
-	res, err = admin.Get(ts.URL + "/api/users")
+	res, err = admin.Get(ts.URL + "/api/users/" + strconv.FormatInt(created.User.ID, 10) + "/card")
 	if err != nil {
 		t.Fatal(err)
 	}
-	listed.Users = nil
-	decodeRes(t, res, &listed)
-	sawDave := false
-	for _, u := range listed.Users {
-		if u.ID == created.User.ID {
-			sawDave = true
-			if u.Password != "dave123" {
-				t.Fatalf("plain after login %q", u.Password)
-			}
-		}
-	}
-	if !sawDave {
-		t.Fatal("dave not listed")
+	card.Password = ""
+	decodeRes(t, res, &card)
+	if card.Password != "dave123" {
+		t.Fatalf("plain after login %q", card.Password)
 	}
 }
 

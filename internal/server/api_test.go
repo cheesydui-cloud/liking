@@ -1039,13 +1039,60 @@ func TestUserPasswordAndExtend(t *testing.T) {
 		}
 		if u.ID == created.User.ID {
 			sawBob = true
-			if u.Password != created.Password {
-				t.Fatalf("list password %q want %q", u.Password, created.Password)
+			if u.Password != "" {
+				t.Fatalf("list leaked password %q", u.Password)
 			}
 		}
 	}
 	if !sawBob {
 		t.Fatal("bob not listed")
+	}
+	res, err = c.Get(ts.URL + "/api/users/" + strconv.FormatInt(created.User.ID, 10) + "/card")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var card struct {
+		Password string `json:"password"`
+		SubToken string `json:"sub_token"`
+	}
+	decodeRes(t, res, &card)
+	if card.Password != created.Password || card.SubToken == "" {
+		t.Fatalf("card %+v", card)
+	}
+	badRemember, _ := json.Marshal(map[string]string{"password": "wrong-pass"})
+	res, err = c.Post(ts.URL+"/api/users/"+strconv.FormatInt(created.User.ID, 10)+"/remember-password", "application/json", bytes.NewReader(badRemember))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode == 200 {
+		t.Fatal("wrong password remembered")
+	}
+	io.ReadAll(res.Body)
+	res.Body.Close()
+	res, err = c.Get(ts.URL + "/api/users/" + strconv.FormatInt(created.User.ID, 10) + "/card")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cardAfterBad struct {
+		Password string `json:"password"`
+		SubToken string `json:"sub_token"`
+	}
+	decodeRes(t, res, &cardAfterBad)
+	if cardAfterBad.Password != created.Password || cardAfterBad.SubToken != card.SubToken {
+		t.Fatalf("wrong remember changed card %+v", cardAfterBad)
+	}
+	okRemember, _ := json.Marshal(map[string]string{"password": created.Password})
+	res, err = c.Post(ts.URL+"/api/users/"+strconv.FormatInt(created.User.ID, 10)+"/remember-password", "application/json", bytes.NewReader(okRemember))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var remembered struct {
+		Password string `json:"password"`
+		SubToken string `json:"sub_token"`
+	}
+	decodeRes(t, res, &remembered)
+	if remembered.Password != created.Password || remembered.SubToken != card.SubToken {
+		t.Fatalf("remember rotated %+v", remembered)
 	}
 	res, err = c.Get(ts.URL + "/api/me")
 	if err != nil {

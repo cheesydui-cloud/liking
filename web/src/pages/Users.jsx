@@ -5,9 +5,9 @@ import { startPoll } from '../lib/poll'
 import { createOpLock } from '../lib/opLock'
 import { asArray, isAbort } from '../lib/safe'
 import { copyText } from '../lib/copy'
-import { useToast, useDialog } from '../components/Layout'
+import { useToast, useDialog, useUser } from '../components/Layout'
 import { Badge, DayBars, Empty, Field, FilterTabs, Icon, Meter, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, billedBytes, fmtBps, fmtBytes, fmtDateShort } from '../components/ui'
-import { SubPanel } from '../components/SubPanel'
+import { SubPanel, panelBase } from '../components/SubPanel'
 import { NodePreviewList } from '../components/NodePreview'
 import { catsForPreset, presetLabel, SubRulePicker, userRulePresets } from '../components/SubRules'
 import { SpeedField } from '../components/SpeedField'
@@ -199,11 +199,11 @@ function cardDate(ts) {
   }).format(d)
 }
 
-function formatUserCard(u, pkgs = []) {
-  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+function formatUserCard(u, pkgs = [], base) {
+  const origin = panelBase(base)
   const lines = [`网址：${origin}`, `账号：${u.username || ''}`]
   if (u.password) lines.push(`密码：${u.password}`)
-  lines.push(`到期：${cardDate(u.expires_at)}`)
+  lines.push(`到期：${cardDate(userExpiryTs(u))}`)
   if (u.package_name) lines.push(`套餐：${u.package_name}`)
   else if (u.role !== 'admin') lines.push('套餐：未绑定')
   if (u.role !== 'admin') {
@@ -418,6 +418,7 @@ function UserDenyModal({ user, onClose, onSaved }) {
 export default function Users() {
   const toast = useToast()
   const dialog = useDialog()
+  const { panelUrl } = useUser() || {}
   const [list, setList] = useState(() => asArray(peekList('users')))
   const [pkgs, setPkgs] = useState(() => asArray(peekList('packages')))
   const [ready, setReady] = useState(() => peekList('users') !== undefined)
@@ -449,13 +450,7 @@ export default function Users() {
   const [batchBusy, setBatchBusy] = useState(false)
   const [loadErr, setLoadErr] = useState('')
   const [bulkResult, setBulkResult] = useState('')
-  const heldPw = useRef(new Map())
   const listSeq = useRef(0)
-
-  const mergeHeld = (rows) => rows.map(u => {
-    const pw = heldPw.current.get(u.id)
-    return pw ? { ...u, password: pw } : u
-  })
 
   const load = async () => {
     const seq = ++listSeq.current
@@ -463,7 +458,7 @@ export default function Users() {
       const g = cacheGen()
       const [a, b] = await Promise.all([api.get('/users'), api.get('/packages')])
       if (seq !== listSeq.current) return
-      setList(putList('users', mergeHeld(asArray(a.users)), g))
+      setList(putList('users', asArray(a.users), g))
       setPkgs(putList('packages', asArray(b.packages), g))
       setLoadErr('')
       setReady(true)
@@ -482,7 +477,7 @@ export default function Users() {
       try {
         const a = await api.get('/users', signal)
         if (seq !== listSeq.current) return
-        setList(putList('users', mergeHeld(asArray(a.users)), g))
+        setList(putList('users', asArray(a.users), g))
         setPollErr('')
       } catch (e) {
         if (isAbort(e)) return
@@ -590,19 +585,20 @@ export default function Users() {
         if (!f.package_id) body.unbind_package = true
         else body.package_id = Number(f.package_id)
         if (pwTyped) body.password = pwTyped
-        await api.put(`/users/${editUser.id}`, body)
+        const saved = await api.put(`/users/${editUser.id}`, body)
         if (pwTyped) {
           const pkgName = pkgs.find(p => Number(p.id) === Number(f.package_id))?.name || ''
+          const fresh = saved?.user || {}
           const card = formatUserCard({
             ...editUser,
+            ...fresh,
             username,
             remark: f.remark,
-            expires_at: ymdToUnix(f.expires),
-            package_name: pkgName,
-            password: pwTyped,
+            package_name: fresh.package_name || pkgName,
+            password: fresh.password || pwTyped,
             enabled: f.enabled !== false,
-            speed_limit: kbpsFromForm(f.speed_value, f.speed_unit),
-          }, pkgs)
+            speed_limit: fresh.speed_limit ?? kbpsFromForm(f.speed_value, f.speed_unit),
+          }, pkgs, panelBase(panelUrl))
           try {
             await copyText(card)
             toast('已保存，名片已复制。订阅链接已更换。')
@@ -622,7 +618,7 @@ export default function Users() {
         const created = d.user ? { ...d.user, password: pw || d.user.password || '' } : null
         if (created) {
           try {
-            await copyText(formatUserCard(created, pkgs))
+            await copyText(formatUserCard(created, pkgs, panelBase(panelUrl)))
             toast('已创建，名片已复制。')
           } catch { toast(pw ? `已创建，密码 ${pw}` : '已创建') }
         } else if (pw) {
@@ -689,11 +685,24 @@ export default function Users() {
 
   const copyCard = async (u) => {
     try {
-      await copyText(formatUserCard(u, pkgs))
-      if (u.password) toast('已复制名片')
-      else toast('已复制名片。没有保存的密码，请先「重置密码」。')
-    } catch {
-      toast('浏览器不允许自动复制', 'error')
+      const d = await api.get(`/users/${u.id}/card`)
+      const base = panelBase(d.panel_url || panelUrl)
+      let view = { ...u, ...(d.user || {}), password: d.password || '' }
+      if (!view.password) {
+        const typed = await dialog.prompt({
+          title: '补记密码',
+          message: `${u.username} 没有保存密码。填现在正在用的密码，通过后写入名片。不换订阅，也不踢下线。`,
+          okText: '保存并复制',
+          inputType: 'password',
+        })
+        if (typed == null) return
+        const saved = await api.post(`/users/${u.id}/remember-password`, { password: String(typed).trim() })
+        view = { ...view, password: saved.password || String(typed).trim(), sub_token: saved.sub_token || view.sub_token }
+      }
+      await copyText(formatUserCard(view, pkgs, base))
+      toast('已复制名片')
+    } catch (e) {
+      toast(e.message || '浏览器不允许自动复制', 'error')
     }
   }
 
@@ -702,11 +711,9 @@ export default function Users() {
     try {
       const d = await api.post(`/users/${u.id}/password`, { password: '' })
       const next = { ...u, password: d.password || '', sub_token: d.sub_token || u.sub_token }
-      if (next.password) heldPw.current.set(u.id, next.password)
-      setList(cur => cur.map(x => x.id === u.id ? { ...x, password: next.password, sub_token: next.sub_token } : x))
+      setList(cur => cur.map(x => x.id === u.id ? { ...x, sub_token: next.sub_token } : x))
       try {
-        await copyText(formatUserCard(next, pkgs))
-        heldPw.current.delete(u.id)
+        await copyText(formatUserCard(next, pkgs, panelBase(panelUrl)))
         toast('已重置并复制名片。订阅链接已更换。')
       } catch {
         toast('已重置。浏览器不允许自动复制，请再点一次「复制名片」。', 'error')
@@ -1127,13 +1134,23 @@ export default function Users() {
                 return { username, password: password || '', package_id: bulkPkg ? Number(bulkPkg) : undefined, days }
               })
               const d = await api.post('/users/bulk', { users })
-              const pw = (d.users || []).filter(x => x.ok && x.password).map(x => `${x.username} ${x.password}`).join('\n')
+              const cards = (d.users || []).filter(x => x.ok && x.password).map(x => formatUserCard({
+                username: x.username,
+                password: x.password,
+                sub_token: x.sub_token,
+                expires_at: x.expires_at,
+                package_expires_at: x.package_expires_at,
+                package_name: x.package_name,
+                remark: x.remark,
+                speed_limit: x.speed_limit,
+                traffic_cap: x.traffic_cap,
+              }, pkgs, panelBase(panelUrl))).join('\n\n')
               toast(`成功 ${d.ok}/${d.total}`)
               setBulkText('')
-              if (pw) {
-                setBulkResult(pw)
-                try { await copyText(pw); toast('密码已复制，关闭前请再核对一遍') }
-                catch { toast('复制失败，请从列表里手动复制', 'error') }
+              if (cards) {
+                setBulkResult(cards)
+                try { await copyText(cards); toast('名片已复制，关闭前请再核对一遍') }
+                catch { toast('复制失败，请从下面手动复制', 'error') }
               }
               load()
             } catch (e) { toast(e.message, 'error') }
@@ -1163,7 +1180,7 @@ export default function Users() {
             </Field>
           </div>
           {bulkResult ? (
-            <Field label="本次密码" hint="关闭后不再显示。复制失败也请从这里选中。">
+            <Field label="本次名片" hint="关闭后不再显示。复制失败也请从这里选中。">
               <textarea className="input-field font-mono text-[12px] min-h-32" readOnly value={bulkResult} />
             </Field>
           ) : null}

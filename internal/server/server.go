@@ -155,7 +155,9 @@ func (s *Server) Router() http.Handler {
 			r.Post("/api/users/{id}/reset-traffic", s.handleResetTraffic)
 			r.Post("/api/users/{id}/rotate-sub", s.handleRotateSub)
 			r.Post("/api/users/{id}/kick", s.handleKickUser)
+			r.Get("/api/users/{id}/card", s.handleUserCard)
 			r.Post("/api/users/{id}/password", s.handleSetUserPassword)
+			r.Post("/api/users/{id}/remember-password", s.handleRememberPassword)
 			r.Post("/api/users/{id}/forget-password", s.handleForgetPassword)
 
 			r.Get("/api/packages", s.handleListPackages)

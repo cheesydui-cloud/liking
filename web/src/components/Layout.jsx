@@ -18,6 +18,7 @@ export function UserProvider({ children }) {
   const [version, setVersion] = useState('')
   const [sub, setSub] = useState(null)
   const [announce, setAnnounce] = useState('')
+  const [panelUrl, setPanelUrl] = useState('')
   const [toasts, setToasts] = useState([])
   const [dialog, setDialog] = useState(null)
 
@@ -28,6 +29,7 @@ export function UserProvider({ children }) {
       if (data?.panel_name) setPanelName(data.panel_name)
       if (data?.version) setVersion(data.version)
       setSub(data?.sub || null)
+      if (data?.panel_url) setPanelUrl(data.panel_url)
       if (data?.announce != null) setAnnounce(data.announce)
       return data
     } catch (e) {
@@ -72,6 +74,7 @@ export function UserProvider({ children }) {
     if (data?.panel_name) setPanelName(data.panel_name)
     if (data?.version) setVersion(data.version)
     setSub(data?.sub || null)
+    if (data?.panel_url) setPanelUrl(data.panel_url)
     if (data?.announce != null) setAnnounce(data.announce)
   }, [])
 
@@ -87,7 +90,7 @@ export function UserProvider({ children }) {
   }
 
   return (
-    <UserCtx.Provider value={{ user, setUser, panelName, version, sub, announce, refreshUser, applySession }}>
+    <UserCtx.Provider value={{ user, setUser, panelName, panelUrl, version, sub, announce, refreshUser, applySession }}>
       <ToastCtx.Provider value={toast}>
         <DialogCtx.Provider value={{ confirm, prompt }}>
           {children}
