@@ -1629,6 +1629,15 @@ html.dark.page-aliyun .machine {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.metric-v.is-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  line-height: 1.35;
+}
 .metric.is-up .metric-v { color: var(--color-ok); font-weight: 600; }
 .metric.is-down .metric-v { color: var(--color-down); font-weight: 600; }
 .metric-v.is-expired { color: var(--color-danger); }

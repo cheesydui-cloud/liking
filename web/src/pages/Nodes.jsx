@@ -261,11 +261,11 @@ function nodeTone(st) {
   return 'is-off'
 }
 
-function Metric({ label, value, plain }) {
+function Metric({ label, value, plain, stack }) {
   return (
     <div className="metric">
       <span className="metric-k">{label}</span>
-      <span className={`metric-v${plain ? ' is-plain' : ''}`}>{value}</span>
+      <span className={`metric-v${plain ? ' is-plain' : ''}${stack ? ' is-stack' : ''}`}>{value}</span>
     </div>
   )
 }
@@ -713,11 +713,10 @@ export default function Nodes() {
                           <Metric label="协议" value={protoShort(inb.profile)} plain />
                           <Metric label="端口" value={String(inb.port || '')} />
                           <Metric label="全站" value={fmtBytes(used)} />
-                          <Metric label="实时" value={s.online ? (
+                          <Metric label="实时" stack value={s.online ? (
                             <>
-                              <span className="speed-up">{fmtBps(s.net_up_bps)}</span>
-                              {' / '}
-                              <span className="speed-down">{fmtBps(s.net_down_bps)}</span>
+                              <span className="speed-up">↑ {fmtBps(s.net_up_bps)}</span>
+                              <span className="speed-down">↓ {fmtBps(s.net_down_bps)}</span>
                             </>
                           ) : '—'} />
                         </div>
