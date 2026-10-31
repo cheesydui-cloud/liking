@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -129,11 +130,12 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
 		return
 	}
-	req.Username = strings.TrimSpace(req.Username)
-	if req.Username == "" {
-		jsonErr(w, http.StatusBadRequest, "用户名不能为空")
+	name, err := normalizeUsername(req.Username)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	req.Username = name
 	generated := ""
 	if strings.TrimSpace(req.Password) == "" {
 		pw, err := randomPassword(10)
@@ -158,21 +160,11 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "角色无效")
 		return
 	}
-	hash, err := HashPassword(req.Password)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	u, err := db.CreateUser(s.DB, req.Username, hash, req.Role, req.Remark)
-	if err != nil {
-		jsonErr(w, http.StatusConflict, "用户名已存在")
-		return
-	}
-	if err := db.SetUserPasswordPlain(s.DB, u.ID, req.Password); err != nil {
-		jsonErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	exp := req.ExpiresAt
+	if exp < 0 || req.Days < 0 {
+		jsonErr(w, http.StatusBadRequest, "到期时间无效")
+		return
+	}
 	if req.Days > 0 {
 		got, err := expiryFromDays(req.Days)
 		if err != nil {
@@ -181,22 +173,27 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		}
 		exp = got
 	}
+	var pkg *db.Package
 	if req.PackageID != nil {
-		if err := db.BindUserPackage(s.DB, u.ID, *req.PackageID, exp); err != nil {
-			jsonErr(w, http.StatusBadRequest, err.Error())
+		pkg, err = db.GetPackage(s.DB, *req.PackageID)
+		if err != nil || pkg == nil {
+			jsonErr(w, http.StatusBadRequest, "套餐不存在")
 			return
 		}
-		u.ExpiresAt = exp
-		if p, err := db.GetPackage(s.DB, *req.PackageID); err == nil {
-			db.CopyPackagePolicy(u, p)
-		}
-		_ = db.UpdateUser(s.DB, u)
-	} else if exp > 0 {
-		u.ExpiresAt = exp
-		_ = db.UpdateUser(s.DB, u)
 	}
-	if fresh, err := db.GetUser(s.DB, u.ID); err == nil && fresh != nil {
-		u = fresh
+	hash, err := HashPassword(req.Password)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	u, err := db.CreateUserConfigured(s.DB, req.Username, hash, req.Password, req.Role, req.Remark, exp, pkg)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			jsonErr(w, http.StatusConflict, "用户名已存在")
+		} else {
+			jsonErr(w, http.StatusInternalServerError, err.Error())
+		}
+		return
 	}
 	s.provisionAndSyncUser(u)
 	admin := userFromCtx(r.Context())
@@ -283,10 +280,18 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		u.Enabled = *req.Enabled
 	}
 	if req.ExpiresAt != nil {
+		if *req.ExpiresAt < 0 {
+			jsonErr(w, http.StatusBadRequest, "到期时间无效")
+			return
+		}
 		u.ExpiresAt = *req.ExpiresAt
 	}
 	if req.Days != nil {
-		if *req.Days <= 0 {
+		if *req.Days < 0 {
+			jsonErr(w, http.StatusBadRequest, "天数无效")
+			return
+		}
+		if *req.Days == 0 {
 			u.ExpiresAt = 0
 		} else {
 			got, err := expiryFromDays(*req.Days)
@@ -297,21 +302,28 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			u.ExpiresAt = got
 		}
 	}
-	if req.ExtendDays != nil && *req.ExtendDays > 0 {
-		if *req.ExtendDays > maxUserDays {
+	if req.ExtendDays != nil {
+		if *req.ExtendDays < 0 || *req.ExtendDays > maxUserDays {
 			jsonErr(w, http.StatusBadRequest, "天数无效")
 			return
 		}
-		base := u.ExpiresAt
-		now := time.Now().Unix()
-		if base < now {
-			base = now
+		if *req.ExtendDays > 0 {
+			base := u.ExpiresAt
+			now := time.Now().Unix()
+			if base < now {
+				base = now
+			}
+			delta := int64(*req.ExtendDays) * 24 * 3600
+			if base > math.MaxInt64-delta {
+				jsonErr(w, http.StatusBadRequest, "到期时间无效")
+				return
+			}
+			u.ExpiresAt = base + delta
 		}
-		u.ExpiresAt = base + int64(*req.ExtendDays)*24*3600
 	}
 	if len(req.TrafficLimit) > 0 && string(req.TrafficLimit) != "null" {
 		var n int64
-		if err := json.Unmarshal(req.TrafficLimit, &n); err != nil {
+		if err := json.Unmarshal(req.TrafficLimit, &n); err != nil || n < 0 {
 			jsonErr(w, http.StatusBadRequest, "流量上限无效")
 			return
 		}

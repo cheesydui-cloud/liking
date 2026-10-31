@@ -56,7 +56,7 @@ liking-upgrade
 指定版本：
 
 ```bash
-liking-upgrade --release v0.2.42
+liking-upgrade --release v0.3.0
 ```
 
 只更新安装脚本本身：
@@ -103,7 +103,7 @@ Agent 只在有对应入站时才拉起该内核。数据目录：`/var/lib/liki
 
 ## 本地开发
 
-需要 Go 1.23+ 和 Node 20+。
+需要 Go 1.25+ 和 Node 20+。
 
 ```bash
 make run

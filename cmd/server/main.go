@@ -25,12 +25,14 @@ func main() {
 func run(args []string) int {
 	var (
 		addr, dbPath, bootstrapPw    string
+		bootstrapPwFile              string
 		resetAdminPw, resetAdminUser string
 	)
 	fs := flag.NewFlagSet("liking-server", flag.ExitOnError)
 	fs.StringVar(&addr, "addr", "127.0.0.1:8899", "panel HTTP address")
 	fs.StringVar(&dbPath, "db", "data/panel.db", "SQLite database path")
 	fs.StringVar(&bootstrapPw, "bootstrap-admin-password", "", "set admin password on first boot")
+	fs.StringVar(&bootstrapPwFile, "bootstrap-admin-password-file", "", "read first-boot admin password from a file")
 	fs.StringVar(&resetAdminPw, "reset-admin-password", "", "reset admin password and exit")
 	fs.StringVar(&resetAdminUser, "reset-admin-username", "admin", "admin username for reset")
 	showVer := fs.Bool("version", false, "print version")
@@ -38,6 +40,25 @@ func run(args []string) int {
 	if *showVer {
 		fmt.Println(version.Version)
 		return 0
+	}
+	if bootstrapPw != "" && bootstrapPwFile != "" {
+		fmt.Fprintln(os.Stderr, "bootstrap password and password file cannot be used together")
+		return 2
+	}
+	if bootstrapPwFile != "" {
+		b, err := os.ReadFile(bootstrapPwFile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "read bootstrap password:", err)
+			return 1
+		}
+		bootstrapPw = string(b)
+		for i := range b {
+			b[i] = 0
+		}
+		if bootstrapPw == "" {
+			fmt.Fprintln(os.Stderr, "bootstrap password file is empty")
+			return 1
+		}
 	}
 
 	if resetAdminPw != "" {
@@ -73,10 +94,17 @@ func run(args []string) int {
 	if err != nil {
 		log.Fatalf("listen: %v", err)
 	}
-	ln = srv.WrapListener(ln)
+	wrapped, err := srv.WrapListener(ln)
+	if err != nil {
+		_ = ln.Close()
+		log.Fatalf("panel TLS: %v", err)
+	}
+	ln = wrapped
 	httpSrv := &http.Server{
 		Handler:           srv.Router(),
 		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 	go func() {
 		log.Printf("liking-server %s listening on %s", version.Version, addr)
@@ -103,7 +131,8 @@ func bootstrap(d *sql.DB, pw string) error {
 	if n > 0 {
 		return nil
 	}
-	if pw == "" {
+	generated := pw == ""
+	if generated {
 		pw, err = db.RandomHex(16)
 		if err != nil {
 			return err
@@ -120,8 +149,12 @@ func bootstrap(d *sql.DB, pw string) error {
 	fmt.Println("================================================")
 	fmt.Println(" 首次启动 - 已创建管理员账号")
 	fmt.Println(" 用户名: admin")
-	fmt.Println(" 密  码:", pw)
-	fmt.Println(" 请妥善保存。可通过 --bootstrap-admin-password 自定义。")
+	if generated {
+		fmt.Println(" 密  码:", pw)
+		fmt.Println(" 请妥善保存。可通过 --bootstrap-admin-password 自定义。")
+	} else {
+		fmt.Println(" 密码已按指定值设置（为安全起见不写入日志）")
+	}
 	fmt.Println("================================================")
 	return nil
 }

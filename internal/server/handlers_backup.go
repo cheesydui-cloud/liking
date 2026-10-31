@@ -17,6 +17,7 @@ import (
 )
 
 const maxBackupUpload = 32 << 20
+const maxBackupRequest = maxBackupUpload + (1 << 20)
 
 func (s *Server) handleBackupSummary(w http.ResponseWriter, r *http.Request) {
 	sum, err := db.LiveSummary(s.DB)
@@ -101,12 +102,16 @@ func (s *Server) encodeBackup(password string) ([]byte, string, error) {
 	return raw, name, nil
 }
 
-func (s *Server) readUploadedBackup(r *http.Request) (*db.Snapshot, error) {
+func (s *Server) readUploadedBackup(w http.ResponseWriter, r *http.Request) (*db.Snapshot, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBackupRequest)
 	ct := r.Header.Get("Content-Type")
 	password := strings.TrimSpace(r.Header.Get("X-Liking-Backup-Password"))
 	if strings.HasPrefix(ct, "multipart/") {
 		if err := r.ParseMultipartForm(maxBackupUpload); err != nil {
 			return nil, fmt.Errorf("读备份失败")
+		}
+		if r.MultipartForm != nil {
+			defer r.MultipartForm.RemoveAll()
 		}
 		if v := strings.TrimSpace(r.FormValue("file_password")); v != "" {
 			password = v
@@ -122,7 +127,7 @@ func (s *Server) readUploadedBackup(r *http.Request) (*db.Snapshot, error) {
 }
 
 func (s *Server) handleBackupPreview(w http.ResponseWriter, r *http.Request) {
-	snap, err := s.readUploadedBackup(r)
+	snap, err := s.readUploadedBackup(w, r)
 	if err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -146,10 +151,14 @@ func (s *Server) handleBackupRestore(w http.ResponseWriter, r *http.Request) {
 
 	var password string
 	ct := r.Header.Get("Content-Type")
+	r.Body = http.MaxBytesReader(w, r.Body, maxBackupRequest)
 	if strings.HasPrefix(ct, "multipart/") {
 		if err := r.ParseMultipartForm(maxBackupUpload); err != nil {
 			jsonErr(w, http.StatusBadRequest, "读备份失败")
 			return
+		}
+		if r.MultipartForm != nil {
+			defer r.MultipartForm.RemoveAll()
 		}
 		password = strings.TrimSpace(r.FormValue("password"))
 		f, _, err := r.FormFile("file")
@@ -244,8 +253,12 @@ func (s *Server) maybeScheduledBackup() {
 		return
 	}
 	dir := filepath.Join(s.DataDir, "backups")
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		log.Printf("scheduled backup: mkdir: %v", err)
+		return
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		log.Printf("scheduled backup: chmod: %v", err)
 		return
 	}
 	pw, _ := db.GetSetting(s.DB, "backup_password")

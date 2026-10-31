@@ -53,10 +53,10 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 	out := make([]row, 0, len(req.Users))
 	okN := 0
 	for _, item := range req.Users {
-		name := strings.TrimSpace(item.Username)
+		name, nameErr := normalizeUsername(item.Username)
 		rec := row{Username: name}
-		if name == "" {
-			rec.Error = "用户名为空"
+		if nameErr != nil {
+			rec.Error = nameErr.Error()
 			out = append(out, rec)
 			continue
 		}
@@ -74,24 +74,12 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 			out = append(out, rec)
 			continue
 		}
-		hash, err := HashPassword(pw)
-		if err != nil {
-			rec.Error = err.Error()
-			out = append(out, rec)
-			continue
-		}
-		u, err := db.CreateUser(s.DB, name, hash, "user", item.Remark)
-		if err != nil {
-			rec.Error = "用户名已存在"
-			out = append(out, rec)
-			continue
-		}
-		if err := db.SetUserPasswordPlain(s.DB, u.ID, pw); err != nil {
-			rec.Error = err.Error()
-			out = append(out, rec)
-			continue
-		}
 		exp := int64(0)
+		if item.Days < 0 {
+			rec.Error = "天数无效"
+			out = append(out, rec)
+			continue
+		}
 		if item.Days > 0 {
 			got, err := expiryFromDays(item.Days)
 			if err != nil {
@@ -101,23 +89,31 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 			}
 			exp = got
 		}
+		var pkg *db.Package
 		if item.PackageID != nil {
-			if err := db.BindUserPackage(s.DB, u.ID, *item.PackageID, exp); err != nil {
-				rec.Error = err.Error()
+			got, getErr := db.GetPackage(s.DB, *item.PackageID)
+			if getErr != nil || got == nil {
+				rec.Error = "套餐不存在"
 				out = append(out, rec)
 				continue
 			}
-			u.ExpiresAt = exp
-			if p, err := db.GetPackage(s.DB, *item.PackageID); err == nil {
-				db.CopyPackagePolicy(u, p)
-			}
-			_ = db.UpdateUser(s.DB, u)
-		} else if exp > 0 {
-			u.ExpiresAt = exp
-			_ = db.UpdateUser(s.DB, u)
+			pkg = got
 		}
-		if fresh, err := db.GetUser(s.DB, u.ID); err == nil && fresh != nil {
-			u = fresh
+		hash, err := HashPassword(pw)
+		if err != nil {
+			rec.Error = err.Error()
+			out = append(out, rec)
+			continue
+		}
+		u, err := db.CreateUserConfigured(s.DB, name, hash, pw, "user", item.Remark, exp, pkg)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "unique") {
+				rec.Error = "用户名已存在"
+			} else {
+				rec.Error = err.Error()
+			}
+			out = append(out, rec)
+			continue
 		}
 		s.provisionAndSyncUser(u)
 		rec.OK = true

@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -19,6 +21,39 @@ func TestMitaAssetURLs(t *testing.T) {
 	}
 	if u := mitaRPMURL("arm64"); u != fmt.Sprintf("https://github.com/enfein/mieru/releases/download/v%s/mita-%s-1.aarch64.rpm", mitaVer, mitaVer) {
 		t.Fatal(u)
+	}
+}
+
+func TestChecksumInLine(t *testing.T) {
+	sum := strings.Repeat("ab", 32)
+	for _, line := range []string{
+		sum + "  asset.tar.gz",
+		"SHA256 (asset.tar.gz) = " + sum,
+		"SHA2-256= " + sum,
+	} {
+		if got := checksumInLine(line); got != sum {
+			t.Fatalf("checksum %q = %q", line, got)
+		}
+	}
+	if got := checksumInLine("MD5 = deadbeef"); got != "" {
+		t.Fatalf("accepted short checksum %q", got)
+	}
+}
+
+func TestWriteCoreBinaryPreservesExistingFileOnFailure(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "core")
+	if err := os.WriteFile(dest, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCoreBinary(bytes.NewReader([]byte("12345")), dest, "core", 4); err == nil {
+		t.Fatal("expected size error")
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "old" {
+		t.Fatalf("existing binary changed: %q", got)
 	}
 }
 

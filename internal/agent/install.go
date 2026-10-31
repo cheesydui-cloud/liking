@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,11 +20,14 @@ import (
 )
 
 const (
-	mitaVer     = "3.36.1"
-	singboxVer  = "1.14.0"
-	xrayVer     = "26.3.27"
-	coreHTTPTO  = 90 * time.Second
-	mitaReadyTO = 15 * time.Second
+	mitaVer        = "3.36.1"
+	singboxVer     = "1.14.0"
+	xrayVer        = "26.3.27"
+	coreHTTPTO     = 90 * time.Second
+	mitaReadyTO    = 15 * time.Second
+	maxCoreArchive = 256 << 20
+	maxCoreBinary  = 128 << 20
+	maxChecksumDoc = 1 << 20
 )
 
 // ensureCore installs the named core (xray / singbox / mita) into PATH if missing.
@@ -195,7 +199,7 @@ func installMita() error {
 	case hasCmd("dpkg"):
 		deb := filepath.Join(tmp, "mita.deb")
 		u := mitaDebURL(arch)
-		if err := downloadVerified(u, u+".sha256.txt", deb); err != nil {
+		if err := downloadVerified(u, u+".sha256.txt", assetName(u), deb); err != nil {
 			return err
 		}
 		cmd := exec.Command("dpkg", "-i", deb)
@@ -209,7 +213,7 @@ func installMita() error {
 	case hasCmd("rpm"):
 		rpm := filepath.Join(tmp, "mita.rpm")
 		u := mitaRPMURL(arch)
-		if err := downloadVerified(u, u+".sha256.txt", rpm); err != nil {
+		if err := downloadVerified(u, u+".sha256.txt", assetName(u), rpm); err != nil {
 			return err
 		}
 		if out, err := exec.Command("rpm", "-Uvh", "--force", rpm).CombinedOutput(); err != nil {
@@ -229,7 +233,7 @@ func installMita() error {
 func installMitaTarball(arch, tmp string) error {
 	u := mitaTarURL(arch)
 	tg := filepath.Join(tmp, "mita.tar.gz")
-	if err := downloadVerified(u, u+".sha256.txt", tg); err != nil {
+	if err := downloadVerified(u, u+".sha256.txt", assetName(u), tg); err != nil {
 		return err
 	}
 	dest := "/usr/local/bin/mita"
@@ -307,7 +311,8 @@ func installSingbox() error {
 	}
 	defer os.RemoveAll(tmp)
 	tg := filepath.Join(tmp, name)
-	if err := download(u, tg); err != nil {
+	checksums := fmt.Sprintf("https://github.com/SagerNet/sing-box/releases/download/v%s/sing-box-%s-checksums.txt", singboxVer, singboxVer)
+	if err := downloadVerified(u, checksums, name, tg); err != nil {
 		return err
 	}
 	dest := "/usr/local/bin/sing-box"
@@ -329,7 +334,7 @@ func installXray() error {
 	}
 	defer os.RemoveAll(tmp)
 	zipPath := filepath.Join(tmp, "xray.zip")
-	if err := download(u, zipPath); err != nil {
+	if err := downloadVerified(u, u+".dgst", asset, zipPath); err != nil {
 		return err
 	}
 	dest := "/usr/local/bin/xray"
@@ -344,32 +349,57 @@ func hasCmd(name string) bool {
 	return err == nil
 }
 
-func downloadVerified(u, shaURL, dest string) error {
+func downloadVerified(u, shaURL, asset, dest string) error {
 	if err := download(u, dest); err != nil {
 		return err
 	}
-	want, err := fetchSHA256(shaURL)
-	if err != nil || want == "" {
-		log.Printf("agent: skip sha256 for %s: %v", u, err)
-		return nil
+	want, err := fetchSHA256(shaURL, asset)
+	if err != nil {
+		_ = os.Remove(dest)
+		return fmt.Errorf("无法校验 %s: %w", asset, err)
 	}
 	got, err := fileSHA256(dest)
 	if err != nil {
+		_ = os.Remove(dest)
 		return err
 	}
 	if !strings.EqualFold(got, want) {
+		_ = os.Remove(dest)
 		return fmt.Errorf("sha256 不匹配 %s", filepath.Base(dest))
 	}
 	return nil
 }
 
+func assetName(u string) string {
+	if i := strings.LastIndexByte(u, '/'); i >= 0 {
+		return u[i+1:]
+	}
+	return u
+}
+
 func download(u, dest string) error {
-	req, err := http.NewRequest(http.MethodGet, withGHProxy(u), nil)
+	rawURL := withGHProxy(u)
+	parsed, err := url.Parse(rawURL)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Host == "" || parsed.User != nil {
+		return fmt.Errorf("下载地址必须使用 HTTPS")
+	}
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "liking-agent")
-	client := &http.Client{Timeout: coreHTTPTO}
+	client := &http.Client{
+		Timeout: coreHTTPTO,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if !strings.EqualFold(req.URL.Scheme, "https") {
+				return fmt.Errorf("下载重定向必须使用 HTTPS")
+			}
+			if len(via) >= 10 {
+				return fmt.Errorf("下载重定向过多")
+			}
+			return nil
+		},
+	}
 	res, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("下载 %s: %w", u, err)
@@ -378,24 +408,78 @@ func download(u, dest string) error {
 	if res.StatusCode != 200 {
 		return fmt.Errorf("下载 %s: HTTP %d", u, res.StatusCode)
 	}
-	f, err := os.Create(dest)
+	if res.ContentLength > maxCoreArchive {
+		return fmt.Errorf("下载 %s: 文件过大", u)
+	}
+	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	if _, err := io.Copy(f, res.Body); err != nil {
-		return err
+	n, copyErr := io.Copy(f, io.LimitReader(res.Body, maxCoreArchive+1))
+	closeErr := f.Close()
+	if copyErr != nil {
+		_ = os.Remove(dest)
+		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(dest)
+		return closeErr
+	}
+	if n > maxCoreArchive {
+		_ = os.Remove(dest)
+		return fmt.Errorf("下载 %s: 文件过大", u)
+	}
+	if n == 0 {
+		_ = os.Remove(dest)
+		return fmt.Errorf("下载 %s: 空文件", u)
 	}
 	return nil
 }
 
-func fetchSHA256(u string) (string, error) {
-	req, err := http.NewRequest(http.MethodGet, withGHProxy(u), nil)
+func validSHA256(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
+}
+
+func checksumInLine(line string) string {
+	for _, field := range strings.FieldsFunc(line, func(r rune) bool {
+		return !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F'))
+	}) {
+		if validSHA256(field) {
+			return strings.ToLower(field)
+		}
+	}
+	return ""
+}
+
+func fetchSHA256(u, asset string) (string, error) {
+	// Fetch checksums directly from the pinned upstream. A configured download
+	// proxy may serve the large archive, but must not be able to forge both the
+	// archive and its checksum.
+	parsed, err := url.Parse(u)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Host == "" || parsed.User != nil {
+		return "", fmt.Errorf("校验地址必须使用 HTTPS")
+	}
+	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("User-Agent", "liking-agent")
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := &http.Client{
+		Timeout: 20 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if !strings.EqualFold(req.URL.Scheme, "https") {
+				return fmt.Errorf("校验文件重定向必须使用 HTTPS")
+			}
+			if len(via) >= 10 {
+				return fmt.Errorf("校验文件重定向过多")
+			}
+			return nil
+		},
+	}
 	res, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -404,19 +488,45 @@ func fetchSHA256(u string) (string, error) {
 	if res.StatusCode != 200 {
 		return "", fmt.Errorf("HTTP %d", res.StatusCode)
 	}
-	b, err := io.ReadAll(io.LimitReader(res.Body, 4096))
+	if res.ContentLength > maxChecksumDoc {
+		return "", fmt.Errorf("校验文件过大")
+	}
+	b, err := io.ReadAll(io.LimitReader(res.Body, maxChecksumDoc+1))
 	if err != nil {
 		return "", err
 	}
-	fields := strings.Fields(string(b))
-	if len(fields) == 0 {
-		return "", fmt.Errorf("empty sha")
+	if len(b) > maxChecksumDoc {
+		return "", fmt.Errorf("校验文件过大")
 	}
-	sum := fields[0]
-	if len(sum) != 64 {
-		return "", fmt.Errorf("bad sha %q", sum)
+	lines := strings.Split(string(b), "\n")
+	asset = strings.ToLower(strings.TrimSpace(asset))
+	for _, line := range lines {
+		low := strings.ToLower(line)
+		if (strings.Contains(low, "sha256") || strings.Contains(low, "sha2-256")) && (asset == "" || strings.Contains(low, asset)) {
+			if sum := checksumInLine(line); sum != "" {
+				return sum, nil
+			}
+		}
 	}
-	return sum, nil
+	for _, line := range lines {
+		if asset != "" && strings.Contains(strings.ToLower(line), asset) {
+			if sum := checksumInLine(line); sum != "" {
+				return sum, nil
+			}
+		}
+	}
+	seen := map[string]struct{}{}
+	for _, line := range lines {
+		if sum := checksumInLine(line); sum != "" {
+			seen[sum] = struct{}{}
+		}
+	}
+	if len(seen) == 1 {
+		for sum := range seen {
+			return sum, nil
+		}
+	}
+	return "", fmt.Errorf("校验文件里找不到 %s 的 SHA-256", asset)
 }
 
 func fileSHA256(path string) (string, error) {
@@ -459,19 +569,7 @@ func extractNamedTarGz(path, want, dest string) error {
 		if base != want {
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			return err
-		}
-		out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-		if err != nil {
-			return err
-		}
-		_, copyErr := io.Copy(out, tr)
-		closeErr := out.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		return closeErr
+		return writeCoreBinary(tr, dest, want, maxCoreBinary)
 	}
 	return fmt.Errorf("%s 里没有 %s", filepath.Base(path), want)
 }
@@ -493,22 +591,43 @@ func extractNamedZip(path, want, dest string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			rc.Close()
-			return err
-		}
-		out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-		if err != nil {
-			rc.Close()
-			return err
-		}
-		_, copyErr := io.Copy(out, rc)
-		rc.Close()
-		closeErr := out.Close()
+		copyErr := writeCoreBinary(rc, dest, want, maxCoreBinary)
+		closeErr := rc.Close()
 		if copyErr != nil {
 			return copyErr
 		}
 		return closeErr
 	}
 	return fmt.Errorf("%s 里没有 %s", filepath.Base(path), want)
+}
+
+func writeCoreBinary(src io.Reader, dest, name string, maxBytes int64) error {
+	dir := filepath.Dir(dest)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(dest)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	n, copyErr := io.Copy(tmp, io.LimitReader(src, maxBytes+1))
+	closeErr := tmp.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if n > maxBytes {
+		return fmt.Errorf("%s 解压后过大", name)
+	}
+	if n == 0 {
+		return fmt.Errorf("%s 解压后为空", name)
+	}
+	if err := os.Chmod(tmpPath, 0o755); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, dest)
 }

@@ -107,6 +107,15 @@ var (
 	errAllowEmpty = simpleError("只允许至少选一个网站")
 )
 
+func hasPositiveID(ids []int64) bool {
+	for _, id := range ids {
+		if id > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name         string    `json:"name"`
@@ -131,7 +140,19 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "流量无效")
 		return
 	}
-	if len(req.ServerIDs) == 0 && len(req.InboundIDs) == 0 {
+	if req.CycleDays < 0 {
+		jsonErr(w, http.StatusBadRequest, "周期天数无效")
+		return
+	}
+	if req.ResetDay < 0 || req.ResetDay > 31 {
+		jsonErr(w, http.StatusBadRequest, "重置日无效")
+		return
+	}
+	if req.Direction != "" && req.Direction != "oneway" && req.Direction != "twoway" {
+		jsonErr(w, http.StatusBadRequest, "计费方向无效")
+		return
+	}
+	if !hasPositiveID(req.ServerIDs) && !hasPositiveID(req.InboundIDs) {
 		jsonErr(w, http.StatusBadRequest, "请选择实例或节点")
 		return
 	}
@@ -140,39 +161,27 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	p, err := db.CreatePackage(s.DB, strings.TrimSpace(req.Name), req.TrafficBytes, req.CycleDays, req.ResetDay, req.Direction)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	p := &db.Package{Name: strings.TrimSpace(req.Name), TrafficBytes: req.TrafficBytes, CycleDays: req.CycleDays, ResetDay: req.ResetDay, Direction: req.Direction}
 	p.SpeedLimit = pol.SpeedLimit
 	p.SubRulePreset = pol.SubRulePreset
 	p.SubRuleCategories = pol.SubRuleCategories
 	p.SiteFilterMode = pol.SiteFilterMode
 	p.SiteDenyCategories = pol.SiteDenyCategories
 	p.SiteDenyDomains = pol.SiteDenyDomains
-	if err := db.UpdatePackage(s.DB, p); err != nil {
-		jsonErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	relation := db.PackageRelationsServer
+	ids := req.ServerIDs
 	if req.InboundIDs != nil {
-		if err := db.SetPackageInbounds(s.DB, p.ID, req.InboundIDs, req.Multipliers); err != nil {
-			jsonErr(w, http.StatusBadRequest, err.Error())
+		if !hasPositiveID(req.InboundIDs) {
+			jsonErr(w, http.StatusBadRequest, "请选择实例或节点")
 			return
 		}
-		if err := db.SetPackageServers(s.DB, p.ID, nil); err != nil {
-			jsonErr(w, http.StatusBadRequest, "节点无效")
-			return
-		}
-	} else {
-		if err := db.SetPackageServers(s.DB, p.ID, req.ServerIDs); err != nil {
-			jsonErr(w, http.StatusBadRequest, "节点无效")
-			return
-		}
-		if err := db.SetPackageInbounds(s.DB, p.ID, nil, nil); err != nil {
-			jsonErr(w, http.StatusBadRequest, err.Error())
-			return
-		}
+		relation = db.PackageRelationsInbound
+		ids = req.InboundIDs
+	}
+	p, err := db.CreatePackageConfigured(s.DB, p, relation, ids, req.Multipliers)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "节点或套餐参数无效："+err.Error())
+		return
 	}
 	if _, err := corecfg.ProvisionAll(s.DB); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
@@ -220,48 +229,50 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 		p.TrafficBytes = *req.TrafficBytes
 	}
 	if req.CycleDays != nil {
+		if *req.CycleDays < 0 {
+			jsonErr(w, http.StatusBadRequest, "周期天数无效")
+			return
+		}
 		p.CycleDays = *req.CycleDays
 	}
 	if req.ResetDay != nil {
+		if *req.ResetDay < 0 || *req.ResetDay > 31 {
+			jsonErr(w, http.StatusBadRequest, "重置日无效")
+			return
+		}
 		p.ResetDay = *req.ResetDay
 	}
 	if req.Direction != "" {
+		if req.Direction != "oneway" && req.Direction != "twoway" {
+			jsonErr(w, http.StatusBadRequest, "计费方向无效")
+			return
+		}
 		p.Direction = req.Direction
 	}
 	if err := applyPackagePolicyReq(p, req.packagePolicyReq); err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := db.UpdatePackage(s.DB, p); err != nil {
-		jsonErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	relation := db.PackageRelationsNone
+	var ids []int64
 	if req.InboundIDs != nil {
-		if len(req.InboundIDs) == 0 {
+		if !hasPositiveID(req.InboundIDs) {
 			jsonErr(w, http.StatusBadRequest, "请选择实例或节点")
 			return
 		}
-		if err := db.SetPackageInbounds(s.DB, p.ID, req.InboundIDs, req.Multipliers); err != nil {
-			jsonErr(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if err := db.SetPackageServers(s.DB, p.ID, nil); err != nil {
-			jsonErr(w, http.StatusBadRequest, "节点无效")
-			return
-		}
+		relation = db.PackageRelationsInbound
+		ids = req.InboundIDs
 	} else if req.ServerIDs != nil {
-		if len(req.ServerIDs) == 0 {
+		if !hasPositiveID(req.ServerIDs) {
 			jsonErr(w, http.StatusBadRequest, "请选择实例或节点")
 			return
 		}
-		if err := db.SetPackageServers(s.DB, p.ID, req.ServerIDs); err != nil {
-			jsonErr(w, http.StatusBadRequest, "节点无效")
-			return
-		}
-		if err := db.SetPackageInbounds(s.DB, p.ID, nil, nil); err != nil {
-			jsonErr(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+		relation = db.PackageRelationsServer
+		ids = req.ServerIDs
+	}
+	if err := db.UpdatePackageConfigured(s.DB, p, relation, ids, req.Multipliers); err != nil {
+		jsonErr(w, http.StatusBadRequest, "节点或套餐参数无效："+err.Error())
+		return
 	}
 	if _, err := corecfg.ProvisionAll(s.DB); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())

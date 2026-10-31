@@ -3,6 +3,7 @@
 #   bash <(curl -fsSL https://raw.githubusercontent.com/cheesydui-cloud/liking/main/install.sh)
 # 需 root。默认安装 GitHub Releases 的 latest 面板二进制。
 set -euo pipefail
+umask 077
 
 REPO="cheesydui-cloud/liking"
 RELEASE="${LIKING_RELEASE:-latest}"
@@ -15,6 +16,8 @@ GH_PROXY_FILE="$ETC_DIR/gh-proxy"
 GH_PROXY="${LIKING_GH_PROXY:-}"
 PANEL_ADDR="${LIKING_ADDR:-127.0.0.1:8899}"
 BOOTSTRAP_PW="${LIKING_ADMIN_PASSWORD:-}"
+MAX_RELEASE_BYTES=134217728
+MAX_METADATA_BYTES=1048576
 
 die() { echo "错误: $*" >&2; exit 1; }
 note() { printf '\033[36m%s\033[0m\n' "$*"; }
@@ -97,9 +100,12 @@ fi
 if [[ -z "$GH_PROXY" && -f "$GH_PROXY_FILE" ]]; then
   GH_PROXY="$(cat "$GH_PROXY_FILE" || true)"
 fi
+if [[ -n "$GH_PROXY" && "$GH_PROXY" != https://* ]]; then
+  die "--gh-proxy 必须使用 HTTPS"
+fi
 
 script_url() {
-  echo "${GH_PROXY}https://raw.githubusercontent.com/$REPO/main/install.sh"
+  echo "https://raw.githubusercontent.com/$REPO/main/install.sh"
 }
 
 persist_gh_proxy() {
@@ -118,7 +124,7 @@ looks_like_installer() {
 persist_script() {
   local stmp src
   stmp="$(mktemp -d)"
-  if curl -fsSL "$(script_url)" -o "$stmp/upgrade.sh" 2>/dev/null && looks_like_installer "$stmp/upgrade.sh"; then
+  if curl -fsSL --max-filesize "$MAX_METADATA_BYTES" "$(script_url)" -o "$stmp/upgrade.sh" 2>/dev/null && looks_like_installer "$stmp/upgrade.sh"; then
     install -m 0755 "$stmp/upgrade.sh" "$SCRIPT_PATH"
     ln -sfn "$SCRIPT_PATH" "$INSTALL_DIR/liking-uninstall"
     note "升级脚本: $SCRIPT_PATH （liking-upgrade）"
@@ -142,8 +148,21 @@ unit_quote() {
   local s=$1
   s=${s//\\/\\\\}
   s=${s//\"/\\\"}
+  s=${s//$'\n'/\\n}
+  s=${s//$'\r'/\\r}
+  s=${s//$'\t'/\\t}
   s=${s//%/%%}
   printf '"%s"' "$s"
+}
+
+remove_bootstrap_dropin() {
+  local dir="$SYSTEMD_DIR/liking-server.service.d"
+  rm -f "$ETC_DIR/bootstrap-password"
+  if [[ -f "$dir/bootstrap.conf" ]]; then
+    rm -f "$dir/bootstrap.conf"
+    rmdir "$dir" 2>/dev/null || true
+    systemctl daemon-reload
+  fi
 }
 
 rand_admin_pw() {
@@ -281,11 +300,12 @@ asset_candidates() {
 
 verify_asset() {
   local base="$1" asset="$2" dest="$3"
-  local ddir expected actual
+  local ddir expected actual official_base
   ddir="$(dirname "$dest")"
   [[ -f "$dest" ]] || die "下载结果不存在: $dest"
-  if curl -fLs --retry 5 --retry-delay 2 --connect-timeout 20 \
-      "$base/SHA256SUMS" -o "$ddir/SHA256SUMS" 2>/dev/null; then
+  official_base="https://github.com${base#*https://github.com}"
+  if curl -fLs --retry 5 --retry-delay 2 --connect-timeout 20 --max-filesize "$MAX_METADATA_BYTES" \
+      "$official_base/SHA256SUMS" -o "$ddir/SHA256SUMS" 2>/dev/null; then
     expected="$(awk -v a="$asset" '$2 == a { print $1; exit }' "$ddir/SHA256SUMS")"
     [[ -n "$expected" ]] || die "SHA256SUMS 中没有 $asset"
     actual="$(sha256sum "$dest" | awk '{print $1}')"
@@ -313,10 +333,11 @@ fetch_agent_asset() {
   local errf
   errf="$(mktemp)"
   rm -f "$dest"
-  if curl -fL --retry 5 --retry-delay 2 --connect-timeout 20 --max-time 180 \
+  if curl -fL --retry 5 --retry-delay 2 --connect-timeout 20 --max-time 180 --max-filesize "$MAX_RELEASE_BYTES" \
        -o "$dest" "$base/$asset" 2>"$errf" \
      && is_elf "$dest" \
      && [[ $(wc -c < "$dest" | tr -d ' ') -gt 1048576 ]] \
+     && [[ $(wc -c < "$dest" | tr -d ' ') -le "$MAX_RELEASE_BYTES" ]] \
      && match_sha "$dest" "$asset" "$sums"; then
     rm -f "$errf"
     note "    sha256: OK ($asset)"
@@ -361,7 +382,7 @@ fetch_release_agents() {
 
 fetch_and_verify() {
   local base="$1" asset="$2" dest="$3"
-  curl -fL --retry 5 --retry-delay 2 --connect-timeout 20 --progress-bar \
+  curl -fL --retry 5 --retry-delay 2 --connect-timeout 20 --max-filesize "$MAX_RELEASE_BYTES" --progress-bar \
     "$base/$asset" -o "$dest" \
     || die "下载失败: $base/$asset"
   verify_asset "$base" "$asset" "$dest"
@@ -373,10 +394,10 @@ download_named() {
   for name in $(asset_candidates "$kind"); do
     note "    尝试 $name ..."
     rm -f "$dest"
-    if curl -fL --retry 4 --retry-delay 2 --connect-timeout 20 --progress-bar \
+    if curl -fL --retry 4 --retry-delay 2 --connect-timeout 20 --max-filesize "$MAX_RELEASE_BYTES" --progress-bar \
          "$base/$name" -o "$dest" 2>/dev/null; then
       size="$(wc -c < "$dest" | tr -d ' ')"
-      if [[ -n "$size" && "$size" -gt 1048576 ]]; then
+      if [[ -n "$size" && "$size" -gt 1048576 && "$size" -le "$MAX_RELEASE_BYTES" ]]; then
         verify_asset "$base" "$name" "$dest" >/dev/null
         return 0
       fi
@@ -396,7 +417,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$INSTALL_DIR/liking-server --addr $addr --db $DATA_DIR/panel.db
+ExecStart=$(unit_quote "$INSTALL_DIR/liking-server") --addr $(unit_quote "$addr") --db $(unit_quote "$DATA_DIR/panel.db")
 WorkingDirectory=$DATA_DIR
 Restart=always
 RestartSec=3
@@ -428,7 +449,7 @@ copy_from_dir() {
 
 backup_db_before_upgrade() {
   [[ -f "$DATA_DIR/panel.db" ]] || return 0
-  mkdir -p "$DATA_DIR/backups"
+  install -d -m 0700 "$DATA_DIR/backups"
   if systemctl is-active --quiet liking-server.service; then
     systemctl stop liking-server.service || true
   fi
@@ -492,7 +513,9 @@ install_or_update() {
   detect_arch
   ensure_curl
   persist_gh_proxy
-  mkdir -p "$INSTALL_DIR" "$ETC_DIR" "$DATA_DIR" "$SYSTEMD_DIR"
+  install -d -m 0755 "$INSTALL_DIR" "$SYSTEMD_DIR"
+  install -d -m 0700 "$ETC_DIR" "$DATA_DIR"
+  chmod 0700 "$ETC_DIR" "$DATA_DIR"
   local tag base tmp
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
@@ -557,39 +580,46 @@ install_or_update() {
     fi
   fi
   write_server_unit "$PANEL_ADDR"
+  remove_bootstrap_dropin
   # 一次性 drop-in：启动时传入密码，起来后再删，避免密码长期留在 unit
   if [[ "$first_install" -eq 1 && -n "$BOOTSTRAP_PW" ]]; then
     mkdir -p "$SYSTEMD_DIR/liking-server.service.d"
+    printf '%s' "$BOOTSTRAP_PW" >"$ETC_DIR/bootstrap-password"
+    chmod 0600 "$ETC_DIR/bootstrap-password"
     cat >"$SYSTEMD_DIR/liking-server.service.d/bootstrap.conf" <<EOF
 [Service]
 ExecStart=
-ExecStart=$INSTALL_DIR/liking-server --addr $(unit_quote "$PANEL_ADDR") --db $DATA_DIR/panel.db --bootstrap-admin-password $(unit_quote "$BOOTSTRAP_PW")
+ExecStart=$(unit_quote "$INSTALL_DIR/liking-server") --addr $(unit_quote "$PANEL_ADDR") --db $(unit_quote "$DATA_DIR/panel.db") --bootstrap-admin-password-file $(unit_quote "$ETC_DIR/bootstrap-password")
 EOF
   fi
   systemctl daemon-reload
   systemctl enable liking-server.service
   # enable --now 不会重启已在跑的进程，升级必须 restart 才能载入新二进制
-  systemctl restart liking-server.service
-  persist_script
-  printf '%s\n' "$PANEL_ADDR" >"$ETC_DIR/addr"
-  if command -v "$INSTALL_DIR/liking-server" >/dev/null 2>&1; then
-    note "版本 $($INSTALL_DIR/liking-server --version 2>/dev/null || echo unknown)"
-  fi
-  sleep 1
-  if systemctl is-active --quiet liking-server.service; then
-    ok "liking-server 已启动（$PANEL_ADDR）"
-  else
+  if ! systemctl restart liking-server.service; then
+    remove_bootstrap_dropin
     if [[ -f "$tmp/liking-server.bak" ]]; then
       install -m 0755 "$tmp/liking-server.bak" "$INSTALL_DIR/liking-server"
       systemctl restart liking-server.service || true
     fi
     die "服务未能启动，请看: journalctl -u liking-server -n 80 --no-pager"
   fi
-  if [[ -f "$SYSTEMD_DIR/liking-server.service.d/bootstrap.conf" ]]; then
-    rm -f "$SYSTEMD_DIR/liking-server.service.d/bootstrap.conf"
-    rmdir "$SYSTEMD_DIR/liking-server.service.d" 2>/dev/null || true
-    systemctl daemon-reload
+  printf '%s\n' "$PANEL_ADDR" >"$ETC_DIR/addr"
+  if command -v "$INSTALL_DIR/liking-server" >/dev/null 2>&1; then
+    note "版本 $($INSTALL_DIR/liking-server --version 2>/dev/null || echo unknown)"
   fi
+  sleep 1
+  if systemctl is-active --quiet liking-server.service; then
+    remove_bootstrap_dropin
+    ok "liking-server 已启动（$PANEL_ADDR）"
+  else
+    remove_bootstrap_dropin
+    if [[ -f "$tmp/liking-server.bak" ]]; then
+      install -m 0755 "$tmp/liking-server.bak" "$INSTALL_DIR/liking-server"
+      systemctl restart liking-server.service || true
+    fi
+    die "服务未能启动，请看: journalctl -u liking-server -n 80 --no-pager"
+  fi
+  persist_script
   systemctl --no-pager --full status liking-server.service | head -20 || true
   restart_local_agent
   local shown_pw=""
@@ -650,7 +680,7 @@ do_update_script() {
   local stmp surl
   surl="$(script_url)"
   stmp="$(mktemp -d)"
-  curl -fsSL "$surl" -o "$stmp/upgrade.sh" || { rm -rf "$stmp"; die "下载失败: $surl"; }
+  curl -fsSL --max-filesize "$MAX_METADATA_BYTES" "$surl" -o "$stmp/upgrade.sh" || { rm -rf "$stmp"; die "下载失败: $surl"; }
   looks_like_installer "$stmp/upgrade.sh" || { rm -rf "$stmp"; die "内容异常，拒绝覆盖"; }
   install -m 0755 "$stmp/upgrade.sh" "$SCRIPT_PATH"
   ln -sfn "$SCRIPT_PATH" "$INSTALL_DIR/liking-uninstall"

@@ -40,7 +40,21 @@ func decodeJSON(r *http.Request, v any) error {
 	if err != nil || !strings.EqualFold(media, "application/json") {
 		return fmt.Errorf("需要 JSON")
 	}
-	return json.NewDecoder(io.LimitReader(r.Body, maxJSONBody)).Decode(v)
+	if r.ContentLength > maxJSONBody {
+		return fmt.Errorf("JSON 请求过大")
+	}
+	lr := &io.LimitedReader{R: r.Body, N: maxJSONBody + 1}
+	dec := json.NewDecoder(lr)
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return fmt.Errorf("JSON 只能包含一个值")
+	}
+	if lr.N <= 0 {
+		return fmt.Errorf("JSON 请求过大")
+	}
+	return nil
 }
 
 func chiID(r *http.Request, name string) (int64, error) {

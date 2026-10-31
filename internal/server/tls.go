@@ -19,32 +19,34 @@ type panelCertCache struct {
 	cert *tls.Certificate
 }
 
-func (s *Server) WrapListener(ln net.Listener) net.Listener {
-	cfg := s.panelTLSConfig()
+func (s *Server) WrapListener(ln net.Listener) (net.Listener, error) {
+	cfg, err := s.panelTLSConfig()
+	if err != nil {
+		return nil, err
+	}
 	if cfg == nil {
-		return ln
+		return ln, nil
 	}
 	s.TLSActive = true
 	log.Printf("liking-server TLS enabled")
-	return tls.NewListener(ln, cfg)
+	return tls.NewListener(ln, cfg), nil
 }
 
-func (s *Server) panelTLSConfig() *tls.Config {
+func (s *Server) panelTLSConfig() (*tls.Config, error) {
 	idStr, _ := db.GetSetting(s.DB, "panel_tls_cert_id")
 	idStr = strings.TrimSpace(idStr)
 	if idStr == "" || idStr == "0" {
-		return nil
+		return nil, nil
 	}
 	if _, err := s.loadPanelCert(); err != nil {
-		log.Printf("liking-server: panel TLS cert: %v", err)
-		return nil
+		return nil, err
 	}
 	return &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 			return s.loadPanelCert()
 		},
-	}
+	}, nil
 }
 
 func (s *Server) loadPanelCert() (*tls.Certificate, error) {

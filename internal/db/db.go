@@ -44,9 +44,21 @@ func Open(path string) (*sql.DB, error) {
 		d.Close()
 		return nil, err
 	}
+	if path != ":memory:" {
+		if err := secureDBFiles(path); err != nil {
+			d.Close()
+			return nil, err
+		}
+	}
 	if err := migrate(d); err != nil {
 		d.Close()
 		return nil, err
+	}
+	if path != ":memory:" {
+		if err := secureDBFiles(path); err != nil {
+			d.Close()
+			return nil, err
+		}
 	}
 	return d, nil
 }

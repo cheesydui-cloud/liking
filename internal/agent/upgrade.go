@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,13 +18,8 @@ import (
 const maxAgentBin = 80 << 20
 
 func (a *Agent) httpClient() *http.Client {
-	tr := &http.Transport{}
-	if a.cfg.Insecure {
-		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
-	}
 	return &http.Client{
-		Transport: tr,
-		Timeout:   3 * time.Minute,
+		Timeout: 3 * time.Minute,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return fmt.Errorf("下载不能跳转")
 		},

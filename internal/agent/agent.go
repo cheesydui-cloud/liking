@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +26,8 @@ var (
 	errSelfRestart = errors.New("self-restart")
 	errUninstalled = errors.New("uninstalled")
 )
+
+const agentMaxReadBytes = 16 << 20
 
 type Config struct {
 	ConnectURL string
@@ -104,18 +105,13 @@ func (a *Agent) session(ctx context.Context) error {
 
 	dialCtx, dialCancel := context.WithTimeout(ctx, 15*time.Second)
 	defer dialCancel()
-	opts := &websocket.DialOptions{}
-	if a.cfg.Insecure {
-		opts.HTTPClient = &http.Client{
-			Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, //nolint:gosec
-			Timeout:   15 * time.Second,
-		}
-	}
+	opts := &websocket.DialOptions{HTTPClient: &http.Client{Timeout: 15 * time.Second}}
 	ws, _, err := websocket.Dial(dialCtx, u.String(), opts)
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
 	defer ws.Close(websocket.StatusNormalClosure, "bye")
+	ws.SetReadLimit(agentMaxReadBytes)
 
 	a.revMu.Lock()
 	lastRev := a.lastRev

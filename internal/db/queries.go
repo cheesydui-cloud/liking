@@ -94,6 +94,62 @@ func CreateUser(d *sql.DB, username, passwordHash, role, remark string) (*User, 
 	return GetUser(d, id)
 }
 
+// CreateUserConfigured creates the user and optional package binding atomically.
+func CreateUserConfigured(d *sql.DB, username, passwordHash, passwordPlain, role, remark string, expiresAt int64, pkg *Package) (*User, error) {
+	tok, err := RandomHex(16)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := d.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	createdAt := now()
+	cycleStart := int64(0)
+	speedLimit := int64(0)
+	subPreset := ""
+	subCats := []string{}
+	siteMode := ""
+	denyCats := []string{}
+	denyDomains := []string{}
+	if pkg != nil {
+		var exists int
+		if err := tx.QueryRow(`SELECT 1 FROM packages WHERE id=?`, pkg.ID).Scan(&exists); err != nil {
+			return nil, err
+		}
+		cycleStart = createdAt
+		speedLimit = pkg.SpeedLimit
+		subPreset = pkg.SubRulePreset
+		subCats = pkg.SubRuleCategories
+		siteMode = pkg.SiteFilterMode
+		denyCats = pkg.SiteDenyCategories
+		denyDomains = pkg.SiteDenyDomains
+	}
+	res, err := tx.Exec(`INSERT INTO users(
+		username,password_hash,password_plain,role,remark,sub_token,created_at,expires_at,cycle_start,
+		speed_limit,sub_rule_preset,sub_rule_categories,site_filter_mode,site_deny_categories,site_deny_domains
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		username, passwordHash, passwordPlain, role, remark, tok, createdAt, expiresAt, cycleStart,
+		speedLimit, subPreset, encodeStringSlice(subCats), siteMode, encodeStringSlice(denyCats), encodeStringSlice(denyDomains))
+	if err != nil {
+		return nil, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	if pkg != nil {
+		if _, err := tx.Exec(`INSERT INTO user_packages(user_id,package_id,bound_at,expires_at) VALUES(?,?,?,?)`, id, pkg.ID, createdAt, expiresAt); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return GetUser(d, id)
+}
+
 func GetUser(d *sql.DB, id int64) (*User, error) {
 	u := &User{}
 	var en int
@@ -802,6 +858,143 @@ func CreatePackage(d *sql.DB, name string, trafficBytes int64, cycleDays, resetD
 	return GetPackage(d, id)
 }
 
+const (
+	PackageRelationsNone    = ""
+	PackageRelationsInbound = "inbounds"
+	PackageRelationsServer  = "servers"
+)
+
+func insertPackageTx(tx *sql.Tx, p *Package) (int64, error) {
+	direction := p.Direction
+	if direction == "" {
+		direction = "oneway"
+	}
+	cycleDays := p.CycleDays
+	if cycleDays < 0 {
+		cycleDays = 0
+	}
+	res, err := tx.Exec(`INSERT INTO packages(
+		name,traffic_bytes,cycle_days,reset_day,direction,created_at,speed_limit,
+		sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains,site_filter_mode
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, p.Name, p.TrafficBytes, cycleDays, p.ResetDay, direction, now(), p.SpeedLimit,
+		p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func updatePackageTx(tx *sql.Tx, p *Package) error {
+	_, err := tx.Exec(`UPDATE packages SET name=?, traffic_bytes=?, cycle_days=?, reset_day=?, direction=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=?, site_filter_mode=? WHERE id=?`,
+		p.Name, p.TrafficBytes, p.CycleDays, p.ResetDay, p.Direction, p.SpeedLimit, p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, p.ID)
+	return err
+}
+
+func setPackageInboundsTx(tx *sql.Tx, pkgID int64, inboundIDs []int64, multipliers []float64) error {
+	if _, err := tx.Exec(`DELETE FROM package_inbounds WHERE package_id=?`, pkgID); err != nil {
+		return err
+	}
+	for i, iid := range inboundIDs {
+		m := 1.0
+		if i < len(multipliers) {
+			got, err := normalizeMultiplier(multipliers[i])
+			if err != nil {
+				return err
+			}
+			m = got
+		}
+		if _, err := tx.Exec(`INSERT INTO package_inbounds(package_id,inbound_id,multiplier) VALUES(?,?,?)`, pkgID, iid, m); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func setPackageServersTx(tx *sql.Tx, pkgID int64, serverIDs []int64) error {
+	if _, err := tx.Exec(`DELETE FROM package_servers WHERE package_id=?`, pkgID); err != nil {
+		return err
+	}
+	seen := map[int64]struct{}{}
+	for _, sid := range serverIDs {
+		if sid == 0 {
+			continue
+		}
+		if _, ok := seen[sid]; ok {
+			continue
+		}
+		seen[sid] = struct{}{}
+		if _, err := tx.Exec(`INSERT INTO package_servers(package_id,server_id,multiplier) VALUES(?,?,1)`, pkgID, sid); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func CreatePackageConfigured(d *sql.DB, p *Package, relation string, ids []int64, multipliers []float64) (*Package, error) {
+	tx, err := d.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	id, err := insertPackageTx(tx, p)
+	if err != nil {
+		return nil, err
+	}
+	switch relation {
+	case PackageRelationsInbound:
+		if err := setPackageInboundsTx(tx, id, ids, multipliers); err != nil {
+			return nil, err
+		}
+		if err := setPackageServersTx(tx, id, nil); err != nil {
+			return nil, err
+		}
+	case PackageRelationsServer:
+		if err := setPackageServersTx(tx, id, ids); err != nil {
+			return nil, err
+		}
+		if err := setPackageInboundsTx(tx, id, nil, nil); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("节点绑定模式无效")
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return GetPackage(d, id)
+}
+
+func UpdatePackageConfigured(d *sql.DB, p *Package, relation string, ids []int64, multipliers []float64) error {
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := updatePackageTx(tx, p); err != nil {
+		return err
+	}
+	switch relation {
+	case PackageRelationsNone:
+	case PackageRelationsInbound:
+		if err := setPackageInboundsTx(tx, p.ID, ids, multipliers); err != nil {
+			return err
+		}
+		if err := setPackageServersTx(tx, p.ID, nil); err != nil {
+			return err
+		}
+	case PackageRelationsServer:
+		if err := setPackageServersTx(tx, p.ID, ids); err != nil {
+			return err
+		}
+		if err := setPackageInboundsTx(tx, p.ID, nil, nil); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("节点绑定模式无效")
+	}
+	return tx.Commit()
+}
+
 func GetPackage(d *sql.DB, id int64) (*Package, error) {
 	p := &Package{}
 	var catsRaw, denyCatsRaw, denyDomsRaw string
@@ -870,21 +1063,8 @@ func SetPackageInbounds(d *sql.DB, pkgID int64, inboundIDs []int64, multipliers 
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`DELETE FROM package_inbounds WHERE package_id=?`, pkgID); err != nil {
+	if err := setPackageInboundsTx(tx, pkgID, inboundIDs, multipliers); err != nil {
 		return err
-	}
-	for i, iid := range inboundIDs {
-		m := 1.0
-		if i < len(multipliers) {
-			got, err := normalizeMultiplier(multipliers[i])
-			if err != nil {
-				return err
-			}
-			m = got
-		}
-		if _, err := tx.Exec(`INSERT INTO package_inbounds(package_id,inbound_id,multiplier) VALUES(?,?,?)`, pkgID, iid, m); err != nil {
-			return err
-		}
 	}
 	return tx.Commit()
 }
@@ -895,21 +1075,8 @@ func SetPackageServers(d *sql.DB, pkgID int64, serverIDs []int64) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`DELETE FROM package_servers WHERE package_id=?`, pkgID); err != nil {
+	if err := setPackageServersTx(tx, pkgID, serverIDs); err != nil {
 		return err
-	}
-	seen := map[int64]struct{}{}
-	for _, sid := range serverIDs {
-		if sid == 0 {
-			continue
-		}
-		if _, ok := seen[sid]; ok {
-			continue
-		}
-		seen[sid] = struct{}{}
-		if _, err := tx.Exec(`INSERT INTO package_servers(package_id,server_id,multiplier) VALUES(?,?,1)`, pkgID, sid); err != nil {
-			return err
-		}
 	}
 	return tx.Commit()
 }

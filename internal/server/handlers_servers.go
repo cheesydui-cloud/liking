@@ -21,6 +21,8 @@ import (
 	"liking/internal/wsproto"
 )
 
+const maxServedAgentBinary = 80 << 20
+
 func corecfgCatalog() []corecfg.Meta { return corecfg.Catalog() }
 
 func (s *Server) reconcileOnline(list []*db.Server) {
@@ -329,7 +331,11 @@ func (s *Server) installCmd(r *http.Request, srv *db.Server) string {
 	if strings.HasPrefix(base, "http://") {
 		insecure = " --insecure"
 	}
-	return fmt.Sprintf("curl -fsSL %s/v1/install-agent | bash -s -- --token %s%s", base, srv.Token, insecure)
+	return fmt.Sprintf("curl -fsSL %s | bash -s -- --token %s%s", shellQuote(base+"/v1/install-agent"), shellQuote(srv.Token), insecure)
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 func (s *Server) handleAgentBin(w http.ResponseWriter, r *http.Request) {
@@ -354,7 +360,7 @@ func (s *Server) handleAgentBin(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 	st, err := f.Stat()
-	if err != nil || st.Size() == 0 {
+	if err != nil || st.Size() == 0 || st.Size() > maxServedAgentBinary {
 		jsonErr(w, http.StatusNotFound, "读取 agent 失败")
 		return
 	}

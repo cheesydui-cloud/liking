@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -77,6 +78,7 @@ func (s *Server) Close() {
 
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
+	r.Use(bodyReadDeadline)
 	r.Use(middleware.Recoverer)
 	r.Use(trustedForwarded)
 	r.Use(secureHeaders)
@@ -192,6 +194,20 @@ func (s *Server) Router() http.Handler {
 	return r
 }
 
+func bodyReadDeadline(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+			return
+		}
+		ctl := http.NewResponseController(w)
+		_ = ctl.SetReadDeadline(time.Now().Add(2 * time.Minute))
+		defer ctl.SetReadDeadline(time.Time{})
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) handleBranding(w http.ResponseWriter, r *http.Request) {
 	name, _ := db.GetSetting(s.DB, "panel_name")
 	if name == "" {
@@ -203,13 +219,15 @@ func (s *Server) handleBranding(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleInstallAgent(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	body := strings.ReplaceAll(installscript.AgentInstall, "__LIKING_PANEL_URL__", panelURL(s.DB, r))
+	body := strings.ReplaceAll(installscript.AgentInstall, "__LIKING_PANEL_URL__", shellQuote(panelURL(s.DB, r)))
 	_, _ = w.Write([]byte(body))
 }
 
 func panelURL(d *sql.DB, r *http.Request) string {
 	if v, _ := db.GetSetting(d, "panel_url"); v != "" {
-		return strings.TrimRight(v, "/")
+		if normalized, err := normalizePanelURL(v); err == nil && normalized != "" {
+			return normalized
+		}
 	}
 	scheme := "http"
 	if isSecureRequest(r) {

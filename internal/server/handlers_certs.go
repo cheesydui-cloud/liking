@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -425,7 +427,12 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		_ = db.SetSetting(s.DB, "panel_name", strings.TrimSpace(*req.PanelName))
 	}
 	if req.PanelURL != nil {
-		_ = db.SetSetting(s.DB, "panel_url", strings.TrimSpace(*req.PanelURL))
+		panelURL, err := normalizePanelURL(*req.PanelURL)
+		if err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		_ = db.SetSetting(s.DB, "panel_url", panelURL)
 	}
 	if req.AcmeEmail != nil {
 		_ = db.SetSetting(s.DB, "acme_email", strings.TrimSpace(*req.AcmeEmail))
@@ -490,4 +497,26 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		_ = db.SetSetting(s.DB, "sub_rule_categories", string(raw))
 	}
 	jsonOK(w, map[string]any{"ok": true, "tls_active": s.TLSActive})
+}
+
+func normalizePanelURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if strings.ContainsAny(raw, "\r\n\t ") {
+		return "", fmt.Errorf("面板地址不能包含空白字符")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.User != nil {
+		return "", fmt.Errorf("面板地址无效")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("面板地址必须使用 http:// 或 https://")
+	}
+	if u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return "", fmt.Errorf("面板地址只能填写协议、域名和端口")
+	}
+	u.Path = ""
+	return strings.TrimRight(u.String(), "/"), nil
 }
