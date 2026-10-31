@@ -135,9 +135,6 @@ func (c *Cores) Apply(cfg wsproto.ApplyConfig) error {
 	}
 	applyDisableIPv6(cfg.DisableIPv6)
 	defer c.mu.Unlock()
-	c.xrayAPI = cfg.XrayAPI
-	c.singboxAPI = cfg.SingboxAPI
-	c.acctMarks = append([]wsproto.AcctMark(nil), cfg.AcctMarks...)
 
 	var errs []string
 	take := func(err error) {
@@ -145,9 +142,16 @@ func (c *Cores) Apply(cfg wsproto.ApplyConfig) error {
 			errs = append(errs, err.Error())
 		}
 	}
-	take(c.applyJSON("xray", "xray.json", cfg.Xray, lookBin("xray"), []string{"run", "-c"}))
-	take(c.applyJSON("singbox", "singbox.json", cfg.Singbox, lookBin("sing-box", "singbox"), []string{"run", "-c"}))
+	// A failed check rolls the process back. Pointing the query at the new
+	// address would miss the counters the running core is still serving.
+	xrayErr := c.applyJSON("xray", "xray.json", cfg.Xray, lookBin("xray"), []string{"run", "-c"})
+	c.xrayAPI = apiAfterApply(c.xrayAPI, cfg.XrayAPI, cfg.Xray, xrayErr)
+	singErr := c.applyJSON("singbox", "singbox.json", cfg.Singbox, lookBin("sing-box", "singbox"), []string{"run", "-c"})
+	c.singboxAPI = apiAfterApply(c.singboxAPI, cfg.SingboxAPI, cfg.Singbox, singErr)
+	take(xrayErr)
+	take(singErr)
 	take(c.applyMita(cfg.Mita))
+	c.acctMarks = append([]wsproto.AcctMark(nil), cfg.AcctMarks...)
 	applyAcctMarks(c.acctMarks)
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
@@ -157,6 +161,18 @@ func (c *Cores) Apply(cfg wsproto.ApplyConfig) error {
 		return err
 	}
 	return nil
+}
+
+// apiAfterApply keeps the previous listen address when that core did not
+// accept the new config. An empty config clears it.
+func apiAfterApply(prev, next string, raw json.RawMessage, err error) string {
+	if err != nil {
+		return prev
+	}
+	if !hasCfg(raw) {
+		return ""
+	}
+	return next
 }
 
 func ensureApplyBins(cfg wsproto.ApplyConfig) {

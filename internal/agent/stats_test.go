@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -229,6 +230,107 @@ func TestParseMitaMetricsAndDeltas(t *testing.T) {
 	delta, _ = mitaDeltas(map[string]bytePair{"bob": {up: 17, down: 19}}, restart)
 	if len(delta) != 1 || delta[0].Up != 3 || delta[0].Down != 4 {
 		t.Fatalf("restart %+v", delta)
+	}
+}
+
+func TestBeginCollectBillsSocketMarkWithoutCoreCounters(t *testing.T) {
+	c := NewCores(t.TempDir())
+	defer c.Close()
+	c.acctMarks = []wsproto.AcctMark{{Mark: 0x4c000009, Email: "u1.i2"}}
+	old := readFlowSources
+	n := 0
+	readFlowSources = func() (flowSources, error) {
+		n++
+		sent := 1000
+		if n > 1 {
+			sent = 1600
+		}
+		return flowSources{
+			conntrack: "ipv4 2 tcp 6 1 ESTABLISHED src=1.2.3.4 dst=10.0.0.5 sport=1 dport=443 packets=1 bytes=8000 src=10.0.0.5 dst=1.2.3.4 sport=443 dport=1 packets=1 bytes=9000 mark=0",
+			ss:        fmt.Sprintf("ESTAB 0 0 10.0.0.5:9 9.9.9.9:443\n\tcubic bytes_sent:%d bytes_received:50 fwmark:0x4c000009\n", sent),
+			local:     map[string]struct{}{"10.0.0.5": {}},
+		}, nil
+	}
+	defer func() { readFlowSources = old }()
+	if got := c.Collect(); len(got) != 0 {
+		t.Fatalf("baseline %+v", got)
+	}
+	got := c.Collect()
+	if len(got) != 1 || got[0].Email != "u1.i2" || got[0].Up != 600 || got[0].Down != 0 {
+		t.Fatalf("socket delta %+v", got)
+	}
+}
+
+func TestBeginCollectEmptyGRPCUsesCLI(t *testing.T) {
+	c := NewCores(t.TempDir())
+	defer c.Close()
+	c.xrayAPI = "127.0.0.1:60085"
+	c.xrayBin = "xray"
+	oldG := queryXrayGRPCFn
+	queryXrayGRPCFn = func(context.Context, string) ([]statRow, error) {
+		return nil, nil
+	}
+	defer func() { queryXrayGRPCFn = oldG }()
+	oldC := runXrayStatsQueryFn
+	n := 0
+	runXrayStatsQueryFn = func(bin, api string, pattern bool) ([]byte, error) {
+		n++
+		up := 100
+		if n > 1 {
+			up = 180
+		}
+		return []byte(fmt.Sprintf(`{"stat":[{"name":"user>>>u1.i2>>>traffic>>>uplink","value":%d},{"name":"user>>>u1.i2>>>traffic>>>downlink","value":40}]}`, up)), nil
+	}
+	defer func() { runXrayStatsQueryFn = oldC }()
+	oldF := readFlowSources
+	readFlowSources = func() (flowSources, error) { return flowSources{}, os.ErrNotExist }
+	defer func() { readFlowSources = oldF }()
+	if got := c.Collect(); len(got) != 0 {
+		t.Fatalf("baseline %+v calls %d", got, n)
+	}
+	if n < 1 {
+		t.Fatal("CLI was not queried after empty gRPC")
+	}
+	got := c.Collect()
+	if len(got) != 1 || got[0].Email != "u1.i2" || got[0].Up != 80 || got[0].Down != 0 {
+		t.Fatalf("cli delta %+v", got)
+	}
+}
+
+func TestBeginCollectDoesNotDoubleBillTrackedUser(t *testing.T) {
+	c := NewCores(t.TempDir())
+	defer c.Close()
+	c.xrayAPI = "127.0.0.1:60085"
+	c.acctMarks = []wsproto.AcctMark{{Mark: 0x4c000009, Email: "u1.i2"}}
+	oldG := queryXrayGRPCFn
+	n := 0
+	queryXrayGRPCFn = func(context.Context, string) ([]statRow, error) {
+		n++
+		up := int64(1000)
+		if n > 1 {
+			up = 1250
+		}
+		return []statRow{
+			{Name: "user>>>u1.i2>>>traffic>>>uplink", Value: up},
+			{Name: "user>>>u1.i2>>>traffic>>>downlink", Value: 40},
+		}, nil
+	}
+	defer func() { queryXrayGRPCFn = oldG }()
+	oldF := readFlowSources
+	fn := 0
+	readFlowSources = func() (flowSources, error) {
+		fn++
+		return flowSources{
+			ss: fmt.Sprintf("ESTAB 0 0 10.0.0.5:9 9.9.9.9:443\n\tcubic bytes_sent:%d bytes_received:8000 fwmark:0x4c000009\n", 5000+fn*1000),
+		}, nil
+	}
+	defer func() { readFlowSources = oldF }()
+	if got := c.Collect(); len(got) != 0 {
+		t.Fatalf("baseline %+v", got)
+	}
+	got := c.Collect()
+	if len(got) != 1 || got[0].Email != "u1.i2" || got[0].Up != 250 || got[0].Down != 0 {
+		t.Fatalf("double billed %+v", got)
 	}
 }
 

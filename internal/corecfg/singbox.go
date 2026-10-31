@@ -70,6 +70,7 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 		}
 		if in.LineKind == "chain" {
 			chainRules = append(chainRules, map[string]any{
+				"action":   "route",
 				"inbound":  []string{inboundTag(in.ID)},
 				"outbound": outboundTag(in.ID),
 			})
@@ -85,6 +86,7 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 				continue
 			}
 			speedRules = append(speedRules, map[string]any{
+				"action":    "route",
 				"inbound":   []string{tag},
 				"auth_user": []string{email},
 				"outbound":  limitTag(mark),

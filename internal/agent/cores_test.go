@@ -445,3 +445,15 @@ func TestCollectTimesOut(t *testing.T) {
 		t.Fatalf("collect took %s", time.Since(start))
 	}
 }
+
+func TestAPIAfterApply(t *testing.T) {
+	if got := apiAfterApply("127.0.0.1:1", "127.0.0.1:2", []byte(`{"a":1}`), fmt.Errorf("check")); got != "127.0.0.1:1" {
+		t.Fatalf("keep %s", got)
+	}
+	if got := apiAfterApply("127.0.0.1:1", "127.0.0.1:2", []byte(`{"a":1}`), nil); got != "127.0.0.1:2" {
+		t.Fatalf("next %s", got)
+	}
+	if got := apiAfterApply("127.0.0.1:1", "127.0.0.1:2", nil, nil); got != "" {
+		t.Fatalf("clear %s", got)
+	}
+}

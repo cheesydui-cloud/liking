@@ -99,6 +99,50 @@ func TestFlowSamplesSkipCoveredEmail(t *testing.T) {
 	}
 }
 
+func TestFlowCumulUsesSocketMarkWhenConntrackUnmarked(t *testing.T) {
+	mark, ok := parseMark("0x4c000009")
+	if !ok {
+		t.Fatal("mark")
+	}
+	src := flowSources{
+		conntrack: strings.Join([]string{
+			"ipv4 2 tcp 6 1 ESTABLISHED src=1.2.3.4 dst=10.0.0.5 sport=1 dport=443 packets=1 bytes=5000 src=10.0.0.5 dst=1.2.3.4 sport=443 dport=1 packets=1 bytes=9000 mark=0",
+			"ipv4 2 tcp 6 1 ESTABLISHED src=10.0.0.5 dst=9.9.9.9 sport=2 dport=443 packets=1 bytes=100 src=9.9.9.9 dst=10.0.0.5 sport=443 dport=2 packets=1 bytes=200 mark=0",
+		}, "\n"),
+		ss:    "ESTAB 0 0 10.0.0.5:50000 9.9.9.9:443\n\tcubic bytes_sent:2000 bytes_received:8000 fwmark:0x4c000009\n",
+		local: map[string]struct{}{"10.0.0.5": {}},
+	}
+	ports, byEmail, ok := flowCumul(src, map[int]struct{}{443: {}}, map[uint32]string{mark: "u1.i2"})
+	if !ok {
+		t.Fatal("read")
+	}
+	if byEmail["u1.i2"].up != 2000 || byEmail["u1.i2"].down != 8000 {
+		t.Fatalf("socket mark dropped %+v", byEmail["u1.i2"])
+	}
+	if ports[443].up != 5000 || ports[443].down != 9000 {
+		t.Fatalf("listen port %+v", ports[443])
+	}
+}
+
+func TestFlowCumulDoesNotSumBothMarks(t *testing.T) {
+	mark, ok := parseMark("0x4c000009")
+	if !ok {
+		t.Fatal("mark")
+	}
+	src := flowSources{
+		conntrack: "ipv4 2 tcp 6 1 ESTABLISHED src=10.0.0.5 dst=9.9.9.9 sport=2 dport=443 packets=1 bytes=2000 src=9.9.9.9 dst=10.0.0.5 sport=443 dport=2 packets=1 bytes=9000 mark=1275068425",
+		ss:        "ESTAB 0 0 10.0.0.5:50000 9.9.9.9:443\n\tcubic bytes_sent:1500 bytes_received:8000 fwmark:0x4c000009\n",
+		local:     map[string]struct{}{"10.0.0.5": {}},
+	}
+	_, byEmail, ok := flowCumul(src, nil, map[uint32]string{mark: "u1.i2"})
+	if !ok {
+		t.Fatal("read")
+	}
+	if byEmail["u1.i2"].up != 2000 || byEmail["u1.i2"].down != 9000 {
+		t.Fatalf("marks summed %+v", byEmail["u1.i2"])
+	}
+}
+
 func TestFlowDeltasIgnoreShrink(t *testing.T) {
 	prev := map[string]bytePair{"u1.i2": {up: 10000, down: 50000}}
 	// One flow expired (upload sum fell) while download still grew.

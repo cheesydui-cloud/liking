@@ -54,40 +54,44 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 		return nil, func(bool) {}
 	}
 	var all []wsproto.Sample
+	tracked := map[string]struct{}{}
 	var xrayNext map[string]bytePair
 	var clashNext map[string]clashSnap
 	var singNext map[string]bytePair
 	var mitaNext map[string]bytePair
 	xrayOK, clashOK, singOK, mitaOK := false, false, false, false
-	if samples, next, ok := c.peekXray(); ok {
+	if samples, next, seen, ok := c.peekXray(); ok {
 		all = append(all, samples...)
 		xrayNext, xrayOK = next, true
+		addTracked(tracked, seen)
 	}
 	// sing-box 1.14 clash /connections has no username, so those samples cannot
 	// be attributed. v2ray_api counters include the name. Use clash only when
 	// that query is unavailable, and never add both in one tick.
-	if samples, next, ok := c.peekSingboxStats(); ok {
+	if samples, next, seen, ok := c.peekSingboxStats(); ok {
 		all = append(all, samples...)
 		singNext, singOK = next, true
-	} else if samples, next, ok := c.peekClash(); ok {
+		addTracked(tracked, seen)
+	} else if samples, next, seen, ok := c.peekClash(); ok {
 		all = append(all, samples...)
 		clashNext, clashOK = next, true
+		addTracked(tracked, seen)
 	}
-	if samples, next, ok := c.peekMita(); ok {
+	if samples, next, seen, ok := c.peekMita(); ok {
 		all = append(all, samples...)
 		mitaNext, mitaOK = next, true
+		addTracked(tracked, seen)
 	}
-	covered := map[string]struct{}{}
-	for _, s := range all {
-		if s.Email != "" {
-			covered[s.Email] = struct{}{}
-		}
-	}
-	flowSamples, flowNext, portNext, flowOK := c.peekFlows(covered)
+	// Skip flow only for users present in a successful core snapshot. A zero
+	// delta this tick still means the core is counting them.
+	flowSamples, flowNext, portNext, flowOK := c.peekFlows(tracked)
 	if flowOK {
 		all = append(all, flowSamples...)
 	}
 	merged := mergeSamples(all)
+	if len(merged) == 0 && portRatesMoving(c.pendingPorts) {
+		noteStatsFail("用户流量", fmt.Errorf("监听端口有流量，但没有归到用户"))
+	}
 	finished := false
 	finish := func(commit bool) {
 		if finished {
@@ -128,30 +132,77 @@ func (c *Cores) TakePorts() ([]wsproto.PortRate, bool) {
 	return p, ok
 }
 
-func (c *Cores) peekXray() ([]wsproto.Sample, map[string]bytePair, bool) {
+func addTracked(dst, src map[string]struct{}) {
+	for email := range src {
+		if email != "" {
+			dst[email] = struct{}{}
+		}
+	}
+}
+
+func emailsOf(samples []wsproto.Sample) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, s := range samples {
+		if s.Email != "" && (s.Up != 0 || s.Down != 0) {
+			out[s.Email] = struct{}{}
+		}
+	}
+	return out
+}
+
+func hasUserCounter(rows []statRow) bool {
+	for _, row := range rows {
+		parts := strings.Split(row.Name, ">>>")
+		if len(parts) == 4 && parts[0] == "user" && parts[2] == "traffic" && row.Value > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func portRatesMoving(ports []wsproto.PortRate) bool {
+	for _, p := range ports {
+		if p.UpBps > 0 || p.DownBps > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Cores) peekXray() ([]wsproto.Sample, map[string]bytePair, map[string]struct{}, bool) {
 	c.mu.Lock()
 	bin, api := c.xrayBin, c.xrayAPI
 	c.mu.Unlock()
+	var grpcRows []statRow
+	grpcOK := false
 	if api != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
 		rows, err := queryXrayGRPCFn(ctx, api)
 		cancel()
 		if err == nil {
-			deltas, next := mitaDeltas(c.xrayLast, samplesFromStatRows(rows))
-			return deltas, next, true
+			grpcRows = rows
+			grpcOK = true
+		} else {
+			noteStatsFail("xray", err)
 		}
-		noteStatsFail("xray", err)
 	}
-	if bin == "" || api == "" {
-		return nil, nil, false
+	// Empty gRPC success is not proof that user counters are absent. The CLI
+	// still sees them when the HTTP/2 query decoded nothing.
+	if bin != "" && api != "" && !hasUserCounter(grpcRows) {
+		samples, err := queryXrayUserStats(bin, api)
+		if err != nil {
+			noteStatsFail("xray", err)
+		} else if len(samples) > 0 || !grpcOK {
+			deltas, next := mitaDeltas(c.xrayLast, samples)
+			return deltas, next, emailsOf(samples), true
+		}
 	}
-	samples, err := queryXrayUserStats(bin, api)
-	if err != nil {
-		noteStatsFail("xray", err)
-		return nil, nil, false
+	if !grpcOK {
+		return nil, nil, nil, false
 	}
-	deltas, next := mitaDeltas(c.xrayLast, samples)
-	return deltas, next, true
+	cum := samplesFromStatRows(grpcRows)
+	deltas, next := mitaDeltas(c.xrayLast, cum)
+	return deltas, next, emailsOf(cum), true
 }
 
 var runXrayStatsQueryFn = runXrayStatsQuery
@@ -193,23 +244,24 @@ func runXrayStatsQuery(bin, api string, pattern bool) ([]byte, error) {
 	return out, err
 }
 
-func (c *Cores) peekSingboxStats() ([]wsproto.Sample, map[string]bytePair, bool) {
+func (c *Cores) peekSingboxStats() ([]wsproto.Sample, map[string]bytePair, map[string]struct{}, bool) {
 	c.mu.Lock()
 	raw := append(json.RawMessage(nil), c.last["singbox"]...)
 	c.mu.Unlock()
 	addr, ok := singboxStatsListen(raw)
 	if !ok {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	rows, err := queryV2RayStatsFn(ctx, addr)
 	if err != nil {
 		noteStatsFail("sing-box", err)
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
-	deltas, next := mitaDeltas(c.singboxStatsLast, samplesFromStatRows(rows))
-	return deltas, next, true
+	cum := samplesFromStatRows(rows)
+	deltas, next := mitaDeltas(c.singboxStatsLast, cum)
+	return deltas, next, emailsOf(cum), true
 }
 
 // singboxStatsListen reads experimental.v2ray_api.listen. Only a loopback
@@ -259,48 +311,56 @@ func noteStatsFail(core string, err error) {
 	log.Printf("agent: %s 用户统计采集失败: %v", core, err)
 }
 
-func (c *Cores) peekClash() ([]wsproto.Sample, map[string]clashSnap, bool) {
+func (c *Cores) peekClash() ([]wsproto.Sample, map[string]clashSnap, map[string]struct{}, bool) {
 	c.mu.Lock()
 	api := c.singboxAPI
 	c.mu.Unlock()
 	if api == "" {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+api+"/connections", nil)
 	if err != nil {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	res, err := clashHTTP.Do(req)
 	if err != nil {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	raw, err := io.ReadAll(io.LimitReader(res.Body, 8<<20))
 	if err != nil {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
-	samples, next := clashDeltas(c.clashLast, parseClashConnections(raw), time.Now())
-	return samples, next, true
+	conns := parseClashConnections(raw)
+	samples, next := clashDeltas(c.clashLast, conns, time.Now())
+	tracked := map[string]struct{}{}
+	for _, conn := range conns {
+		if conn.User != "" {
+			tracked[conn.User] = struct{}{}
+		}
+	}
+	return samples, next, tracked, true
 }
 
-func (c *Cores) peekMita() ([]wsproto.Sample, map[string]bytePair, bool) {
+func (c *Cores) peekMita() ([]wsproto.Sample, map[string]bytePair, map[string]struct{}, bool) {
 	bin := lookBin("mita")
 	if bin == "" || !mitaIsRunning(bin) {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, bin, "get", "metrics").Output()
 	if err != nil {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
-	samples, next := mitaDeltas(c.mitaLast, parseMitaMetrics(out))
-	return samples, next, true
+	cum := parseMitaMetrics(out)
+	samples, next := mitaDeltas(c.mitaLast, cum)
+	return samples, next, emailsOf(cum), true
 }
 
 func parseXrayStats(raw []byte) []wsproto.Sample {

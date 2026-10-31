@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -34,18 +35,17 @@ func defaultReadFlowSources() (flowSources, error) {
 		src.conntrack = string(b)
 	}
 	if !strings.Contains(src.conntrack, "bytes=") {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		out, err := exec.CommandContext(ctx, "conntrack", "-L").Output()
-		cancel()
-		if err == nil && strings.Contains(string(out), "bytes=") {
+		if out, err := runFlowTool("conntrack", "-L"); err == nil && strings.Contains(string(out), "bytes=") {
 			src.conntrack = string(out)
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	out, err := exec.CommandContext(ctx, "ss", "-tuinpe").Output()
-	cancel()
+	out, err := runFlowTool("ss", "-tuinpe")
 	if err == nil {
 		src.ss = string(out)
+	} else if lookBin("ss") == "" {
+		noteStatsFail("ss", fmt.Errorf("未找到 ss，套接字标记无法读取"))
+	} else {
+		noteStatsFail("ss", err)
 	}
 	if src.conntrack == "" && src.ss == "" {
 		if err != nil {
@@ -54,6 +54,21 @@ func defaultReadFlowSources() (flowSources, error) {
 		return src, os.ErrNotExist
 	}
 	return src, nil
+}
+
+func runFlowTool(name string, args ...string) ([]byte, error) {
+	bin := lookBin(name)
+	if bin == "" {
+		return nil, os.ErrNotExist
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, args...)
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return out, ctx.Err()
+	}
+	return out, err
 }
 
 func enableConntrackAcct() {
@@ -233,6 +248,13 @@ func parseSS(text string, listen map[int]struct{}) (ports map[int]bytePair, mark
 		}
 		if line[0] != ' ' && line[0] != '\t' {
 			port, isListen = ssLocalPort(line, listen)
+			sent, recv, mark, hasMark := parseSSDetail(line)
+			if hasMark && (sent != 0 || recv != 0) {
+				a := marks[mark]
+				a.up += sent
+				a.down += recv
+				marks[mark] = a
+			}
 			continue
 		}
 		sent, recv, mark, hasMark := parseSSDetail(line)
@@ -252,27 +274,61 @@ func parseSS(text string, listen map[int]struct{}) (ports map[int]bytePair, mark
 	return ports, marks
 }
 
+// mergeMarkBytes takes the larger of each direction. Conntrack mark is the
+// connection mark, which stays 0 unless nft copied SO_MARK. ss fwmark is the
+// socket mark the core actually sets. Summing the two would bill a live flow
+// twice once the copy succeeds; skipping ss whenever conntrack has bytes left
+// every user at 0.
+func mergeMarkBytes(conntrack, ss map[uint32]bytePair) map[uint32]bytePair {
+	out := map[uint32]bytePair{}
+	seen := map[uint32]struct{}{}
+	for mark := range conntrack {
+		seen[mark] = struct{}{}
+	}
+	for mark := range ss {
+		seen[mark] = struct{}{}
+	}
+	for mark := range seen {
+		a, b := conntrack[mark], ss[mark]
+		up, down := a.up, a.down
+		if b.up > up {
+			up = b.up
+		}
+		if b.down > down {
+			down = b.down
+		}
+		if up == 0 && down == 0 {
+			continue
+		}
+		out[mark] = bytePair{up: up, down: down}
+	}
+	return out
+}
+
 func flowCumul(src flowSources, listen map[int]struct{}, emails map[uint32]string) (ports map[int]bytePair, byEmail map[string]bytePair, ok bool) {
 	ports = map[int]bytePair{}
 	byEmail = map[string]bytePair{}
-	var markBytes map[uint32]bytePair
-	var hasBytes bool
+	var ctMarks map[uint32]bytePair
 	if strings.Contains(src.conntrack, "bytes=") {
-		var marks map[uint32]bytePair
-		ports, marks, hasBytes = parseConntrack(src.conntrack, listen, src.local)
+		var hasBytes bool
+		ports, ctMarks, hasBytes = parseConntrack(src.conntrack, listen, src.local)
 		if hasBytes {
-			markBytes = marks
 			ok = true
 		}
 	}
-	if !ok && strings.TrimSpace(src.ss) != "" {
-		ports, markBytes = parseSS(src.ss, listen)
-		ok = true
+	var ssMarks map[uint32]bytePair
+	if strings.TrimSpace(src.ss) != "" {
+		ssPorts, marks := parseSS(src.ss, listen)
+		ssMarks = marks
+		if !ok {
+			ports = ssPorts
+			ok = true
+		}
 	}
 	if !ok {
 		return nil, nil, false
 	}
-	for mark, b := range markBytes {
+	for mark, b := range mergeMarkBytes(ctMarks, ssMarks) {
 		email := emails[mark]
 		if email == "" || (b.up == 0 && b.down == 0) {
 			continue

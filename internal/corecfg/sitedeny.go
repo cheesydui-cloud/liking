@@ -783,6 +783,7 @@ func singSiteAllowPassRules(groups []siteAllowPassGroup) []any {
 		}
 		if len(g.Domains) > 0 {
 			rules = append(rules, map[string]any{
+				"action":        "route",
 				"inbound":       g.Tags,
 				"auth_user":     g.Users,
 				"domain_suffix": g.Domains,
@@ -791,6 +792,7 @@ func singSiteAllowPassRules(groups []siteAllowPassGroup) []any {
 		}
 		if len(g.IPs) > 0 {
 			rules = append(rules, map[string]any{
+				"action":    "route",
 				"inbound":   g.Tags,
 				"auth_user": g.Users,
 				"ip_cidr":   g.IPs,
