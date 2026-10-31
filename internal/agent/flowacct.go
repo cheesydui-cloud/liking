@@ -237,11 +237,16 @@ func parseSSDetail(line string) (sent, recv int64, mark uint32, hasMark bool) {
 	return
 }
 
+// parseSS reads `ss -tuinpe`. iproute2 prints fwmark on the socket line and
+// bytes_sent/bytes_received on the next indented line. A mark is kept for that
+// socket so the following line's bytes are attributed to it.
 func parseSS(text string, listen map[int]struct{}) (ports map[int]bytePair, marks map[uint32]bytePair) {
 	ports = map[int]bytePair{}
 	marks = map[uint32]bytePair{}
 	var port int
 	var isListen bool
+	var headMark uint32
+	var headHasMark bool
 	for _, line := range strings.Split(text, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -249,15 +254,17 @@ func parseSS(text string, listen map[int]struct{}) (ports map[int]bytePair, mark
 		if line[0] != ' ' && line[0] != '\t' {
 			port, isListen = ssLocalPort(line, listen)
 			sent, recv, mark, hasMark := parseSSDetail(line)
-			if hasMark && (sent != 0 || recv != 0) {
-				a := marks[mark]
-				a.up += sent
-				a.down += recv
-				marks[mark] = a
+			headMark, headHasMark = 0, false
+			if hasMark {
+				headMark, headHasMark = mark, true
+				addSSMark(marks, mark, sent, recv)
 			}
 			continue
 		}
 		sent, recv, mark, hasMark := parseSSDetail(line)
+		if !hasMark && headHasMark {
+			mark, hasMark = headMark, true
+		}
 		if isListen && port > 0 {
 			a := ports[port]
 			a.up += recv
@@ -265,13 +272,20 @@ func parseSS(text string, listen map[int]struct{}) (ports map[int]bytePair, mark
 			ports[port] = a
 		}
 		if hasMark {
-			a := marks[mark]
-			a.up += sent
-			a.down += recv
-			marks[mark] = a
+			addSSMark(marks, mark, sent, recv)
 		}
 	}
 	return ports, marks
+}
+
+func addSSMark(marks map[uint32]bytePair, mark uint32, sent, recv int64) {
+	if mark == 0 || (sent == 0 && recv == 0) {
+		return
+	}
+	a := marks[mark]
+	a.up += sent
+	a.down += recv
+	marks[mark] = a
 }
 
 // mergeMarkBytes takes the larger of each direction. Conntrack mark is the

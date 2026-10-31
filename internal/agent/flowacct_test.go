@@ -34,11 +34,17 @@ func TestParseConntrackPortAndMark(t *testing.T) {
 }
 
 func TestParseSSListenAndFwmark(t *testing.T) {
+	// iproute2 prints fwmark on the socket line and byte counters on the next line.
 	text := "" +
-		"ESTAB 0 0 0.0.0.0:443 1.2.3.4:40000\n" +
-		"\tcubic bytes_sent:8000 bytes_received:1000\n" +
-		"ESTAB 0 0 10.0.0.5:50000 9.9.9.9:443\n" +
-		"\tcubic bytes_sent:2000 bytes_received:9000 fwmark:0x4c000009\n"
+		"Netid State Recv-Q Send-Q Local Address:Port Peer Address:Port\n" +
+		"tcp ESTAB 0 0 0.0.0.0:443 1.2.3.4:40000 users:((\"xray\",pid=1,fd=3)) ino:1 sk:aa\n" +
+		"\t cubic wscale:7,7 rto:201 bytes_sent:8000 bytes_acked:8000 bytes_received:1000\n" +
+		"tcp ESTAB 0 0 10.0.0.5:50000 9.9.9.9:443 users:((\"sing-box\",pid=2,fd=4)) ino:2 sk:bb fwmark:0x4c000009\n" +
+		"\t cubic wscale:7,7 rto:201 bytes_sent:2000 bytes_acked:2000 bytes_received:9000\n" +
+		"tcp ESTAB 0 0 10.0.0.5:50001 8.8.8.8:53 ino:3 sk:cc\n" +
+		"\tcubic bytes_sent:50 bytes_received:60\n" +
+		"tcp ESTAB 0 0 10.0.0.5:50002 1.1.1.1:443\n" +
+		"\tcubic bytes_sent:70 bytes_received:80 fwmark:0x4c00000a\n"
 	listen := map[int]struct{}{443: {}}
 	ports, marks := parseSS(text, listen)
 	if ports[443].up != 1000 || ports[443].down != 8000 {
@@ -49,7 +55,17 @@ func TestParseSSListenAndFwmark(t *testing.T) {
 		t.Fatal("mark")
 	}
 	if marks[mark].up != 2000 || marks[mark].down != 9000 {
-		t.Fatalf("fwmark %+v", marks[mark])
+		t.Fatalf("header fwmark %+v", marks[mark])
+	}
+	other, ok := parseMark("0x4c00000a")
+	if !ok {
+		t.Fatal("detail mark")
+	}
+	if marks[other].up != 70 || marks[other].down != 80 {
+		t.Fatalf("detail fwmark %+v", marks[other])
+	}
+	if len(marks) != 2 {
+		t.Fatalf("unmarked socket inherited a mark: %+v", marks)
 	}
 }
 
@@ -109,7 +125,7 @@ func TestFlowCumulUsesSocketMarkWhenConntrackUnmarked(t *testing.T) {
 			"ipv4 2 tcp 6 1 ESTABLISHED src=1.2.3.4 dst=10.0.0.5 sport=1 dport=443 packets=1 bytes=5000 src=10.0.0.5 dst=1.2.3.4 sport=443 dport=1 packets=1 bytes=9000 mark=0",
 			"ipv4 2 tcp 6 1 ESTABLISHED src=10.0.0.5 dst=9.9.9.9 sport=2 dport=443 packets=1 bytes=100 src=9.9.9.9 dst=10.0.0.5 sport=443 dport=2 packets=1 bytes=200 mark=0",
 		}, "\n"),
-		ss:    "ESTAB 0 0 10.0.0.5:50000 9.9.9.9:443\n\tcubic bytes_sent:2000 bytes_received:8000 fwmark:0x4c000009\n",
+		ss:    "tcp ESTAB 0 0 10.0.0.5:50000 9.9.9.9:443 ino:2 sk:bb fwmark:0x4c000009\n\tcubic bytes_sent:2000 bytes_received:8000\n",
 		local: map[string]struct{}{"10.0.0.5": {}},
 	}
 	ports, byEmail, ok := flowCumul(src, map[int]struct{}{443: {}}, map[uint32]string{mark: "u1.i2"})
@@ -131,7 +147,7 @@ func TestFlowCumulDoesNotSumBothMarks(t *testing.T) {
 	}
 	src := flowSources{
 		conntrack: "ipv4 2 tcp 6 1 ESTABLISHED src=10.0.0.5 dst=9.9.9.9 sport=2 dport=443 packets=1 bytes=2000 src=9.9.9.9 dst=10.0.0.5 sport=443 dport=2 packets=1 bytes=9000 mark=1275068425",
-		ss:        "ESTAB 0 0 10.0.0.5:50000 9.9.9.9:443\n\tcubic bytes_sent:1500 bytes_received:8000 fwmark:0x4c000009\n",
+		ss:        "tcp ESTAB 0 0 10.0.0.5:50000 9.9.9.9:443 ino:2 sk:bb fwmark:0x4c000009\n\tcubic bytes_sent:1500 bytes_received:8000\n",
 		local:     map[string]struct{}{"10.0.0.5": {}},
 	}
 	_, byEmail, ok := flowCumul(src, nil, map[uint32]string{mark: "u1.i2"})

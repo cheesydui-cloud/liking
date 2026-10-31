@@ -247,7 +247,7 @@ func TestBeginCollectBillsSocketMarkWithoutCoreCounters(t *testing.T) {
 		}
 		return flowSources{
 			conntrack: "ipv4 2 tcp 6 1 ESTABLISHED src=1.2.3.4 dst=10.0.0.5 sport=1 dport=443 packets=1 bytes=8000 src=10.0.0.5 dst=1.2.3.4 sport=443 dport=1 packets=1 bytes=9000 mark=0",
-			ss:        fmt.Sprintf("ESTAB 0 0 10.0.0.5:9 9.9.9.9:443\n\tcubic bytes_sent:%d bytes_received:50 fwmark:0x4c000009\n", sent),
+			ss:        fmt.Sprintf("tcp ESTAB 0 0 10.0.0.5:9 9.9.9.9:443 fwmark:0x4c000009\n\tcubic bytes_sent:%d bytes_received:50\n", sent),
 			local:     map[string]struct{}{"10.0.0.5": {}},
 		}, nil
 	}
@@ -321,7 +321,7 @@ func TestBeginCollectDoesNotDoubleBillTrackedUser(t *testing.T) {
 	readFlowSources = func() (flowSources, error) {
 		fn++
 		return flowSources{
-			ss: fmt.Sprintf("ESTAB 0 0 10.0.0.5:9 9.9.9.9:443\n\tcubic bytes_sent:%d bytes_received:8000 fwmark:0x4c000009\n", 5000+fn*1000),
+			ss: fmt.Sprintf("tcp ESTAB 0 0 10.0.0.5:9 9.9.9.9:443 fwmark:0x4c000009\n\tcubic bytes_sent:%d bytes_received:8000\n", 5000+fn*1000),
 		}, nil
 	}
 	defer func() { readFlowSources = oldF }()
