@@ -2,11 +2,13 @@ package corecfg
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"liking/internal/db"
 )
 
-func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound, apiPort int, speeds map[int64]int64, denies map[int64]SiteDeny) (map[string]any, error) {
+func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound, apiPort, statsPort int, speeds map[int64]int64, denies map[int64]SiteDeny) (map[string]any, error) {
 	var ins []any
 	var outs []any
 	used := false
@@ -106,14 +108,64 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 		"outbounds": outs,
 		"route":     map[string]any{"rules": routeRules, "final": final},
 	}
-	if apiPort > 0 {
-		cfg["experimental"] = map[string]any{
-			"clash_api": map[string]any{
+	if apiPort > 0 || statsPort > 0 {
+		exp := map[string]any{}
+		if apiPort > 0 {
+			exp["clash_api"] = map[string]any{
 				"external_controller": fmt.Sprintf("127.0.0.1:%d", apiPort),
-			},
+			}
 		}
+		// sing-box 1.14 clash /connections no longer includes the username.
+		// User counters come from v2ray_api, and only listed names are counted.
+		if statsPort > 0 {
+			exp["v2ray_api"] = map[string]any{
+				"listen": fmt.Sprintf("127.0.0.1:%d", statsPort),
+				"stats": map[string]any{
+					"enabled": true,
+					"users":   singStatUsers(inbounds, clients),
+				},
+			}
+		}
+		cfg["experimental"] = exp
 	}
 	return cfg, nil
+}
+
+func singStatUsers(inbounds []*db.Inbound, clients map[int64][]*db.Client) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" || strings.HasPrefix(name, "relay.") {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	for _, in := range inbounds {
+		if in == nil || in.Core != CoreSingbox || !in.Enabled {
+			continue
+		}
+		for _, c := range clients[in.ID] {
+			if c == nil || !c.Enabled {
+				continue
+			}
+			switch in.Profile {
+			case ProfileSOCKS5:
+				add(clientSocksUser(c))
+			case ProfileAnyTLS:
+				add(c.Email)
+			}
+		}
+	}
+	sort.Strings(out)
+	if out == nil {
+		out = []string{}
+	}
+	return out
 }
 
 func singInbound(in *db.Inbound, clients []*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound) (map[string]any, error) {

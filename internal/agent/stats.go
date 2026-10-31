@@ -1,12 +1,18 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"log"
+	"net"
 	"net/http"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"liking/internal/wsproto"
@@ -15,6 +21,11 @@ import (
 var clashHTTP = &http.Client{Timeout: 2 * time.Second}
 
 type bytePair struct{ up, down int64 }
+
+type statRow struct {
+	Name  string
+	Value int64
+}
 
 type clashSnap struct {
 	up, down int64
@@ -45,13 +56,20 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 	var all []wsproto.Sample
 	var xrayNext map[string]bytePair
 	var clashNext map[string]clashSnap
+	var singNext map[string]bytePair
 	var mitaNext map[string]bytePair
-	xrayOK, clashOK, mitaOK := false, false, false
+	xrayOK, clashOK, singOK, mitaOK := false, false, false, false
 	if samples, next, ok := c.peekXray(); ok {
 		all = append(all, samples...)
 		xrayNext, xrayOK = next, true
 	}
-	if samples, next, ok := c.peekClash(); ok {
+	// sing-box 1.14 clash /connections has no username, so those samples cannot
+	// be attributed. v2ray_api counters include the name. Use clash only when
+	// that query is unavailable, and never add both in one tick.
+	if samples, next, ok := c.peekSingboxStats(); ok {
+		all = append(all, samples...)
+		singNext, singOK = next, true
+	} else if samples, next, ok := c.peekClash(); ok {
 		all = append(all, samples...)
 		clashNext, clashOK = next, true
 	}
@@ -69,6 +87,11 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 		if commit {
 			if xrayOK {
 				c.xrayLast = xrayNext
+			}
+			if singOK {
+				c.singboxStatsLast = singNext
+				// A later clash fallback must not bill the interval already counted here.
+				c.clashLast = map[string]clashSnap{}
 			}
 			if clashOK {
 				c.clashLast = clashNext
@@ -89,15 +112,118 @@ func (c *Cores) peekXray() ([]wsproto.Sample, map[string]bytePair, bool) {
 	if bin == "" || api == "" {
 		return nil, nil, false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "api", "statsquery", "--server="+api)
-	out, err := cmd.Output()
+	samples, err := queryXrayUserStats(bin, api)
 	if err != nil {
+		noteStatsFail("xray", err)
 		return nil, nil, false
 	}
-	samples, next := mitaDeltas(c.xrayLast, parseXrayStats(out))
-	return samples, next, true
+	deltas, next := mitaDeltas(c.xrayLast, samples)
+	return deltas, next, true
+}
+
+var runXrayStatsQueryFn = runXrayStatsQuery
+
+// queryXrayUserStats asks for user counters only. A timeout is not retried:
+// the dokodemo API path used to stall every tick, and a second attempt would
+// skip the next stats frame. A fast failure retries once without the pattern.
+func queryXrayUserStats(bin, api string) ([]wsproto.Sample, error) {
+	out, err := runXrayStatsQueryFn(bin, api, true)
+	if samples, ok := parseXrayStatsOK(out); ok && err == nil {
+		return samples, nil
+	}
+	if err != nil && errors.Is(err, context.DeadlineExceeded) {
+		return nil, err
+	}
+	out, err = runXrayStatsQueryFn(bin, api, false)
+	if err != nil {
+		return nil, err
+	}
+	samples, ok := parseXrayStatsOK(out)
+	if !ok {
+		return nil, fmt.Errorf("statsquery 输出不是 JSON")
+	}
+	return samples, nil
+}
+
+func runXrayStatsQuery(bin, api string, pattern bool) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	args := []string{"api", "statsquery", "--server=" + api, "-timeout=3"}
+	if pattern {
+		args = append(args, "-pattern=user>>>")
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return out, ctx.Err()
+	}
+	return out, err
+}
+
+func (c *Cores) peekSingboxStats() ([]wsproto.Sample, map[string]bytePair, bool) {
+	c.mu.Lock()
+	raw := append(json.RawMessage(nil), c.last["singbox"]...)
+	c.mu.Unlock()
+	addr, ok := singboxStatsListen(raw)
+	if !ok {
+		return nil, nil, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	rows, err := queryV2RayStatsFn(ctx, addr)
+	if err != nil {
+		noteStatsFail("sing-box", err)
+		return nil, nil, false
+	}
+	deltas, next := mitaDeltas(c.singboxStatsLast, samplesFromStatRows(rows))
+	return deltas, next, true
+}
+
+// singboxStatsListen reads experimental.v2ray_api.listen. Only a loopback
+// address is queried. Clash is the fallback when this block is absent.
+func singboxStatsListen(raw []byte) (string, bool) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return "", false
+	}
+	var top map[string]any
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return "", false
+	}
+	exp, _ := top["experimental"].(map[string]any)
+	v2, _ := exp["v2ray_api"].(map[string]any)
+	if v2 == nil {
+		return "", false
+	}
+	stats, _ := v2["stats"].(map[string]any)
+	enabled, _ := stats["enabled"].(bool)
+	if !enabled {
+		return "", false
+	}
+	listen := strings.TrimSpace(strAny(v2["listen"]))
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil || port == "" || !isLoopback(host) {
+		return "", false
+	}
+	return listen, true
+}
+
+var (
+	statsFailMu sync.Mutex
+	statsFailAt = map[string]time.Time{}
+)
+
+func noteStatsFail(core string, err error) {
+	if err == nil {
+		return
+	}
+	statsFailMu.Lock()
+	defer statsFailMu.Unlock()
+	now := time.Now()
+	if now.Sub(statsFailAt[core]) < 30*time.Second {
+		return
+	}
+	statsFailAt[core] = now
+	log.Printf("agent: %s 用户统计采集失败: %v", core, err)
 }
 
 func (c *Cores) peekClash() ([]wsproto.Sample, map[string]clashSnap, bool) {
@@ -145,27 +271,78 @@ func (c *Cores) peekMita() ([]wsproto.Sample, map[string]bytePair, bool) {
 }
 
 func parseXrayStats(raw []byte) []wsproto.Sample {
-	var st xrayStats
-	if err := json.Unmarshal(raw, &st); err != nil {
+	samples, ok := parseXrayStatsOK(raw)
+	if !ok {
 		return nil
 	}
+	return samples
+}
+
+// parseXrayStatsOK accepts a log prefix and Stat/stats keys. Non-JSON is a
+// failure so a garbage success cannot be committed as an empty snapshot.
+func parseXrayStatsOK(raw []byte) ([]wsproto.Sample, bool) {
+	body := extractJSONObject(raw)
+	if body == nil {
+		return nil, false
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(body, &top); err != nil {
+		return nil, false
+	}
+	var statRaw json.RawMessage
+	for _, key := range []string{"stat", "Stat", "stats"} {
+		if v, ok := top[key]; ok && string(v) != "null" {
+			statRaw = v
+			break
+		}
+	}
+	if statRaw == nil {
+		return nil, true
+	}
+	var rows []struct {
+		Name  string `json:"name"`
+		Value any    `json:"value"`
+	}
+	if err := json.Unmarshal(statRaw, &rows); err != nil {
+		return nil, false
+	}
+	out := make([]statRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, statRow{Name: row.Name, Value: anyInt(row.Value)})
+	}
+	return samplesFromStatRows(out), true
+}
+
+func extractJSONObject(raw []byte) []byte {
+	raw = bytes.TrimSpace(raw)
+	start := bytes.IndexByte(raw, '{')
+	end := bytes.LastIndexByte(raw, '}')
+	if start < 0 || end < start {
+		return nil
+	}
+	return raw[start : end+1]
+}
+
+func samplesFromStatRows(rows []statRow) []wsproto.Sample {
 	m := map[string]*bytePair{}
-	for _, row := range st.Stat {
+	for _, row := range rows {
 		parts := strings.Split(row.Name, ">>>")
 		if len(parts) != 4 || parts[0] != "user" || parts[2] != "traffic" {
 			continue
 		}
 		email := parts[1]
+		if email == "" {
+			continue
+		}
 		a := m[email]
 		if a == nil {
 			a = &bytePair{}
 			m[email] = a
 		}
-		v := anyInt(row.Value)
 		if parts[3] == "uplink" {
-			a.up = v
+			a.up = row.Value
 		} else if parts[3] == "downlink" {
-			a.down = v
+			a.down = row.Value
 		}
 	}
 	var out []wsproto.Sample

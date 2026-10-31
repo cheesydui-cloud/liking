@@ -191,7 +191,7 @@ func TestBuildSiteDenyXrayOrderAndSniff(t *testing.T) {
 			directAt = i
 		}
 	}
-	if apiAt != 0 || denyAt < 0 || directAt < 0 || !(apiAt < denyAt && denyAt < directAt) {
+	if apiAt >= 0 || denyAt < 0 || directAt < 0 || !(denyAt < directAt) {
 		t.Fatalf("order api=%d deny=%d direct=%d", apiAt, denyAt, directAt)
 	}
 	if len(denyUsers) != 1 || denyUsers[0] != c.Email {
@@ -501,7 +501,7 @@ func TestBuildSiteAllowXrayOrder(t *testing.T) {
 			directAt = i
 		}
 	}
-	if apiAt != 0 || passAt < 0 || blockAt < 0 || directAt < 0 || !(apiAt < passAt && passAt < blockAt && blockAt < directAt) {
+	if apiAt >= 0 || passAt < 0 || blockAt < 0 || directAt < 0 || !(passAt < blockAt && blockAt < directAt) {
 		t.Fatalf("order api=%d pass=%d block=%d direct=%d", apiAt, passAt, blockAt, directAt)
 	}
 	joined := fmtJoin(passDomains)

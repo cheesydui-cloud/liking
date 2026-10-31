@@ -90,6 +90,9 @@ func TestSocksPortOutOfUserPool(t *testing.T) {
 	if _, ok := used[SingboxAPIPort]; !ok {
 		t.Fatal("singbox api")
 	}
+	if _, ok := used[SingboxStatsPort]; !ok {
+		t.Fatal("singbox stats")
+	}
 	if _, ok := used[SocksPort(1)]; !ok {
 		t.Fatal("socks 1")
 	}

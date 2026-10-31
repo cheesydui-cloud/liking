@@ -13,6 +13,7 @@ const (
 	DefaultPortMax   = 59999
 	XrayAPIPort      = 60085
 	SingboxAPIPort   = 60190
+	SingboxStatsPort = 60191
 	SocksPortBase    = 61000
 	socksPortCeiling = 65535
 )
@@ -36,6 +37,7 @@ func MarkReservedPorts(used map[int]struct{}, ins []*db.Inbound) {
 	}
 	used[XrayAPIPort] = struct{}{}
 	used[SingboxAPIPort] = struct{}{}
+	used[SingboxStatsPort] = struct{}{}
 	for _, in := range ins {
 		if in == nil {
 			continue

@@ -12,22 +12,13 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 	var outs []any
 	var rules []any
 
-	ins = append(ins, map[string]any{
-		"tag":      "api",
-		"listen":   "127.0.0.1",
-		"port":     apiPort,
-		"protocol": "dokodemo-door",
-		"settings": map[string]any{"address": "127.0.0.1"},
-	})
 	outs = append(outs,
 		map[string]any{"tag": "direct", "protocol": "freedom"},
 		map[string]any{"tag": "block", "protocol": "blackhole"},
 	)
-	// API inbound must route to the api module tag, not freedom.
-	// freedom here loops 127.0.0.1:API onto itself and opens tens of thousands of fds.
-	rules = append(rules, map[string]any{
-		"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api",
-	})
+	// Stats API listens directly. A dokodemo-door inbound routed back to the
+	// api outbound stalls `xray api statsquery`, so every user stays at 0 B/s
+	// while the NIC rate still moves.
 
 	used := false
 	limitOuts := map[uint32]struct{}{}
@@ -127,7 +118,11 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 			"loglevel": "warning",
 		},
 		"stats": map[string]any{},
-		"api":   map[string]any{"tag": "api", "services": []string{"HandlerService", "StatsService"}},
+		"api": map[string]any{
+			"tag":      "api",
+			"listen":   fmt.Sprintf("127.0.0.1:%d", apiPort),
+			"services": []string{"HandlerService", "StatsService"},
+		},
 		"policy": map[string]any{
 			"levels": map[string]any{"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true}},
 			"system": map[string]any{"statsInboundUplink": true, "statsInboundDownlink": true},

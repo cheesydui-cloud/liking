@@ -118,20 +118,14 @@ func TestBuildXrayAndMita(t *testing.T) {
 	if !strings.Contains(joined, "HandlerService") || !strings.Contains(joined, "StatsService") {
 		t.Fatalf("xray api services %v", svcs)
 	}
-	routing, _ := xray["routing"].(map[string]any)
-	rules, _ := routing["rules"].([]any)
-	apiRule := ""
-	for _, r := range rules {
-		m, _ := r.(map[string]any)
-		tags, _ := m["inboundTag"].([]any)
-		for _, t := range tags {
-			if t == "api" {
-				apiRule, _ = m["outboundTag"].(string)
-			}
-		}
+	if apiMod["listen"] != b.Apply.XrayAPI {
+		t.Fatalf("api listen %v want %s", apiMod["listen"], b.Apply.XrayAPI)
 	}
-	if apiRule != "api" {
-		t.Fatalf("api inbound must route to api module, got %q", apiRule)
+	for _, raw := range xray["inbounds"].([]any) {
+		m, _ := raw.(map[string]any)
+		if m["tag"] == "api" {
+			t.Fatal("stats API must listen directly, not via a dokodemo inbound")
+		}
 	}
 	for _, o := range xray["outbounds"].([]any) {
 		if o.(map[string]any)["tag"] == "api-out" {

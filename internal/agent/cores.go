@@ -26,30 +26,32 @@ type proc struct {
 }
 
 type Cores struct {
-	dir        string
-	mu         sync.Mutex
-	collectMu  sync.Mutex
-	procs      map[string]*proc
-	last       map[string]json.RawMessage
-	lastReq    map[string]json.RawMessage
-	xrayAPI    string
-	xrayBin    string
-	singboxAPI string
-	clashLast  map[string]clashSnap
-	mitaLast   map[string]bytePair
-	xrayLast   map[string]bytePair
-	applyGen   uint64
-	crashes    map[string][]time.Time
-	stopWatch  chan struct{}
-	stopOnce   sync.Once
+	dir              string
+	mu               sync.Mutex
+	collectMu        sync.Mutex
+	procs            map[string]*proc
+	last             map[string]json.RawMessage
+	lastReq          map[string]json.RawMessage
+	xrayAPI          string
+	xrayBin          string
+	singboxAPI       string
+	clashLast        map[string]clashSnap
+	mitaLast         map[string]bytePair
+	xrayLast         map[string]bytePair
+	singboxStatsLast map[string]bytePair
+	applyGen         uint64
+	crashes          map[string][]time.Time
+	stopWatch        chan struct{}
+	stopOnce         sync.Once
 }
 
 func NewCores(dir string) *Cores {
 	c := &Cores{
 		dir: dir, procs: map[string]*proc{}, last: map[string]json.RawMessage{}, lastReq: map[string]json.RawMessage{},
 		clashLast: map[string]clashSnap{}, mitaLast: map[string]bytePair{}, xrayLast: map[string]bytePair{},
-		crashes:   map[string][]time.Time{},
-		stopWatch: make(chan struct{}),
+		singboxStatsLast: map[string]bytePair{},
+		crashes:          map[string][]time.Time{},
+		stopWatch:        make(chan struct{}),
 	}
 	go c.watchLoop()
 	return c
