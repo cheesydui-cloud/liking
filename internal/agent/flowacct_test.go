@@ -85,7 +85,7 @@ func TestPortRatesStayDistinct(t *testing.T) {
 	}
 }
 
-func TestFlowSamplesSkipCoveredEmail(t *testing.T) {
+func TestFlowSamplesBillMarkedSocket(t *testing.T) {
 	c := NewCores(t.TempDir())
 	defer c.Close()
 	c.acctMarks = []wsproto.AcctMark{{Mark: 0x4c000009, Email: "u1.i2"}}
@@ -99,18 +99,16 @@ func TestFlowSamplesSkipCoveredEmail(t *testing.T) {
 		}, nil
 	}
 	defer func() { readFlowSources = old }()
-	samples, next, _, ok := c.peekFlows(map[string]struct{}{"u1.i2": {}})
-	if !ok {
-		t.Fatal("read")
+	samples, next, _, ok := c.peekFlows()
+	if !ok || len(samples) != 1 || samples[0].Email != "u1.i2" || samples[0].Up != 200 || samples[0].Down != 300 {
+		t.Fatalf("socket delta %+v ok %v", samples, ok)
 	}
-	if len(samples) != 0 {
-		t.Fatalf("covered email billed %+v", samples)
-	}
-	if next["u1.i2"].up != 300 {
+	if next["u1.i2"].up != 300 || next["u1.i2"].down != 400 {
 		t.Fatalf("cursor %+v", next["u1.i2"])
 	}
-	samples, _, _, ok = c.peekFlows(nil)
-	if !ok || len(samples) != 1 || samples[0].Email != "u1.i2" || samples[0].Up != 200 {
+	// The cursor moves only after the stats frame is written.
+	samples, _, _, ok = c.peekFlows()
+	if !ok || len(samples) != 1 || samples[0].Up != 200 {
 		t.Fatalf("uncommitted cursor must still bill the interval %+v ok %v", samples, ok)
 	}
 }

@@ -39,13 +39,21 @@ func defaultReadFlowSources() (flowSources, error) {
 			src.conntrack = string(out)
 		}
 	}
-	out, err := runFlowTool("ss", "-tuinpe")
-	if err == nil {
+	// -p scans /proc for every socket and is not parsed. On a busy node it
+	// blows the timeout, and a non-zero exit used to discard the fwmark lines
+	// already printed. Keep any stdout that contains a socket line.
+	out, err := runFlowTool("ss", "-tuine")
+	if text := strings.TrimSpace(string(out)); text != "" {
 		src.ss = string(out)
-	} else if lookBin("ss") == "" {
-		noteStatsFail("ss", fmt.Errorf("未找到 ss，套接字标记无法读取"))
-	} else {
-		noteStatsFail("ss", err)
+	}
+	if err != nil {
+		if lookBin("ss") == "" {
+			noteStatsFail("ss", fmt.Errorf("未找到 ss，套接字标记无法读取"))
+		} else if src.ss == "" {
+			noteStatsFail("ss", err)
+		} else {
+			noteStatsFail("ss", fmt.Errorf("%v（已保留套接字输出）", err))
+		}
 	}
 	if src.conntrack == "" && src.ss == "" {
 		if err != nil {
@@ -61,7 +69,7 @@ func runFlowTool(name string, args ...string) ([]byte, error) {
 	if bin == "" {
 		return nil, os.ErrNotExist
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	out, err := cmd.Output()
@@ -237,7 +245,7 @@ func parseSSDetail(line string) (sent, recv int64, mark uint32, hasMark bool) {
 	return
 }
 
-// parseSS reads `ss -tuinpe`. iproute2 prints fwmark on the socket line and
+// parseSS reads `ss -tuine`. iproute2 prints fwmark on the socket line and
 // bytes_sent/bytes_received on the next indented line. A mark is kept for that
 // socket so the following line's bytes are attributed to it.
 func parseSS(text string, listen map[int]struct{}) (ports map[int]bytePair, marks map[uint32]bytePair) {
@@ -355,7 +363,7 @@ func flowCumul(src flowSources, listen map[int]struct{}, emails map[uint32]strin
 	return ports, byEmail, true
 }
 
-func (c *Cores) peekFlows(covered map[string]struct{}) ([]wsproto.Sample, map[string]bytePair, map[int]bytePair, bool) {
+func (c *Cores) peekFlows() ([]wsproto.Sample, map[string]bytePair, map[int]bytePair, bool) {
 	c.mu.Lock()
 	listen := listenPortsLocked(c.last)
 	marks := append([]wsproto.AcctMark(nil), c.acctMarks...)
@@ -398,14 +406,7 @@ func (c *Cores) peekFlows(covered map[string]struct{}) ([]wsproto.Sample, map[st
 		cum = append(cum, wsproto.Sample{Email: email, Up: b.up, Down: b.down})
 	}
 	deltas, next := flowDeltas(c.flowLast, cum)
-	var samples []wsproto.Sample
-	for _, s := range deltas {
-		if _, skip := covered[s.Email]; skip {
-			continue
-		}
-		samples = append(samples, s)
-	}
-	return samples, next, portNext, true
+	return deltas, next, portNext, true
 }
 
 func listenPortsLocked(last map[string]json.RawMessage) []int {

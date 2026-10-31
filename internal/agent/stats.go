@@ -54,41 +54,35 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 		return nil, func(bool) {}
 	}
 	var all []wsproto.Sample
-	tracked := map[string]struct{}{}
 	var xrayNext map[string]bytePair
 	var clashNext map[string]clashSnap
 	var singNext map[string]bytePair
 	var mitaNext map[string]bytePair
 	xrayOK, clashOK, singOK, mitaOK := false, false, false, false
-	if samples, next, seen, ok := c.peekXray(); ok {
+	if samples, next, _, ok := c.peekXray(); ok {
 		all = append(all, samples...)
 		xrayNext, xrayOK = next, true
-		addTracked(tracked, seen)
 	}
 	// sing-box 1.14 clash /connections has no username, so those samples cannot
 	// be attributed. v2ray_api counters include the name. Use clash only when
 	// that query is unavailable, and never add both in one tick.
-	if samples, next, seen, ok := c.peekSingboxStats(); ok {
+	if samples, next, _, ok := c.peekSingboxStats(); ok {
 		all = append(all, samples...)
 		singNext, singOK = next, true
-		addTracked(tracked, seen)
-	} else if samples, next, seen, ok := c.peekClash(); ok {
+	} else if samples, next, _, ok := c.peekClash(); ok {
 		all = append(all, samples...)
 		clashNext, clashOK = next, true
-		addTracked(tracked, seen)
 	}
-	if samples, next, seen, ok := c.peekMita(); ok {
+	if samples, next, _, ok := c.peekMita(); ok {
 		all = append(all, samples...)
 		mitaNext, mitaOK = next, true
-		addTracked(tracked, seen)
 	}
-	// Skip flow only for users present in a successful core snapshot. A zero
-	// delta this tick still means the core is counting them.
-	flowSamples, flowNext, portNext, flowOK := c.peekFlows(tracked)
-	if flowOK {
-		all = append(all, flowSamples...)
-	}
-	merged := mergeSamples(all)
+	// Core counters and socket marks measure the same interval. Vision splice
+	// freezes user>>> counters after the handshake while the marked socket
+	// keeps growing. A zero core delta must not hide that socket. Take the
+	// larger side of each direction so a live core counter is not added again.
+	flowSamples, flowNext, portNext, flowOK := c.peekFlows()
+	merged := maxMergeSamples(all, flowSamples)
 	if len(merged) == 0 && portRatesMoving(c.pendingPorts) {
 		noteStatsFail("用户流量", fmt.Errorf("监听端口有流量，但没有归到用户"))
 	}
@@ -130,14 +124,6 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 func (c *Cores) TakePorts() ([]wsproto.PortRate, bool) {
 	p, ok := c.pendingPorts, c.pendingHasPorts
 	return p, ok
-}
-
-func addTracked(dst, src map[string]struct{}) {
-	for email := range src {
-		if email != "" {
-			dst[email] = struct{}{}
-		}
-	}
 }
 
 func emailsOf(samples []wsproto.Sample) map[string]struct{} {
@@ -711,25 +697,50 @@ func mitaDeltas(prev map[string]bytePair, cum []wsproto.Sample) ([]wsproto.Sampl
 }
 
 func mergeSamples(in []wsproto.Sample) []wsproto.Sample {
-	m := map[string]*bytePair{}
+	return maxMergeSamples(in)
+}
+
+// maxMergeSamples sums samples inside one source, then keeps the larger value
+// of each direction across sources. Socket bytes and a core counter describe
+// the same transfer. Adding them bills it twice. Keeping only the core counter
+// drops the bytes after Xray splices past the userspace stat writer.
+func maxMergeSamples(groups ...[]wsproto.Sample) []wsproto.Sample {
+	summed := make([]map[string]bytePair, 0, len(groups))
 	var order []string
-	for _, s := range in {
-		if s.Email == "" || (s.Up == 0 && s.Down == 0) {
-			continue
-		}
-		a := m[s.Email]
-		if a == nil {
-			a = &bytePair{}
+	seen := map[string]struct{}{}
+	for _, group := range groups {
+		m := map[string]bytePair{}
+		for _, s := range group {
+			if s.Email == "" || (s.Up == 0 && s.Down == 0) {
+				continue
+			}
+			a := m[s.Email]
+			a.up += s.Up
+			a.down += s.Down
 			m[s.Email] = a
-			order = append(order, s.Email)
+			if _, ok := seen[s.Email]; !ok {
+				seen[s.Email] = struct{}{}
+				order = append(order, s.Email)
+			}
 		}
-		a.up += s.Up
-		a.down += s.Down
+		summed = append(summed, m)
 	}
 	out := make([]wsproto.Sample, 0, len(order))
 	for _, email := range order {
-		a := m[email]
-		out = append(out, wsproto.Sample{Email: email, Up: a.up, Down: a.down})
+		var up, down int64
+		for _, m := range summed {
+			a := m[email]
+			if a.up > up {
+				up = a.up
+			}
+			if a.down > down {
+				down = a.down
+			}
+		}
+		if up == 0 && down == 0 {
+			continue
+		}
+		out = append(out, wsproto.Sample{Email: email, Up: up, Down: down})
 	}
 	return out
 }

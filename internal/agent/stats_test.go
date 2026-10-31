@@ -329,8 +329,57 @@ func TestBeginCollectDoesNotDoubleBillTrackedUser(t *testing.T) {
 		t.Fatalf("baseline %+v", got)
 	}
 	got := c.Collect()
-	if len(got) != 1 || got[0].Email != "u1.i2" || got[0].Up != 250 || got[0].Down != 0 {
+	// Core uplink grew 250. The socket grew 1000 in the same interval.
+	// Bill the larger side once, not 1250.
+	if len(got) != 1 || got[0].Email != "u1.i2" || got[0].Up != 1000 || got[0].Down != 0 {
 		t.Fatalf("double billed %+v", got)
+	}
+}
+
+func TestBeginCollectBillsSocketWhenCoreCounterFrozen(t *testing.T) {
+	c := NewCores(t.TempDir())
+	defer c.Close()
+	c.xrayAPI = "127.0.0.1:60085"
+	c.acctMarks = []wsproto.AcctMark{{Mark: 0x4c000009, Email: "u1.i2"}}
+	oldG := queryXrayGRPCFn
+	queryXrayGRPCFn = func(context.Context, string) ([]statRow, error) {
+		return []statRow{
+			{Name: "user>>>u1.i2>>>traffic>>>uplink", Value: 1200},
+			{Name: "user>>>u1.i2>>>traffic>>>downlink", Value: 3400},
+		}, nil
+	}
+	defer func() { queryXrayGRPCFn = oldG }()
+	oldF := readFlowSources
+	n := 0
+	readFlowSources = func() (flowSources, error) {
+		n++
+		sent := 5000
+		recv := 8000
+		if n > 1 {
+			sent = 9000
+			recv = 15000
+		}
+		return flowSources{
+			ss: fmt.Sprintf("tcp ESTAB 0 0 10.0.0.5:9 9.9.9.9:443 fwmark:0x4c000009\n\tcubic bytes_sent:%d bytes_received:%d\n", sent, recv),
+		}, nil
+	}
+	defer func() { readFlowSources = oldF }()
+	if got := c.Collect(); len(got) != 0 {
+		t.Fatalf("baseline %+v", got)
+	}
+	got := c.Collect()
+	if len(got) != 1 || got[0].Email != "u1.i2" || got[0].Up != 4000 || got[0].Down != 7000 {
+		t.Fatalf("frozen core hid socket %+v", got)
+	}
+}
+
+func TestMaxMergeSamplesPerDirection(t *testing.T) {
+	got := maxMergeSamples(
+		[]wsproto.Sample{{Email: "u1.i2", Up: 10, Down: 0}, {Email: "u1.i2", Up: 5, Down: 1}},
+		[]wsproto.Sample{{Email: "u1.i2", Up: 4, Down: 80}},
+	)
+	if len(got) != 1 || got[0].Up != 15 || got[0].Down != 80 {
+		t.Fatalf("%+v", got)
 	}
 }
 
