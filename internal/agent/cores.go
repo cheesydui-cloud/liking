@@ -39,6 +39,12 @@ type Cores struct {
 	mitaLast         map[string]bytePair
 	xrayLast         map[string]bytePair
 	singboxStatsLast map[string]bytePair
+	acctMarks        []wsproto.AcctMark
+	flowLast         map[string]bytePair
+	portLast         map[int]bytePair
+	flowAt           time.Time
+	pendingPorts     []wsproto.PortRate
+	pendingHasPorts  bool
 	applyGen         uint64
 	crashes          map[string][]time.Time
 	stopWatch        chan struct{}
@@ -131,6 +137,7 @@ func (c *Cores) Apply(cfg wsproto.ApplyConfig) error {
 	defer c.mu.Unlock()
 	c.xrayAPI = cfg.XrayAPI
 	c.singboxAPI = cfg.SingboxAPI
+	c.acctMarks = append([]wsproto.AcctMark(nil), cfg.AcctMarks...)
 
 	var errs []string
 	take := func(err error) {
@@ -141,6 +148,7 @@ func (c *Cores) Apply(cfg wsproto.ApplyConfig) error {
 	take(c.applyJSON("xray", "xray.json", cfg.Xray, lookBin("xray"), []string{"run", "-c"}))
 	take(c.applyJSON("singbox", "singbox.json", cfg.Singbox, lookBin("sing-box", "singbox"), []string{"run", "-c"}))
 	take(c.applyMita(cfg.Mita))
+	applyAcctMarks(c.acctMarks)
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
@@ -198,6 +206,9 @@ func (c *Cores) applyJSON(name, file string, raw json.RawMessage, bin string, pr
 	}
 	c.stopLocked(name)
 	filtered, skipped := dropOccupiedListen(raw)
+	if name == "singbox" {
+		filtered = stripV2RayAPI(filtered)
+	}
 	if len(skipped) > 0 {
 		c.rollbackJSON(name, file, prev, bin, prefix)
 		if !hasCfg(prev) {

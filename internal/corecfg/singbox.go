@@ -37,11 +37,11 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 			outs = append(outs, obs...)
 			continue
 		}
-		if !directThrottle(in) {
+		if !acctProfile(in) {
 			continue
 		}
 		for _, c := range clients[in.ID] {
-			mark, ok := clientSpeedMark(c, speeds)
+			mark, _, ok := clientAcct(in, c)
 			if !ok {
 				continue
 			}
@@ -75,18 +75,18 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 			})
 			continue
 		}
-		if !directThrottle(in) {
+		if !acctProfile(in) {
 			continue
 		}
 		tag := inboundTag(in.ID)
 		for _, c := range clients[in.ID] {
-			mark, ok := clientSpeedMark(c, speeds)
+			mark, email, ok := clientAcct(in, c)
 			if !ok {
 				continue
 			}
 			speedRules = append(speedRules, map[string]any{
 				"inbound":   []string{tag},
-				"auth_user": []string{c.Email},
+				"auth_user": []string{email},
 				"outbound":  limitTag(mark),
 			})
 		}
@@ -108,26 +108,18 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 		"outbounds": outs,
 		"route":     map[string]any{"rules": routeRules, "final": final},
 	}
-	if apiPort > 0 || statsPort > 0 {
-		exp := map[string]any{}
-		if apiPort > 0 {
-			exp["clash_api"] = map[string]any{
+	// Stock sing-box releases are built without with_v2ray_api. Emitting
+	// experimental.v2ray_api makes `sing-box check` fail and rolls the whole
+	// config back, so SOCKS5 stops listening. User bytes are counted from
+	// outbound fwmarks instead.
+	if apiPort > 0 {
+		cfg["experimental"] = map[string]any{
+			"clash_api": map[string]any{
 				"external_controller": fmt.Sprintf("127.0.0.1:%d", apiPort),
-			}
+			},
 		}
-		// sing-box 1.14 clash /connections no longer includes the username.
-		// User counters come from v2ray_api, and only listed names are counted.
-		if statsPort > 0 {
-			exp["v2ray_api"] = map[string]any{
-				"listen": fmt.Sprintf("127.0.0.1:%d", statsPort),
-				"stats": map[string]any{
-					"enabled": true,
-					"users":   singStatUsers(inbounds, clients),
-				},
-			}
-		}
-		cfg["experimental"] = exp
 	}
+	_ = statsPort
 	return cfg, nil
 }
 

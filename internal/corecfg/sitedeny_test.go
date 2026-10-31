@@ -405,16 +405,16 @@ func TestCollectSiteAllowGroups(t *testing.T) {
 		3: {Mode: SiteFilterDeny, Categories: []string{"google"}},
 	}
 	pass, block := collectSiteAllowGroups([]*db.Inbound{in}, map[int64][]*db.Client{7: {c1, c2, c3}}, filters, nil, CoreXray)
-	if len(pass) != 1 {
+	if len(pass) != 2 {
 		t.Fatalf("pass %d %+v", len(pass), pass)
 	}
-	if pass[0].Outbound != "direct" {
-		t.Fatalf("ob %s", pass[0].Outbound)
+	joined := ""
+	for _, g := range pass {
+		if !strings.HasPrefix(g.Outbound, "limit-") {
+			t.Fatalf("ob %s", g.Outbound)
+		}
+		joined += strings.Join(g.Users, ",") + ","
 	}
-	if len(pass[0].Users) != 2 {
-		t.Fatalf("pass users %+v", pass[0].Users)
-	}
-	joined := strings.Join(pass[0].Users, ",")
 	if !strings.Contains(joined, "u1.i7") || !strings.Contains(joined, "u2.i7") || strings.Contains(joined, "u3.i7") {
 		t.Fatalf("users %s", joined)
 	}
@@ -430,15 +430,10 @@ func TestCollectSiteAllowGroups(t *testing.T) {
 	if len(pass) != 2 {
 		t.Fatalf("speed split %d %+v", len(pass), pass)
 	}
-	obs := map[string]int{}
 	for _, g := range pass {
-		obs[g.Outbound]++
-		if g.Outbound != "direct" && !strings.HasPrefix(g.Outbound, "limit-") {
+		if !strings.HasPrefix(g.Outbound, "limit-") {
 			t.Fatalf("outbound %s", g.Outbound)
 		}
-	}
-	if obs["direct"] != 1 || len(obs) != 2 {
-		t.Fatalf("obs %+v", obs)
 	}
 	if len(block) != 1 {
 		t.Fatalf("block after split %+v", block)
@@ -485,7 +480,8 @@ func TestBuildSiteAllowXrayOrder(t *testing.T) {
 			apiAt = i
 			continue
 		}
-		if m["outboundTag"] == "direct" && m["domain"] != nil && passAt < 0 {
+		ob, _ := m["outboundTag"].(string)
+		if strings.HasPrefix(ob, "limit-") && m["domain"] != nil && passAt < 0 {
 			passAt = i
 			passDomains, _ = m["domain"].([]any)
 			continue
@@ -616,7 +612,8 @@ func TestBuildSiteAllowSingbox(t *testing.T) {
 	passAt, blockAt := -1, -1
 	for i, raw := range rules {
 		m, _ := raw.(map[string]any)
-		if m["outbound"] == "direct" && m["domain_suffix"] != nil && passAt < 0 {
+		ob, _ := m["outbound"].(string)
+		if strings.HasPrefix(ob, "limit-") && m["domain_suffix"] != nil && passAt < 0 {
 			passAt = i
 			suf, _ := m["domain_suffix"].([]any)
 			joined := fmtJoin(suf)

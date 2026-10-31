@@ -715,8 +715,8 @@ export default function Nodes() {
                           <Metric label="全站" value={fmtBytes(used)} />
                           <Metric label="实时" stack value={s.online ? (
                             <>
-                              <span className="speed-up">↑ {fmtBps(s.net_up_bps)}</span>
-                              <span className="speed-down">↓ {fmtBps(s.net_down_bps)}</span>
+                              <span className="speed-up">↑ {fmtBps(inb.net_up_bps)}</span>
+                              <span className="speed-down">↓ {fmtBps(inb.net_down_bps)}</span>
                             </>
                           ) : '—'} />
                         </div>

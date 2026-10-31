@@ -77,6 +77,16 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 		all = append(all, samples...)
 		mitaNext, mitaOK = next, true
 	}
+	covered := map[string]struct{}{}
+	for _, s := range all {
+		if s.Email != "" {
+			covered[s.Email] = struct{}{}
+		}
+	}
+	flowSamples, flowNext, portNext, flowOK := c.peekFlows(covered)
+	if flowOK {
+		all = append(all, flowSamples...)
+	}
 	merged := mergeSamples(all)
 	finished := false
 	finish := func(commit bool) {
@@ -99,16 +109,39 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 			if mitaOK {
 				c.mitaLast = mitaNext
 			}
+			if flowOK {
+				c.flowLast = flowNext
+				c.portLast = portNext
+				c.flowAt = time.Now()
+			}
 		}
+		c.pendingPorts = nil
+		c.pendingHasPorts = false
 		c.collectMu.Unlock()
 	}
 	return merged, finish
+}
+
+// TakePorts returns listen-port rates from the open collect. Call it before finish.
+func (c *Cores) TakePorts() ([]wsproto.PortRate, bool) {
+	p, ok := c.pendingPorts, c.pendingHasPorts
+	return p, ok
 }
 
 func (c *Cores) peekXray() ([]wsproto.Sample, map[string]bytePair, bool) {
 	c.mu.Lock()
 	bin, api := c.xrayBin, c.xrayAPI
 	c.mu.Unlock()
+	if api != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
+		rows, err := queryXrayGRPCFn(ctx, api)
+		cancel()
+		if err == nil {
+			deltas, next := mitaDeltas(c.xrayLast, samplesFromStatRows(rows))
+			return deltas, next, true
+		}
+		noteStatsFail("xray", err)
+	}
 	if bin == "" || api == "" {
 		return nil, nil, false
 	}
@@ -146,9 +179,9 @@ func queryXrayUserStats(bin, api string) ([]wsproto.Sample, error) {
 }
 
 func runXrayStatsQuery(bin, api string, pattern bool) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	args := []string{"api", "statsquery", "--server=" + api, "-timeout=3"}
+	args := []string{"api", "statsquery", "--server=" + api, "-timeout=2"}
 	if pattern {
 		args = append(args, "-pattern=user>>>")
 	}
@@ -553,6 +586,38 @@ func classifyMitaPath(path []string) (user, dir string) {
 func isMitaMetricName(s string) bool {
 	l := strings.ToLower(s)
 	return strings.Contains(l, "upload") || strings.Contains(l, "download") || strings.Contains(l, "uplink") || strings.Contains(l, "downlink")
+}
+
+// flowDeltas bills only an increase. Conntrack sums shrink when a flow
+// expires; the remaining bytes were already counted and must not be billed again.
+func flowDeltas(prev map[string]bytePair, cum []wsproto.Sample) ([]wsproto.Sample, map[string]bytePair) {
+	next := map[string]bytePair{}
+	for k, v := range prev {
+		next[k] = v
+	}
+	var out []wsproto.Sample
+	for _, s := range cum {
+		if s.Email == "" {
+			continue
+		}
+		next[s.Email] = bytePair{up: s.Up, down: s.Down}
+		old, ok := prev[s.Email]
+		if !ok {
+			continue
+		}
+		var up, down int64
+		if s.Up >= old.up {
+			up = s.Up - old.up
+		}
+		if s.Down >= old.down {
+			down = s.Down - old.down
+		}
+		if up == 0 && down == 0 {
+			continue
+		}
+		out = append(out, wsproto.Sample{Email: s.Email, Up: up, Down: down})
+	}
+	return out, next
 }
 
 func mitaDeltas(prev map[string]bytePair, cum []wsproto.Sample) ([]wsproto.Sample, map[string]bytePair) {

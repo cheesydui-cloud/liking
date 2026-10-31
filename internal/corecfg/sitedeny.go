@@ -514,11 +514,10 @@ func userOutboundTag(in *db.Inbound, c *db.Client, speeds map[int64]int64) strin
 	if in != nil && in.LineKind == "chain" {
 		return outboundTag(in.ID)
 	}
-	if in != nil && directThrottle(in) {
-		if mark, ok := clientSpeedMark(c, speeds); ok {
-			return limitTag(mark)
-		}
+	if mark, _, ok := clientAcct(in, c); ok {
+		return limitTag(mark)
 	}
+	_ = speeds
 	return "direct"
 }
 

@@ -71,6 +71,11 @@ type RejectCN struct {
 	Allow []string `json:"allow,omitempty"`
 }
 
+type AcctMark struct {
+	Mark  uint32 `json:"mark"`
+	Email string `json:"email"`
+}
+
 type ApplyConfig struct {
 	Rev         string          `json:"rev"`
 	Xray        json.RawMessage `json:"xray,omitempty"`
@@ -79,6 +84,7 @@ type ApplyConfig struct {
 	XrayAPI     string          `json:"xray_api,omitempty"`
 	SingboxAPI  string          `json:"singbox_api,omitempty"`
 	SpeedLimits []SpeedLimit    `json:"speed_limits,omitempty"`
+	AcctMarks   []AcctMark      `json:"acct_marks,omitempty"`
 	DisableIPv6 bool            `json:"disable_ipv6"`
 	RejectCN    RejectCN        `json:"reject_cn"`
 }
@@ -101,8 +107,18 @@ type Stats struct {
 	DiskTotal    int64    `json:"disk_total,omitempty"`
 	MemAvail     int64    `json:"mem_avail,omitempty"`
 	MemTotal     int64    `json:"mem_total,omitempty"`
-	LoadMilli    int64    `json:"load_milli,omitempty"`
-	Conns        int      `json:"conns,omitempty"`
+	LoadMilli    int64      `json:"load_milli,omitempty"`
+	Conns        int        `json:"conns,omitempty"`
+	Ports        []PortRate `json:"ports,omitempty"`
+	HasPorts     bool       `json:"has_ports,omitempty"`
+}
+
+// PortRate is one listen port's realtime speed. It is display-only:
+// the panel must not bill it as a user's traffic.
+type PortRate struct {
+	Port    int   `json:"port"`
+	UpBps   int64 `json:"up_bps"`
+	DownBps int64 `json:"down_bps"`
 }
 
 type Upgrade struct {

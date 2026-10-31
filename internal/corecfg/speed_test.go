@@ -2,6 +2,7 @@ package corecfg
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"liking/internal/db"
@@ -73,7 +74,11 @@ func TestBuildDirectSpeedLimit(t *testing.T) {
 	if len(b.Apply.SpeedLimits) != 1 {
 		t.Fatalf("limits %+v", b.Apply.SpeedLimits)
 	}
-	mark := SpeedMark(u.ID)
+	client, err := db.GetClient(d, created.ID, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mark := AcctMark(client, created.ID)
 	if b.Apply.SpeedLimits[0].Mark != mark || b.Apply.SpeedLimits[0].Mbps != 50 || b.Apply.SpeedLimits[0].KBps != 50*KBpsPerMbps {
 		t.Fatalf("limit %+v mark %d", b.Apply.SpeedLimits[0], mark)
 	}
@@ -223,7 +228,6 @@ func TestBuildChainDoesNotStealSpeed(t *testing.T) {
 	}
 	routing, _ := xray["routing"].(map[string]any)
 	chainTag := inboundTag(createdChain.ID)
-	limitPrefix := limitTag(SpeedMark(u.ID))
 	for _, raw := range routing["rules"].([]any) {
 		m, _ := raw.(map[string]any)
 		tags, _ := m["inboundTag"].([]any)
@@ -231,7 +235,7 @@ func TestBuildChainDoesNotStealSpeed(t *testing.T) {
 			continue
 		}
 		ob, _ := m["outboundTag"].(string)
-		if ob == limitPrefix || ob == "direct" {
+		if strings.HasPrefix(ob, "limit-") || ob == "direct" {
 			t.Fatalf("chain inbound stolen: %+v", m)
 		}
 		if _, ok := m["user"]; ok {
@@ -298,7 +302,11 @@ func TestBuildSingboxSpeedLimit(t *testing.T) {
 	if len(b.Apply.Singbox) == 0 {
 		t.Fatal("singbox")
 	}
-	mark := SpeedMark(u.ID)
+	client, err := db.GetClient(d, created.ID, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mark := AcctMark(client, created.ID)
 	if len(b.Apply.SpeedLimits) != 1 || b.Apply.SpeedLimits[0].Mark != mark || b.Apply.SpeedLimits[0].Mbps != 20 || b.Apply.SpeedLimits[0].KBps != 20*KBpsPerMbps {
 		t.Fatalf("limits %+v", b.Apply.SpeedLimits)
 	}

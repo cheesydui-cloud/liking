@@ -52,9 +52,12 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 			})
 			continue
 		}
-		if directThrottle(in) {
+		// Each direct user gets a marked freedom outbound. The mark is how the
+		// agent attributes bytes when the stats API returns nothing. Speed
+		// limits reuse the same mark; unlimited users are not dropped.
+		if acctProfile(in) {
 			for _, c := range clients[in.ID] {
-				mark, ok := clientSpeedMark(c, speeds)
+				mark, email, ok := clientAcct(in, c)
 				if !ok {
 					continue
 				}
@@ -65,7 +68,7 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 				speedRules = append(speedRules, map[string]any{
 					"type":        "field",
 					"inboundTag":  []string{tag},
-					"user":        []string{c.Email},
+					"user":        []string{email},
 					"outboundTag": limitTag(mark),
 				})
 			}

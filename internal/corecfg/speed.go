@@ -98,8 +98,8 @@ func collectSpeedLimits(ins []*db.Inbound, clients map[int64][]*db.Client, speed
 			if kbps < 1 {
 				continue
 			}
-			mark := SpeedMark(c.UserID)
-			if mark == 0 {
+			mark, _, ok := clientAcct(in, c)
+			if !ok {
 				continue
 			}
 			byMark[mark] = kbps

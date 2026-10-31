@@ -70,6 +70,15 @@ func (s *Server) handleListInbounds(w http.ResponseWriter, r *http.Request) {
 			m["used_up"] = t.Up
 			m["used_down"] = t.Down
 		}
+		if s.Hub != nil {
+			if up, down, ok := s.Hub.PortLive(in.ServerID, in.Port); ok {
+				m["net_up_bps"] = up
+				m["net_down_bps"] = down
+			} else if up, down, ok := s.Hub.InboundUserLive(in.ID); ok {
+				m["net_up_bps"] = up
+				m["net_down_bps"] = down
+			}
+		}
 		out = append(out, m)
 	}
 	jsonOK(w, map[string]any{"inbounds": out})

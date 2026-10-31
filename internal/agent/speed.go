@@ -11,7 +11,10 @@ import (
 	"liking/internal/wsproto"
 )
 
-const nftSpeedTableName = "liking_speed"
+const (
+	nftSpeedTableName = "liking_speed"
+	nftAcctTableName  = "liking_acct"
+)
 
 func nftMbpsToKBps(mbps int64) int64 {
 	if mbps < 1 {
@@ -80,6 +83,55 @@ func lookNft() string {
 		}
 	}
 	return ""
+}
+
+func nftAcctTable(marks []wsproto.AcctMark) string {
+	seen := map[uint32]struct{}{}
+	var rules strings.Builder
+	n := 0
+	for _, m := range marks {
+		if m.Mark == 0 {
+			continue
+		}
+		if _, ok := seen[m.Mark]; ok {
+			continue
+		}
+		seen[m.Mark] = struct{}{}
+		n++
+		fmt.Fprintf(&rules, "    meta mark 0x%08x ct mark set meta mark\n", m.Mark)
+	}
+	if n == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("table inet ")
+	b.WriteString(nftAcctTableName)
+	b.WriteString(" {\n  chain output {\n")
+	b.WriteString("    type filter hook output priority -10; policy accept;\n")
+	b.WriteString(rules.String())
+	b.WriteString("  }\n}\n")
+	return b.String()
+}
+
+func applyAcctMarks(marks []wsproto.AcctMark) {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	nft := lookNft()
+	if nft == "" {
+		return
+	}
+	_ = exec.Command(nft, "delete", "table", "inet", nftAcctTableName).Run()
+	body := nftAcctTable(marks)
+	if body == "" {
+		return
+	}
+	cmd := exec.Command(nft, "-f", "-")
+	cmd.Stdin = strings.NewReader(body)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("agent: nft 计数标记失败: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
 }
 
 func applySpeedLimits(limits []wsproto.SpeedLimit) {

@@ -2,6 +2,7 @@ package corecfg
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"liking/internal/db"
@@ -26,17 +27,23 @@ func TestSingboxV2RayStatsUsers(t *testing.T) {
 		t.Fatal(err)
 	}
 	exp, _ := cfg["experimental"].(map[string]any)
-	v2, _ := exp["v2ray_api"].(map[string]any)
-	if v2["listen"] != "127.0.0.1:60191" {
-		t.Fatalf("listen %v", v2["listen"])
+	if _, ok := exp["v2ray_api"]; ok {
+		t.Fatalf("stock sing-box rejects v2ray_api: %+v", exp["v2ray_api"])
 	}
-	stats, _ := v2["stats"].(map[string]any)
-	if stats["enabled"] != true {
-		t.Fatal("stats not enabled")
+	rawExp, _ := json.Marshal(exp)
+	if strings.Contains(string(rawExp), "v2ray_api") {
+		t.Fatalf("v2ray_api still present: %s", rawExp)
 	}
-	users, _ := stats["users"].([]string)
-	if len(users) != 3 || users[0] != "neo" || users[1] != "u3.i7" || users[2] != "u5.i8" {
-		t.Fatalf("users %#v", users)
+	var users []string
+	for _, raw := range cfg["outbounds"].([]any) {
+		ob, _ := raw.(map[string]any)
+		if ob["routing_mark"] == nil {
+			continue
+		}
+		users = append(users, ob["tag"].(string))
+	}
+	if len(users) != 3 {
+		t.Fatalf("marked outbounds %#v", users)
 	}
 	raw, err := json.Marshal(cfg)
 	if err != nil {

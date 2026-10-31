@@ -99,6 +99,7 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 		b.Apply.Mita = raw
 	}
 	b.Apply.SpeedLimits = collectSpeedLimits(ins, clients, speeds)
+	b.Apply.AcctMarks = collectAcctMarks(ins, clients)
 	b.Apply.DisableIPv6 = srv.DisableIPv6
 	b.Apply.RejectCN = CollectRejectCN(d, serverID, all)
 	sum := sha256.New()
@@ -106,6 +107,9 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 	sum.Write(b.Apply.Singbox)
 	sum.Write(b.Apply.Mita)
 	if raw, err := json.Marshal(b.Apply.SpeedLimits); err == nil {
+		sum.Write(raw)
+	}
+	if raw, err := json.Marshal(b.Apply.AcctMarks); err == nil {
 		sum.Write(raw)
 	}
 	if srv.DisableIPv6 {

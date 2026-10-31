@@ -14,7 +14,10 @@ import (
 	"golang.org/x/net/http2"
 )
 
-const v2rayStatsPath = "/v2ray.core.app.stats.command.StatsService/QueryStats"
+const (
+	v2rayStatsPath = "/v2ray.core.app.stats.command.StatsService/QueryStats"
+	xrayStatsPath  = "/xray.app.stats.command.StatsService/QueryStats"
+)
 
 // queryV2RayStatsFn is replaced in tests. Production queries sing-box
 // experimental.v2ray_api over h2c. xray api statsquery cannot speak this
@@ -22,7 +25,17 @@ const v2rayStatsPath = "/v2ray.core.app.stats.command.StatsService/QueryStats"
 // would otherwise drop the interval.
 var queryV2RayStatsFn = queryV2RayStats
 
+var queryXrayGRPCFn = queryXrayGRPC
+
+func queryXrayGRPC(ctx context.Context, addr string) ([]statRow, error) {
+	return queryStatsService(ctx, addr, xrayStatsPath)
+}
+
 func queryV2RayStats(ctx context.Context, addr string) ([]statRow, error) {
+	return queryStatsService(ctx, addr, v2rayStatsPath)
+}
+
+func queryStatsService(ctx context.Context, addr, path string) ([]statRow, error) {
 	tr := &http2.Transport{
 		AllowHTTP: true,
 		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
@@ -31,7 +44,7 @@ func queryV2RayStats(ctx context.Context, addr string) ([]statRow, error) {
 		},
 	}
 	defer tr.CloseIdleConnections()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+addr+v2rayStatsPath, bytes.NewReader([]byte{0, 0, 0, 0, 0}))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+addr+path, bytes.NewReader([]byte{0, 0, 0, 0, 0}))
 	if err != nil {
 		return nil, err
 	}

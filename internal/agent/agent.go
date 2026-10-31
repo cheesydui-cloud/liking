@@ -234,6 +234,7 @@ func (a *Agent) session(ctx context.Context) error {
 			}
 		case <-stats.C:
 			samples, finishStats := a.cores.BeginCollect()
+			ports, hasPorts := a.cores.TakePorts()
 			up, down, hasNet := snapshotNet()
 			diskFree, diskTotal := snapshotDisk()
 			memAvail, memTotal := snapshotMem()
@@ -250,6 +251,8 @@ func (a *Agent) session(ctx context.Context) error {
 				MemTotal:     memTotal,
 				LoadMilli:    snapshotLoadMilli(),
 				Conns:        countEstablished(a.cores.ListenPorts()),
+				Ports:        ports,
+				HasPorts:     hasPorts,
 			})
 			if err := a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeStats, Payload: st}); err != nil {
 				finishStats(false)

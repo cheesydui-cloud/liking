@@ -56,6 +56,14 @@ type Hub struct {
 	userLiveMu sync.Mutex
 	userParts  map[int64]map[int64]userLivePart // userID -> inboundID -> bps
 	userPartAt map[int64]time.Time              // serverID -> last stats time
+
+	portMu sync.Mutex
+	ports  map[int64]map[int]portLive // serverID -> listen port -> bps
+	portAt map[int64]time.Time
+}
+
+type portLive struct {
+	up, down int64
 }
 
 // userLiveTTL is how long a per-server live sample stays visible after the last
@@ -292,6 +300,7 @@ func (h *Hub) readerLoop(parent context.Context, ac *agentConn) {
 				_ = db.SetServerCores(h.DB, ac.serverID, st.Cores)
 			}
 			h.noteLive(ac, st)
+			h.notePorts(ac.serverID, st)
 			h.applyStats(ac.serverID, st.Samples)
 		case wsproto.TypeApplyAck, wsproto.TypeHelloAck, wsproto.TypeUpgradeAck, wsproto.TypeUninstallAck, wsproto.TypeEnsureCoreAck, wsproto.TypeRemoveCoreAck, wsproto.TypeProbeAck, wsproto.TypeKickAck, wsproto.TypeEnsureNFTAck, wsproto.TypeAllowPortAck:
 			ac.dispatchAck(env)
@@ -650,7 +659,69 @@ func (h *Hub) pruneUserLiveLocked(now time.Time) {
 	}
 }
 
+func (h *Hub) notePorts(serverID int64, st wsproto.Stats) {
+	if !st.HasPorts {
+		return
+	}
+	now := time.Now()
+	h.portMu.Lock()
+	defer h.portMu.Unlock()
+	if h.ports == nil {
+		h.ports = map[int64]map[int]portLive{}
+	}
+	if h.portAt == nil {
+		h.portAt = map[int64]time.Time{}
+	}
+	m := map[int]portLive{}
+	for _, p := range st.Ports {
+		if p.Port <= 0 {
+			continue
+		}
+		m[p.Port] = portLive{up: p.UpBps, down: p.DownBps}
+	}
+	h.ports[serverID] = m
+	h.portAt[serverID] = now
+}
+
+func (h *Hub) PortLive(serverID int64, port int) (up, down int64, ok bool) {
+	h.portMu.Lock()
+	defer h.portMu.Unlock()
+	at := h.portAt[serverID]
+	if at.IsZero() || time.Since(at) > userLiveTTL {
+		return 0, 0, false
+	}
+	p, ok := h.ports[serverID][port]
+	if !ok {
+		return 0, 0, false
+	}
+	return p.up, p.down, true
+}
+
+func (h *Hub) InboundUserLive(inboundID int64) (up, down int64, ok bool) {
+	h.userLiveMu.Lock()
+	defer h.userLiveMu.Unlock()
+	h.pruneUserLiveLocked(time.Now())
+	for _, parts := range h.userParts {
+		p, exists := parts[inboundID]
+		if !exists {
+			continue
+		}
+		up += p.up
+		down += p.down
+		ok = true
+	}
+	return
+}
+
+func (h *Hub) clearPortLive(serverID int64) {
+	h.portMu.Lock()
+	delete(h.ports, serverID)
+	delete(h.portAt, serverID)
+	h.portMu.Unlock()
+}
+
 func (h *Hub) clearUserLive(serverID int64) {
+	h.clearPortLive(serverID)
 	h.userLiveMu.Lock()
 	defer h.userLiveMu.Unlock()
 	delete(h.userPartAt, serverID)
@@ -671,6 +742,10 @@ func (h *Hub) clearAllUserLive() {
 	h.userParts = nil
 	h.userPartAt = nil
 	h.userLiveMu.Unlock()
+	h.portMu.Lock()
+	h.ports = nil
+	h.portAt = nil
+	h.portMu.Unlock()
 }
 
 func (h *Hub) UserLive(id int64) (up, down int64, ok bool) {
