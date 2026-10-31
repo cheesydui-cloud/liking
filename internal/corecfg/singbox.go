@@ -95,6 +95,9 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 	routeRules = append(routeRules, singSiteAllowBlockRules(block)...)
 	routeRules = append(routeRules, chainRules...)
 	routeRules = append(routeRules, speedRules...)
+	// sing-box 1.13 删除了入站上的 sniff。嗅探必须是路由动作，并且排在域名规则前面。
+	// 不改写目标地址，与旧的 sniff_override_destination: false 相同。
+	routeRules = append([]any{map[string]any{"action": "sniff"}}, routeRules...)
 	final := "direct"
 
 	cfg := map[string]any{
@@ -158,14 +161,12 @@ func singInbound(in *db.Inbound, clients []*db.Client, certs map[int64]*db.Certi
 		tls["server_name"] = sni
 	}
 	return map[string]any{
-		"type":                       "anytls",
-		"tag":                        inboundTag(in.ID),
-		"listen":                     in.Listen,
-		"listen_port":                in.Port,
-		"users":                      users,
-		"tls":                        tls,
-		"sniff":                      true,
-		"sniff_override_destination": false,
+		"type":        "anytls",
+		"tag":         inboundTag(in.ID),
+		"listen":      in.Listen,
+		"listen_port": in.Port,
+		"users":       users,
+		"tls":         tls,
 	}, nil
 }
 
@@ -197,13 +198,11 @@ func singSocksInbound(in *db.Inbound, clients []*db.Client, byID map[int64]*db.I
 		users = []any{map[string]any{"username": "hold", "password": "hold"}}
 	}
 	return map[string]any{
-		"type":                       "socks",
-		"tag":                        inboundTag(in.ID),
-		"listen":                     in.Listen,
-		"listen_port":                in.Port,
-		"users":                      users,
-		"sniff":                      true,
-		"sniff_override_destination": false,
+		"type":        "socks",
+		"tag":         inboundTag(in.ID),
+		"listen":      in.Listen,
+		"listen_port": in.Port,
+		"users":       users,
 	}, nil
 }
 

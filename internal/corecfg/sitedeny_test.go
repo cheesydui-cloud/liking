@@ -285,26 +285,33 @@ func TestBuildSiteDenySingbox(t *testing.T) {
 	if err := json.Unmarshal(b.Apply.Singbox, &sb); err != nil {
 		t.Fatal(err)
 	}
-	foundSniff := false
+	foundInbound := false
 	for _, raw := range sb["inbounds"].([]any) {
 		m := raw.(map[string]any)
 		if m["tag"] != inboundTag(in.ID) {
 			continue
 		}
-		if m["sniff"] != true || m["sniff_override_destination"] != false {
-			t.Fatalf("sniff %+v", m)
+		if _, ok := m["sniff"]; ok {
+			t.Fatalf("legacy sniff %+v", m)
 		}
-		foundSniff = true
+		if _, ok := m["sniff_override_destination"]; ok {
+			t.Fatalf("legacy sniff override %+v", m)
+		}
+		foundInbound = true
 	}
-	if !foundSniff {
-		t.Fatal("socks sniff")
+	if !foundInbound {
+		t.Fatal("socks inbound")
 	}
 	route, _ := sb["route"].(map[string]any)
 	rules, _ := route["rules"].([]any)
-	if len(rules) == 0 {
+	if len(rules) < 2 {
 		t.Fatal("no rules")
 	}
-	first, _ := rules[0].(map[string]any)
+	sniff, _ := rules[0].(map[string]any)
+	if sniff["action"] != "sniff" || len(sniff) != 1 {
+		t.Fatalf("sniff %+v", sniff)
+	}
+	first, _ := rules[1].(map[string]any)
 	if first["action"] != "reject" {
 		t.Fatalf("first %+v", first)
 	}
