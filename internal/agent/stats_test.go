@@ -176,6 +176,31 @@ func TestBeginCollectClashFallback(t *testing.T) {
 	}
 }
 
+func TestClashChainAttributesWithoutUsername(t *testing.T) {
+	raw := []byte(`{"connections":[
+		{"id":"a","upload":40,"download":80,"chains":["limit-1275068425"],"metadata":{}},
+		{"id":"b","upload":5,"download":6,"chains":["direct"],"metadata":{}}
+	]}`)
+	conns := fillClashUsers(parseClashConnections(raw), map[uint32]string{0x4c000009: "u1.i2"})
+	if len(conns) != 2 {
+		t.Fatalf("conns %d", len(conns))
+	}
+	if conns[0].User != "u1.i2" || conns[1].User != "" {
+		t.Fatalf("users %+v %+v", conns[0].User, conns[1].User)
+	}
+	_, next := clashDeltas(nil, conns, time.Now())
+	samples, _ := clashDeltas(next, conns, time.Now().Add(5*time.Second))
+	if len(samples) != 0 {
+		t.Fatalf("unchanged connection billed %+v", samples)
+	}
+	conns[0].Up = 140
+	conns[0].Down = 280
+	samples, _ = clashDeltas(next, conns, time.Now().Add(5*time.Second))
+	if len(samples) != 1 || samples[0].Email != "u1.i2" || samples[0].Up != 100 || samples[0].Down != 200 {
+		t.Fatalf("chain sample %+v", samples)
+	}
+}
+
 func TestParseClashAndDeltas(t *testing.T) {
 	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
 	raw := []byte(`{"connections":[

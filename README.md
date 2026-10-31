@@ -56,7 +56,7 @@ liking-upgrade
 指定版本：
 
 ```bash
-liking-upgrade --release v0.2.41
+liking-upgrade --release v0.2.42
 ```
 
 只更新安装脚本本身：

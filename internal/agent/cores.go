@@ -472,9 +472,37 @@ func rotateLog(path string) {
 	_ = os.Rename(path, path+".1")
 }
 
+// coreEnv is the process environment for a core we start.
+// Xray Vision splices the download in the kernel. user>>>downlink then
+// stays at the handshake size until the TCP connection closes, while the
+// listen socket's byte counters keep growing. The node card moves and the
+// user card stays at 0 B/s for the whole download. Userspace copy updates
+// that counter as bytes pass. A parent env that turns splice back on is
+// dropped; Go keeps the first value of a repeated key.
+func coreEnv(name string) []string {
+	drop := map[string]struct{}{}
+	if name == "xray" {
+		drop["xray.buf.splice"] = struct{}{}
+		drop["XRAY_BUF_SPLICE"] = struct{}{}
+	}
+	env := make([]string, 0, len(os.Environ())+2)
+	for _, e := range os.Environ() {
+		k, _, _ := strings.Cut(e, "=")
+		if _, skip := drop[k]; skip {
+			continue
+		}
+		env = append(env, e)
+	}
+	env = append(env, "GOMEMLIMIT=256MiB")
+	if name == "xray" {
+		env = append(env, "xray.buf.splice=false")
+	}
+	return env
+}
+
 func (c *Cores) startLocked(name, bin string, args []string) error {
 	cmd := exec.Command(bin, args...)
-	cmd.Env = append(os.Environ(), "GOMEMLIMIT=256MiB")
+	cmd.Env = coreEnv(name)
 	logPath := filepath.Join(c.dir, name+".log")
 	rotateLog(logPath)
 	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)

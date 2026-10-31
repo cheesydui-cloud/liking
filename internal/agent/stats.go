@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,11 +34,12 @@ type clashSnap struct {
 }
 
 type clashConn struct {
-	ID    string
-	User  string
-	Up    int64
-	Down  int64
-	Start time.Time
+	ID     string
+	User   string
+	Up     int64
+	Down   int64
+	Start  time.Time
+	Chains []string
 }
 
 func (c *Cores) Collect() []wsproto.Sample {
@@ -300,6 +302,7 @@ func noteStatsFail(core string, err error) {
 func (c *Cores) peekClash() ([]wsproto.Sample, map[string]clashSnap, map[string]struct{}, bool) {
 	c.mu.Lock()
 	api := c.singboxAPI
+	emails := acctEmailMap(c.acctMarks)
 	c.mu.Unlock()
 	if api == "" {
 		return nil, nil, nil, false
@@ -322,7 +325,7 @@ func (c *Cores) peekClash() ([]wsproto.Sample, map[string]clashSnap, map[string]
 	if err != nil {
 		return nil, nil, nil, false
 	}
-	conns := parseClashConnections(raw)
+	conns := fillClashUsers(parseClashConnections(raw), emails)
 	samples, next := clashDeltas(c.clashLast, conns, time.Now())
 	tracked := map[string]struct{}{}
 	for _, conn := range conns {
@@ -434,13 +437,25 @@ func samplesFromStatRows(rows []statRow) []wsproto.Sample {
 	return out
 }
 
+func acctEmailMap(marks []wsproto.AcctMark) map[uint32]string {
+	out := map[uint32]string{}
+	for _, m := range marks {
+		if m.Mark == 0 || m.Email == "" {
+			continue
+		}
+		out[m.Mark] = m.Email
+	}
+	return out
+}
+
 func parseClashConnections(raw []byte) []clashConn {
 	var payload struct {
 		Connections []struct {
-			ID       string `json:"id"`
-			Upload   any    `json:"upload"`
-			Download any    `json:"download"`
-			Start    string `json:"start"`
+			ID       string   `json:"id"`
+			Upload   any      `json:"upload"`
+			Download any      `json:"download"`
+			Start    string   `json:"start"`
+			Chains   []string `json:"chains"`
 			Metadata struct {
 				User string `json:"user"`
 			} `json:"metadata"`
@@ -452,18 +467,60 @@ func parseClashConnections(raw []byte) []clashConn {
 	var out []clashConn
 	for _, row := range payload.Connections {
 		user := strings.TrimSpace(row.Metadata.User)
-		if row.ID == "" || user == "" {
+		if row.ID == "" || (user == "" && len(row.Chains) == 0) {
 			continue
 		}
 		out = append(out, clashConn{
-			ID:    row.ID,
-			User:  user,
-			Up:    anyInt(row.Upload),
-			Down:  anyInt(row.Download),
-			Start: parseClashStart(row.Start),
+			ID:     row.ID,
+			User:   user,
+			Up:     anyInt(row.Upload),
+			Down:   anyInt(row.Download),
+			Start:  parseClashStart(row.Start),
+			Chains: row.Chains,
 		})
 	}
 	return out
+}
+
+// fillClashUsers names a connection from its outbound tag when the clash
+// JSON has no username. Official sing-box omits metadata.user. The tag we
+// write is limit-<mark>, and that mark is already mapped to the client email.
+func fillClashUsers(conns []clashConn, emails map[uint32]string) []clashConn {
+	if len(emails) == 0 {
+		return conns
+	}
+	for i := range conns {
+		if conns[i].User != "" {
+			continue
+		}
+		conns[i].User = emailFromChains(conns[i].Chains, emails)
+	}
+	return conns
+}
+
+func emailFromChains(chains []string, emails map[uint32]string) string {
+	for _, tag := range chains {
+		mark, ok := markFromLimitTag(tag)
+		if !ok {
+			continue
+		}
+		if email := emails[mark]; email != "" {
+			return email
+		}
+	}
+	return ""
+}
+
+func markFromLimitTag(tag string) (uint32, bool) {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(tag), "limit-")
+	if !ok || rest == "" {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(rest, 10, 32)
+	if err != nil || n == 0 {
+		return 0, false
+	}
+	return uint32(n), true
 }
 
 func parseClashStart(s string) time.Time {

@@ -138,6 +138,57 @@ func TestFlowCumulUsesSocketMarkWhenConntrackUnmarked(t *testing.T) {
 	}
 }
 
+func TestFlowCumulAttributesUnmarkedConntrackBySocket(t *testing.T) {
+	mark, ok := parseMark("0x4c000009")
+	if !ok {
+		t.Fatal("mark")
+	}
+	// Listen port has bytes and no user. Outbound UDP has fwmark on ss and
+	// bytes only in conntrack, with mark=0. That is the node-moves,
+	// user-card-stays-0 split for UDP and for a failed nft copy.
+	src := flowSources{
+		conntrack: strings.Join([]string{
+			"ipv4 2 udp 17 30 src=1.2.3.4 dst=10.0.0.5 sport=1111 dport=1080 packets=1 bytes=5000 src=10.0.0.5 dst=1.2.3.4 sport=1080 dport=1111 packets=1 bytes=8000 mark=0",
+			"ipv4 2 udp 17 30 src=10.0.0.5 dst=9.9.9.9 sport=40000 dport=443 packets=1 bytes=2000 src=9.9.9.9 dst=10.0.0.5 sport=443 dport=40000 packets=1 bytes=9000 mark=0",
+			"ipv4 2 tcp 6 100 ESTABLISHED src=10.0.0.5 dst=8.8.8.8 sport=50000 dport=443 packets=1 bytes=3000 src=8.8.8.8 dst=10.0.0.5 sport=443 dport=50000 packets=1 bytes=7000 mark=0",
+		}, "\n"),
+		ss: strings.Join([]string{
+			"udp UNCONN 0 0 10.0.0.5:40000 9.9.9.9:443 fwmark:0x4c000009",
+			"tcp ESTAB 0 0 10.0.0.5:50000 8.8.8.8:443 fwmark:0x4c000009",
+		}, "\n"),
+		local: map[string]struct{}{"10.0.0.5": {}},
+	}
+	ports, byEmail, ok := flowCumul(src, map[int]struct{}{1080: {}}, map[uint32]string{mark: "u1.i2"})
+	if !ok {
+		t.Fatal("read")
+	}
+	if ports[1080].up != 5000 || ports[1080].down != 8000 {
+		t.Fatalf("listen port %+v", ports[1080])
+	}
+	if byEmail["u1.i2"].up != 5000 || byEmail["u1.i2"].down != 16000 {
+		t.Fatalf("user %+v", byEmail["u1.i2"])
+	}
+}
+
+func TestFlowCumulDoesNotSumJoinedMark(t *testing.T) {
+	mark, ok := parseMark("0x4c000009")
+	if !ok {
+		t.Fatal("mark")
+	}
+	src := flowSources{
+		conntrack: "ipv4 2 tcp 6 1 ESTABLISHED src=10.0.0.5 dst=9.9.9.9 sport=50000 dport=443 packets=1 bytes=2000 src=9.9.9.9 dst=10.0.0.5 sport=443 dport=50000 packets=1 bytes=9000 mark=1275068425",
+		ss:        "tcp ESTAB 0 0 10.0.0.5:50000 9.9.9.9:443 fwmark:0x4c000009\n\tcubic bytes_sent:1500 bytes_received:8000\n",
+		local:     map[string]struct{}{"10.0.0.5": {}},
+	}
+	_, byEmail, ok := flowCumul(src, nil, map[uint32]string{mark: "u1.i2"})
+	if !ok {
+		t.Fatal("read")
+	}
+	if byEmail["u1.i2"].up != 2000 || byEmail["u1.i2"].down != 9000 {
+		t.Fatalf("joined mark summed %+v", byEmail["u1.i2"])
+	}
+}
+
 func TestFlowCumulDoesNotSumBothMarks(t *testing.T) {
 	mark, ok := parseMark("0x4c000009")
 	if !ok {

@@ -15,6 +15,29 @@ import (
 	"liking/internal/wsproto"
 )
 
+func TestXrayEnvDisablesSplice(t *testing.T) {
+	t.Setenv("xray.buf.splice", "enable")
+	t.Setenv("XRAY_BUF_SPLICE", "enable")
+	env := coreEnv("xray")
+	n := 0
+	for _, e := range env {
+		if e == "xray.buf.splice=false" {
+			n++
+		}
+		if e == "xray.buf.splice=enable" || e == "XRAY_BUF_SPLICE=enable" {
+			t.Fatalf("parent splice flag leaked: %s", e)
+		}
+	}
+	if n != 1 {
+		t.Fatalf("splice flag count %d", n)
+	}
+	for _, e := range coreEnv("singbox") {
+		if strings.Contains(e, "splice") {
+			t.Fatalf("sing-box env %s", e)
+		}
+	}
+}
+
 func TestKnownAgentCoreAndRemoveUnknown(t *testing.T) {
 	if !knownAgentCore("sing-box") || !knownAgentCore("Mita") || knownAgentCore("clash") {
 		t.Fatal("known")

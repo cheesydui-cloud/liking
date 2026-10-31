@@ -286,6 +286,213 @@ func parseSS(text string, listen map[int]struct{}) (ports map[int]bytePair, mark
 	return ports, marks
 }
 
+type flowKey struct {
+	src, dst     string
+	sport, dport int
+}
+
+type markedSock struct {
+	key  flowKey
+	mark uint32
+}
+
+type ctFlow struct {
+	key      flowKey
+	up, down int64
+}
+
+// attributeMarkedFlows bills conntrack bytes to the fwmark on the matching
+// outbound socket. nf_conntrack mark is a different field and stays 0 when
+// nft did not copy SO_MARK. ss still prints that fwmark. UDP has no
+// bytes_sent line, so the mark alone used to bill nothing while the listen
+// port's conntrack row kept the node card moving.
+func attributeMarkedFlows(conntrack, ssText string, listen map[int]struct{}) map[uint32]bytePair {
+	if !strings.Contains(conntrack, "bytes=") {
+		return nil
+	}
+	socks := parseSSMarkedSockets(ssText)
+	if len(socks) == 0 {
+		return nil
+	}
+	byKey := map[flowKey]uint32{}
+	for _, s := range socks {
+		if s.mark == 0 || s.key.sport <= 0 || s.key.dport <= 0 || s.key.src == "" || s.key.dst == "" {
+			continue
+		}
+		if _, inbound := listen[s.key.sport]; inbound {
+			continue
+		}
+		byKey[s.key] = s.mark
+	}
+	if len(byKey) == 0 {
+		return nil
+	}
+	out := map[uint32]bytePair{}
+	for _, f := range parseConntrackFlows(conntrack) {
+		mark, ok := byKey[f.key]
+		if !ok || (f.up == 0 && f.down == 0) {
+			continue
+		}
+		a := out[mark]
+		a.up += f.up
+		a.down += f.down
+		out[mark] = a
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func parseConntrackFlows(text string) []ctFlow {
+	var out []ctFlow
+	for _, line := range strings.Split(text, "\n") {
+		f, ok := parseConntrackFlow(line)
+		if ok {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func parseConntrackFlow(line string) (ctFlow, bool) {
+	var src, dst string
+	var sport, dport int
+	var up, down int64
+	var hasBytes bool
+	srcN := 0
+	for _, f := range strings.Fields(line) {
+		k, v, ok := strings.Cut(f, "=")
+		if !ok {
+			continue
+		}
+		switch k {
+		case "src":
+			srcN++
+			if srcN == 1 {
+				src = v
+			}
+		case "dst":
+			if srcN == 1 && dst == "" {
+				dst = v
+			}
+		case "sport":
+			if srcN == 1 && sport == 0 {
+				sport, _ = strconv.Atoi(v)
+			}
+		case "dport":
+			if srcN == 1 && dport == 0 {
+				dport, _ = strconv.Atoi(v)
+			}
+		case "bytes":
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n < 0 {
+				continue
+			}
+			hasBytes = true
+			if srcN <= 1 {
+				up = n
+			} else if down == 0 {
+				down = n
+			}
+		}
+	}
+	if !hasBytes || sport <= 0 || dport <= 0 {
+		return ctFlow{}, false
+	}
+	srcIP, ok1 := normIP(src)
+	dstIP, ok2 := normIP(dst)
+	if !ok1 || !ok2 {
+		return ctFlow{}, false
+	}
+	return ctFlow{key: flowKey{src: srcIP, dst: dstIP, sport: sport, dport: dport}, up: up, down: down}, true
+}
+
+// parseSSMarkedSockets keeps a header fwmark for the socket's address pair.
+// iproute2 prints the mark on the socket line. A later indented line may
+// carry the mark instead; the address stays on the socket line.
+func parseSSMarkedSockets(text string) []markedSock {
+	var out []markedSock
+	var key flowKey
+	var keyOK, headHas bool
+	var headMark uint32
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if line[0] != ' ' && line[0] != '\t' {
+			key, keyOK = ssFlowKey(line)
+			_, _, mark, has := parseSSDetail(line)
+			headMark, headHas = 0, false
+			if has {
+				headMark, headHas = mark, true
+				if keyOK {
+					out = append(out, markedSock{key: key, mark: mark})
+				}
+			}
+			continue
+		}
+		_, _, mark, has := parseSSDetail(line)
+		if !has && headHas {
+			mark, has = headMark, true
+		}
+		if has && keyOK && !headHas {
+			out = append(out, markedSock{key: key, mark: mark})
+		}
+	}
+	return out
+}
+
+func ssFlowKey(line string) (flowKey, bool) {
+	var addrs []string
+	for _, f := range strings.Fields(line) {
+		if !strings.Contains(f, ":") || strings.Contains(f, "=") || strings.Contains(f, "(") {
+			continue
+		}
+		addrs = append(addrs, f)
+		if len(addrs) == 2 {
+			break
+		}
+	}
+	if len(addrs) < 2 {
+		return flowKey{}, false
+	}
+	src, sport, ok1 := splitIPPort(addrs[0])
+	dst, dport, ok2 := splitIPPort(addrs[1])
+	if !ok1 || !ok2 {
+		return flowKey{}, false
+	}
+	return flowKey{src: src, dst: dst, sport: sport, dport: dport}, true
+}
+
+func splitIPPort(s string) (string, int, bool) {
+	host, port, err := net.SplitHostPort(s)
+	if err != nil {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n <= 0 || n > 65535 {
+		return "", 0, false
+	}
+	ip, ok := normIP(host)
+	if !ok || ip == "" || ip == "::" || ip == "0.0.0.0" {
+		return "", 0, false
+	}
+	return ip, n, true
+}
+
+func normIP(s string) (string, bool) {
+	s = strings.Trim(strings.TrimSpace(s), "[]")
+	if s == "" || s == "*" {
+		return "", false
+	}
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return "", false
+	}
+	return ip.String(), true
+}
+
 func addSSMark(marks map[uint32]bytePair, mark uint32, sent, recv int64) {
 	if mark == 0 || (sent == 0 && recv == 0) {
 		return
@@ -350,7 +557,11 @@ func flowCumul(src flowSources, listen map[int]struct{}, emails map[uint32]strin
 	if !ok {
 		return nil, nil, false
 	}
-	for mark, b := range mergeMarkBytes(ctMarks, ssMarks) {
+	// Conntrack mark stays 0 unless nft copied SO_MARK, and UDP sockets have
+	// no tcpinfo byte counters. Listen-port rows still have bytes, so the
+	// node card moves. Join the socket fwmark to those flows by address.
+	joined := attributeMarkedFlows(src.conntrack, src.ss, listen)
+	for mark, b := range mergeMarkBytes(mergeMarkBytes(ctMarks, ssMarks), joined) {
 		email := emails[mark]
 		if email == "" || (b.up == 0 && b.down == 0) {
 			continue
