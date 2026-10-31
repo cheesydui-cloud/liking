@@ -41,6 +41,13 @@ func TestBytesContainVersion(t *testing.T) {
 	if bytesContainVersion(blob, "0.2.23") {
 		t.Fatal("missing")
 	}
+	// v0.3.0's agent contained this shape: the only "0.3.0" was glued to "sse2".
+	if bytesContainVersion([]byte("sse20.3.0token<nil>"), "0.3.0") {
+		t.Fatal("glued bare version must not count")
+	}
+	if !bytesContainVersion([]byte("sse2liking-version=0.3.1token"), "0.3.1") {
+		t.Fatal("marker must count when glued to the previous string")
+	}
 }
 
 func TestAgentBinaryHasVersion(t *testing.T) {

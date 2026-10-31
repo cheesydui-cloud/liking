@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"liking/internal/version"
 )
 
 // agentBinDownloadURL is relative on purpose. Agents since 0.1.32 resolve it
@@ -37,10 +39,16 @@ func agentBinaryHasVersion(path, want string) (bool, error) {
 }
 
 func bytesContainVersion(b []byte, want string) bool {
-	needle := []byte(want)
-	if len(needle) == 0 {
+	want = strings.TrimSpace(want)
+	if want == "" {
 		return false
 	}
+	// The marker stays contiguous even when the linker glues it to the
+	// previous rodata string. A bare version does not.
+	if bytes.Contains(b, []byte(version.VersionMarkerPrefix+want)) {
+		return true
+	}
+	needle := []byte(want)
 	for from := 0; from < len(b); {
 		i := bytes.Index(b[from:], needle)
 		if i < 0 {
