@@ -125,6 +125,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		PackageID *int64 `json:"package_id"`
 		ExpiresAt int64  `json:"expires_at"`
 		Days      int    `json:"days"`
+		Months    int    `json:"months"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -160,18 +161,10 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "角色无效")
 		return
 	}
-	exp := req.ExpiresAt
-	if exp < 0 || req.Days < 0 {
-		jsonErr(w, http.StatusBadRequest, "到期时间无效")
+	exp, err := resolveCreateExpiry(s.DB, req.ExpiresAt, req.Days, req.Months)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
-	}
-	if req.Days > 0 {
-		got, err := expiryFromDays(req.Days)
-		if err != nil {
-			jsonErr(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		exp = got
 	}
 	var pkg *db.Package
 	if req.PackageID != nil {
@@ -186,7 +179,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	u, err := db.CreateUserConfigured(s.DB, req.Username, hash, req.Password, req.Role, req.Remark, exp, pkg)
+	u, err := db.CreateUserConfigured(s.DB, req.Username, hash, req.Password, req.Role, req.Remark, exp, pkg, anniversaryResetDay(s.DB, pkg))
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			jsonErr(w, http.StatusConflict, "用户名已存在")

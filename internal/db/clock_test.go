@@ -39,3 +39,31 @@ func TestMonthResetStart(t *testing.T) {
 		t.Fatal("same day")
 	}
 }
+
+func TestAddMonths(t *testing.T) {
+	loc := time.FixedZone("CST", 8*3600)
+	jan12 := time.Date(2026, 1, 12, 15, 4, 5, 0, loc)
+	got := AddMonths(jan12, 3)
+	if got.Format("2006-01-02 15:04:05") != "2026-04-12 15:04:05" {
+		t.Fatalf("jan12+3 %v", got)
+	}
+	jan31 := time.Date(2026, 1, 31, 8, 0, 0, 0, loc)
+	got = AddMonths(jan31, 1)
+	if got.Format("2006-01-02 15:04:05") != "2026-02-28 08:00:00" {
+		t.Fatalf("jan31+1 %v", got)
+	}
+	leap := time.Date(2024, 1, 31, 0, 0, 0, 0, loc)
+	got = AddMonths(leap, 1)
+	if got.Format("2006-01-02") != "2024-02-29" {
+		t.Fatalf("leap %v", got)
+	}
+	dec := time.Date(2026, 12, 19, 0, 0, 0, 0, loc)
+	got = AddMonths(dec, 12)
+	if got.Format("2006-01-02") != "2027-12-19" {
+		t.Fatalf("year %v", got)
+	}
+	got = AddMonths(jan12, 0)
+	if !got.Equal(jan12) {
+		t.Fatalf("zero %v", got)
+	}
+}

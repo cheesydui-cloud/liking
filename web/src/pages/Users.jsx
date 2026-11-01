@@ -45,6 +45,24 @@ function ymdToUnix(s) {
   return Number.isNaN(n) ? 0 : Math.floor(n / 1000)
 }
 
+function shanghaiToday() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
+function addCalendarMonths(ymdStr, months) {
+  const [y, m, d] = String(ymdStr).split('-').map(Number)
+  const target = new Date(Date.UTC(y, m - 1 + months, 1))
+  const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate()
+  const day = Math.min(d, last)
+  const z = n => String(n).padStart(2, '0')
+  return `${target.getUTCFullYear()}-${z(target.getUTCMonth() + 1)}-${z(day)}`
+}
+
 function gbFromBytes(n) {
   if (n == null || n === '') return ''
   const gb = Number(n) / (1024 ** 3)
@@ -60,7 +78,33 @@ function bytesFromGB(s) {
   return Math.round(n * 1024 * 1024 * 1024)
 }
 
-const emptyForm = { username: '', password: '', remark: '', package_id: '', days: 30, expires: '', traffic_gb: '', enabled: true, traffic_reset_day: 0, speed_value: '', speed_unit: 'mbps' }
+const emptyForm = { username: '', password: '', remark: '', package_id: '', duration: '3', days: '', expires: '', traffic_gb: '', enabled: true, traffic_reset_day: 0, speed_value: '', speed_unit: 'mbps' }
+
+function DurationPicker({ duration, days, onDuration, onDays }) {
+  return (
+    <div>
+      <div className="text-[12px] font-medium text-ink-soft mb-1.5">时长</div>
+      <div className="seg" role="group" aria-label="时长">
+        {[['3', '3个月'], ['6', '6个月'], ['12', '1年'], ['custom', '自定义']].map(([id, lab]) => (
+          <button key={id} type="button" className={`seg-item${duration === id ? ' is-on' : ''}`} onClick={() => onDuration(id)}>{lab}</button>
+        ))}
+      </div>
+      {duration === 'custom' ? (
+        <input className="input-field mt-1.5" type="number" min="0" max="36500" placeholder="天数，0 为不限期" value={days} onChange={e => onDays(e.target.value)} />
+      ) : (
+        <div className="text-[12px] text-ink-mut mt-1.5">按自然月。1月31日加1个月，到期日是2月最后一天。</div>
+      )}
+    </div>
+  )
+}
+
+function packageFieldHint(editing, editUser, f, selectedPkg) {
+  const switched = editing && Number(f.package_id || 0) !== Number(editUser?.package_id || 0) && f.package_id
+  if (switched && selectedPkg?.reset_mode === 'anniversary') return '更换套餐会清零已用流量。按开通日不会自动写到已有用户，请在下面填每月几号。'
+  if (switched) return '更换套餐会清零已用流量'
+  if (!editing && selectedPkg?.reset_mode === 'anniversary') return '按开通日清零：今天是几号，以后每月这一天清已用流量。首月按整月计。'
+  return undefined
+}
 
 function speedLimitBps(kbps) {
   const n = Number(kbps) || 0
@@ -210,6 +254,7 @@ function formatUserCard(u, pkgs = [], base) {
     const cap = u.traffic_cap || trafficCap(u, pkgs)
     if (cap > 0) lines.push(`流量：${fmtBytes(billedBytes(u))} / ${fmtBytes(cap)}`)
     else lines.push('流量：不限')
+    if (Number(u.traffic_reset_day) > 0) lines.push(`每月 ${u.traffic_reset_day} 号清零`)
     if (u.speed_limit > 0) lines.push(`限速：${formatSpeedLimit(u.speed_limit)}`)
     else lines.push('限速：不限')
   }
@@ -443,7 +488,8 @@ export default function Users() {
   const [bulkText, setBulkText] = useState('')
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkPkg, setBulkPkg] = useState('')
-  const [bulkDays, setBulkDays] = useState(30)
+  const [bulkDuration, setBulkDuration] = useState('3')
+  const [bulkDays, setBulkDays] = useState('')
   const [ruleUser, setRuleUser] = useState(null)
   const [denyUser, setDenyUser] = useState(null)
   const [selected, setSelected] = useState(() => new Set())
@@ -490,12 +536,12 @@ export default function Users() {
   const closeForm = () => {
     setFormOpen(false)
     setEditUser(null)
-    setF({ ...emptyForm, package_id: f.package_id, days: 30 })
+    setF({ ...emptyForm, package_id: f.package_id, duration: '3', days: '' })
   }
 
   const openCreate = () => {
     setEditUser(null)
-    setF({ ...emptyForm, package_id: f.package_id, days: 30 })
+    setF({ ...emptyForm, package_id: f.package_id, duration: '3', days: '' })
     setFormOpen(true)
   }
 
@@ -507,7 +553,8 @@ export default function Users() {
       password: '',
       remark: u.remark || '',
       package_id: u.package_id || '',
-      days: 30,
+      duration: '3',
+      days: '',
       expires: ymd(u.expires_at),
       traffic_gb: gbFromBytes(u.traffic_limit),
       enabled: u.enabled !== false,
@@ -518,14 +565,20 @@ export default function Users() {
     setFormOpen(true)
   }
 
+  const expiryBase = () => {
+    const today = shanghaiToday()
+    return f.expires && f.expires >= today ? f.expires : today
+  }
+
   const bumpExpiry = (days) => {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    let d = f.expires ? new Date(`${f.expires}T00:00:00`) : new Date(today)
-    if (Number.isNaN(d.getTime()) || d < today) d = new Date(today)
-    d.setDate(d.getDate() + days)
+    const [y, m, d] = expiryBase().split('-').map(Number)
+    const next = new Date(Date.UTC(y, m - 1, d + days))
     const z = n => String(n).padStart(2, '0')
-    setF({ ...f, expires: `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}` })
+    setF({ ...f, expires: `${next.getUTCFullYear()}-${z(next.getUTCMonth() + 1)}-${z(next.getUTCDate())}` })
+  }
+
+  const bumpMonths = (months) => {
+    setF({ ...f, expires: addCalendarMonths(expiryBase(), months) })
   }
 
   const save = async (e) => {
@@ -540,9 +593,9 @@ export default function Users() {
       toast('密码至少 6 位', 'error')
       return
     }
-    if (!editUser) {
+    if (!editUser && f.duration === 'custom') {
       const days = Number(f.days) || 0
-      if (days < 0 || days > 36500) {
+      if (!Number.isFinite(days) || days < 0 || days > 36500) {
         toast('天数无效', 'error')
         return
       }
@@ -610,7 +663,9 @@ export default function Users() {
           }
         } else toast('已保存')
       } else {
-        const body = { username, remark: f.remark, days: Number(f.days) || 0 }
+        const body = { username, remark: f.remark }
+        if (f.duration === 'custom') body.days = Number(f.days) || 0
+        else body.months = Number(f.duration)
         if (f.password) body.password = f.password
         if (f.package_id) body.package_id = Number(f.package_id)
         const d = await api.post('/users', body)
@@ -951,6 +1006,7 @@ export default function Users() {
                 <div className="machine-metrics">
                   <Metric label="套餐" value={u.package_name || '未绑定'} plain />
                   <Metric label="到期" value={expTs ? fmtDateShort(expTs) : '不限期'} danger={expired} />
+                  {Number(u.traffic_reset_day) > 0 ? <Metric label="清零" value={`每月 ${u.traffic_reset_day} 号`} plain /> : null}
                   <Metric label="额度" value={cap > 0 ? fmtBytes(cap) : '不限'} />
                   <Metric label="计费" value={u.direction === 'twoway' ? '双向' : '单向'} plain />
                   <Metric label="上行" value={fmtBps(u.net_up_bps)} tone={upOver ? undefined : 'up'} danger={upOver} />
@@ -989,31 +1045,31 @@ export default function Users() {
             </div>
           </Field>
           <Field label="备注"><input className="input-field" placeholder="可选" value={f.remark} onChange={e => setF({ ...f, remark: e.target.value })} /></Field>
-          <Field label="套餐" hint={editing && Number(f.package_id || 0) !== Number(editUser.package_id || 0) && f.package_id ? '更换套餐会清零已用流量' : undefined}>
+          <Field label="套餐" hint={packageFieldHint(editing, editUser, f, selectedPkg)}>
             <select className="input-field" value={f.package_id} onChange={e => setF({ ...f, package_id: e.target.value })}>
               <option value="">不绑定</option>
               {pkgs.map(p => {
                 const n = (p.inbound_ids || []).length
                 const tag = n ? `${n} 个节点` : ((p.server_ids || []).length ? `${p.server_ids.length} 台实例` : '未选节点')
-                return <option key={p.id} value={p.id}>{p.name} / {tag}</option>
+                const reset = p.reset_mode === 'anniversary' ? ' / 按开通日' : ''
+                return <option key={p.id} value={p.id}>{p.name} / {tag}{reset}</option>
               })}
             </select>
           </Field>
           {editing ? (
             <div>
-              <Field label="到期" hint="留空表示不限期">
+              <Field label="到期" hint="留空表示不限期。按自然月，1月31日加1个月到2月最后一天。">
                 <input className="input-field" type="date" value={f.expires} onChange={e => setF({ ...f, expires: e.target.value })} />
               </Field>
-              <div className="flex gap-2 mt-1.5">
+              <div className="flex flex-wrap gap-2 mt-1.5">
+                <button type="button" className="row-act" onClick={() => bumpMonths(3)}>+3 个月</button>
+                <button type="button" className="row-act" onClick={() => bumpMonths(6)}>+6 个月</button>
+                <button type="button" className="row-act" onClick={() => bumpMonths(12)}>+1 年</button>
                 <button type="button" className="row-act" onClick={() => bumpExpiry(30)}>+30 天</button>
-                <button type="button" className="row-act" onClick={() => bumpExpiry(60)}>+60 天</button>
-                <button type="button" className="row-act" onClick={() => bumpExpiry(90)}>+90 天</button>
               </div>
             </div>
           ) : (
-            <Field label="天数" hint="从今天起算">
-              <input className="input-field" type="number" min="0" max="36500" value={f.days} onChange={e => setF({ ...f, days: e.target.value })} />
-            </Field>
+            <DurationPicker duration={f.duration} days={f.days} onDuration={duration => setF({ ...f, duration })} onDays={days => setF({ ...f, days })} />
           )}
           {editing && (
             <Field label="流量上限 G" hint={f.traffic_gb === '' ? (selectedPkg?.traffic_bytes ? `留空跟随套餐 ${fmtBytes(selectedPkg.traffic_bytes)}` : '留空跟随套餐，0 为不限') : (Number(f.traffic_gb) === 0 ? '0 = 不限流量' : '覆盖套餐额度')}>
@@ -1029,7 +1085,7 @@ export default function Users() {
             />
           )}
           {editing && (
-            <Field label="流量重置日" hint="0 跟随套餐 / 每月周期。1–31 表示每月这一天清零。">
+            <Field label="流量重置日" hint="1–31 每月这一天清零。0 表示不按日清零。已有用户要在这里改，新开户才会自动填写。">
               <input className="input-field" type="number" min="0" max="31" value={f.traffic_reset_day} onChange={e => setF({ ...f, traffic_reset_day: e.target.value })} />
             </Field>
           )}
@@ -1125,13 +1181,18 @@ export default function Users() {
           <button type="button" className="btn-primary" disabled={bulkBusy} onClick={async () => {
             const lines = bulkText.split('\n').map(x => x.trim()).filter(Boolean)
             if (!lines.length) { toast('请填写用户名，一行一个', 'error'); return }
-            const days = Number(bulkDays) || 0
-            if (days < 0 || days > 36500) { toast('天数无效', 'error'); return }
+            if (bulkDuration === 'custom') {
+              const days = Number(bulkDays) || 0
+              if (!Number.isFinite(days) || days < 0 || days > 36500) { toast('天数无效', 'error'); return }
+            }
             setBulkBusy(true)
             try {
               const users = lines.map(line => {
                 const [username, password] = line.split(/[\s,]+/).filter(Boolean)
-                return { username, password: password || '', package_id: bulkPkg ? Number(bulkPkg) : undefined, days }
+                const row = { username, password: password || '', package_id: bulkPkg ? Number(bulkPkg) : undefined }
+                if (bulkDuration === 'custom') row.days = Number(bulkDays) || 0
+                else row.months = Number(bulkDuration)
+                return row
               })
               const d = await api.post('/users/bulk', { users })
               const cards = (d.users || []).filter(x => x.ok && x.password).map(x => formatUserCard({
@@ -1144,6 +1205,7 @@ export default function Users() {
                 remark: x.remark,
                 speed_limit: x.speed_limit,
                 traffic_cap: x.traffic_cap,
+                traffic_reset_day: x.traffic_reset_day,
               }, pkgs, panelBase(panelUrl))).join('\n\n')
               toast(`成功 ${d.ok}/${d.total}`)
               setBulkText('')
@@ -1169,15 +1231,13 @@ export default function Users() {
             <textarea className="input-field font-mono text-[12px] min-h-40" value={bulkText} onChange={e => setBulkText(e.target.value)} placeholder={'alice\nbob secret12'} />
           </Field>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="套餐">
+            <Field label="套餐" hint={pkgs.find(p => String(p.id) === String(bulkPkg))?.reset_mode === 'anniversary' ? '按开通日清零：今天是几号，以后每月这一天清已用流量' : undefined}>
               <select className="input-field" value={bulkPkg} onChange={e => setBulkPkg(e.target.value)}>
                 <option value="">不绑定</option>
-                {pkgs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {pkgs.map(p => <option key={p.id} value={p.id}>{p.name}{p.reset_mode === 'anniversary' ? ' / 按开通日' : ''}</option>)}
               </select>
             </Field>
-            <Field label="天数" hint="0 表示不限期，最多 36500">
-              <input className="input-field" type="number" min="0" max="36500" value={bulkDays} onChange={e => setBulkDays(e.target.value)} />
-            </Field>
+            <DurationPicker duration={bulkDuration} days={bulkDays} onDuration={setBulkDuration} onDays={setBulkDays} />
           </div>
           {bulkResult ? (
             <Field label="本次名片" hint="关闭后不再显示。复制失败也请从这里选中。">

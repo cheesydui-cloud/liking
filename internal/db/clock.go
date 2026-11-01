@@ -102,6 +102,18 @@ func clampMonthDay(y int, m time.Month, day int, loc *time.Location) time.Time {
 	return time.Date(y, m, day, 0, 0, 0, 0, loc)
 }
 
+// AddMonths adds n calendar months in t's location and keeps the clock time.
+// The day clamps to the last day of the target month, so 31 Jan plus one
+// month lands on the last day of February.
+func AddMonths(t time.Time, n int) time.Time {
+	loc := t.Location()
+	t = t.In(loc)
+	y, m, d := t.Date()
+	anchor := time.Date(y, m, 1, 0, 0, 0, 0, loc).AddDate(0, n, 0)
+	clamped := clampMonthDay(anchor.Year(), anchor.Month(), d, loc)
+	return time.Date(clamped.Year(), clamped.Month(), clamped.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
+}
+
 // ResetDayOn is the calendar day in now's month that a 1–31 reset actually
 // fires. Day 31 in February becomes the last day of that month.
 func ResetDayOn(now time.Time, day int) int {

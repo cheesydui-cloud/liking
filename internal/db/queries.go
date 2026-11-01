@@ -94,8 +94,23 @@ func CreateUser(d *sql.DB, username, passwordHash, role, remark string) (*User, 
 	return GetUser(d, id)
 }
 
+// NormalizeResetMode accepts anniversary, none, or empty. Anything else is rejected.
+// Empty and none both store as "" so existing packages stay non-resetting.
+func NormalizeResetMode(s string) (string, error) {
+	switch strings.TrimSpace(s) {
+	case "", "none":
+		return "", nil
+	case ResetModeAnniversary:
+		return ResetModeAnniversary, nil
+	default:
+		return "", fmt.Errorf("清零方式无效")
+	}
+}
+
 // CreateUserConfigured creates the user and optional package binding atomically.
-func CreateUserConfigured(d *sql.DB, username, passwordHash, passwordPlain, role, remark string, expiresAt int64, pkg *Package) (*User, error) {
+// resetDay 1–31 is written onto the user. 0 leaves the column at its default.
+// Callers set the day only for a new anniversary package; this does not rewrite existing users.
+func CreateUserConfigured(d *sql.DB, username, passwordHash, passwordPlain, role, remark string, expiresAt int64, pkg *Package, resetDay int) (*User, error) {
 	tok, err := RandomHex(16)
 	if err != nil {
 		return nil, err
@@ -126,12 +141,17 @@ func CreateUserConfigured(d *sql.DB, username, passwordHash, passwordPlain, role
 		denyCats = pkg.SiteDenyCategories
 		denyDomains = pkg.SiteDenyDomains
 	}
+	day := 0
+	if resetDay >= 1 && resetDay <= 31 {
+		day = resetDay
+	}
 	res, err := tx.Exec(`INSERT INTO users(
 		username,password_hash,password_plain,role,remark,sub_token,created_at,expires_at,cycle_start,
-		speed_limit,sub_rule_preset,sub_rule_categories,site_filter_mode,site_deny_categories,site_deny_domains
-	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		speed_limit,sub_rule_preset,sub_rule_categories,site_filter_mode,site_deny_categories,site_deny_domains,
+		traffic_reset_day
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		username, passwordHash, passwordPlain, role, remark, tok, createdAt, expiresAt, cycleStart,
-		speedLimit, subPreset, encodeStringSlice(subCats), siteMode, encodeStringSlice(denyCats), encodeStringSlice(denyDomains))
+		speedLimit, subPreset, encodeStringSlice(subCats), siteMode, encodeStringSlice(denyCats), encodeStringSlice(denyDomains), day)
 	if err != nil {
 		return nil, err
 	}
@@ -873,11 +893,15 @@ func insertPackageTx(tx *sql.Tx, p *Package) (int64, error) {
 	if cycleDays < 0 {
 		cycleDays = 0
 	}
+	mode, err := NormalizeResetMode(p.ResetMode)
+	if err != nil {
+		return 0, err
+	}
 	res, err := tx.Exec(`INSERT INTO packages(
 		name,traffic_bytes,cycle_days,reset_day,direction,created_at,speed_limit,
-		sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains,site_filter_mode
-	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, p.Name, p.TrafficBytes, cycleDays, p.ResetDay, direction, now(), p.SpeedLimit,
-		p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode)
+		sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains,site_filter_mode,reset_mode
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, p.Name, p.TrafficBytes, cycleDays, p.ResetDay, direction, now(), p.SpeedLimit,
+		p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, mode)
 	if err != nil {
 		return 0, err
 	}
@@ -885,8 +909,12 @@ func insertPackageTx(tx *sql.Tx, p *Package) (int64, error) {
 }
 
 func updatePackageTx(tx *sql.Tx, p *Package) error {
-	_, err := tx.Exec(`UPDATE packages SET name=?, traffic_bytes=?, cycle_days=?, reset_day=?, direction=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=?, site_filter_mode=? WHERE id=?`,
-		p.Name, p.TrafficBytes, p.CycleDays, p.ResetDay, p.Direction, p.SpeedLimit, p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, p.ID)
+	mode, err := NormalizeResetMode(p.ResetMode)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`UPDATE packages SET name=?, traffic_bytes=?, cycle_days=?, reset_day=?, direction=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=?, site_filter_mode=?, reset_mode=? WHERE id=?`,
+		p.Name, p.TrafficBytes, p.CycleDays, p.ResetDay, p.Direction, p.SpeedLimit, p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, mode, p.ID)
 	return err
 }
 
@@ -998,8 +1026,8 @@ func UpdatePackageConfigured(d *sql.DB, p *Package, relation string, ids []int64
 func GetPackage(d *sql.DB, id int64) (*Package, error) {
 	p := &Package{}
 	var catsRaw, denyCatsRaw, denyDomsRaw string
-	err := d.QueryRow(`SELECT id,name,traffic_bytes,cycle_days,reset_day,direction,created_at,speed_limit,sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains,site_filter_mode FROM packages WHERE id=?`, id).
-		Scan(&p.ID, &p.Name, &p.TrafficBytes, &p.CycleDays, &p.ResetDay, &p.Direction, &p.CreatedAt, &p.SpeedLimit, &p.SubRulePreset, &catsRaw, &denyCatsRaw, &denyDomsRaw, &p.SiteFilterMode)
+	err := d.QueryRow(`SELECT id,name,traffic_bytes,cycle_days,reset_day,direction,created_at,speed_limit,sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains,site_filter_mode,reset_mode FROM packages WHERE id=?`, id).
+		Scan(&p.ID, &p.Name, &p.TrafficBytes, &p.CycleDays, &p.ResetDay, &p.Direction, &p.CreatedAt, &p.SpeedLimit, &p.SubRulePreset, &catsRaw, &denyCatsRaw, &denyDomsRaw, &p.SiteFilterMode, &p.ResetMode)
 	if err != nil {
 		return nil, err
 	}
@@ -1082,8 +1110,12 @@ func SetPackageServers(d *sql.DB, pkgID int64, serverIDs []int64) error {
 }
 
 func UpdatePackage(d *sql.DB, p *Package) error {
-	_, err := d.Exec(`UPDATE packages SET name=?, traffic_bytes=?, cycle_days=?, reset_day=?, direction=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=?, site_filter_mode=? WHERE id=?`,
-		p.Name, p.TrafficBytes, p.CycleDays, p.ResetDay, p.Direction, p.SpeedLimit, p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, p.ID)
+	mode, err := NormalizeResetMode(p.ResetMode)
+	if err != nil {
+		return err
+	}
+	_, err = d.Exec(`UPDATE packages SET name=?, traffic_bytes=?, cycle_days=?, reset_day=?, direction=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=?, site_filter_mode=?, reset_mode=? WHERE id=?`,
+		p.Name, p.TrafficBytes, p.CycleDays, p.ResetDay, p.Direction, p.SpeedLimit, p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, mode, p.ID)
 	return err
 }
 

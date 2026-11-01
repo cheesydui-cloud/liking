@@ -89,12 +89,15 @@ type Certificate struct {
 	AutoRenew bool   `json:"auto_renew"`
 }
 
+const ResetModeAnniversary = "anniversary"
+
 type Package struct {
 	ID                 int64     `json:"id"`
 	Name               string    `json:"name"`
 	TrafficBytes       int64     `json:"traffic_bytes"`
 	CycleDays          int       `json:"cycle_days"`
 	ResetDay           int       `json:"reset_day"`
+	ResetMode          string    `json:"reset_mode"`
 	Direction          string    `json:"direction"`
 	CreatedAt          int64     `json:"created_at"`
 	InboundIDs         []int64   `json:"inbound_ids,omitempty"`

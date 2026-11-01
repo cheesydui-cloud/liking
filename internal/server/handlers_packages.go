@@ -122,6 +122,7 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		TrafficBytes int64     `json:"traffic_bytes"`
 		CycleDays    int       `json:"cycle_days"`
 		ResetDay     int       `json:"reset_day"`
+		ResetMode    string    `json:"reset_mode"`
 		Direction    string    `json:"direction"`
 		InboundIDs   []int64   `json:"inbound_ids"`
 		Multipliers  []float64 `json:"multipliers"`
@@ -148,6 +149,11 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "重置日无效")
 		return
 	}
+	resetMode, err := db.NormalizeResetMode(req.ResetMode)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if req.Direction != "" && req.Direction != "oneway" && req.Direction != "twoway" {
 		jsonErr(w, http.StatusBadRequest, "计费方向无效")
 		return
@@ -161,7 +167,7 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	p := &db.Package{Name: strings.TrimSpace(req.Name), TrafficBytes: req.TrafficBytes, CycleDays: req.CycleDays, ResetDay: req.ResetDay, Direction: req.Direction}
+	p := &db.Package{Name: strings.TrimSpace(req.Name), TrafficBytes: req.TrafficBytes, CycleDays: req.CycleDays, ResetDay: req.ResetDay, ResetMode: resetMode, Direction: req.Direction}
 	p.SpeedLimit = pol.SpeedLimit
 	p.SubRulePreset = pol.SubRulePreset
 	p.SubRuleCategories = pol.SubRuleCategories
@@ -178,7 +184,7 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		relation = db.PackageRelationsInbound
 		ids = req.InboundIDs
 	}
-	p, err := db.CreatePackageConfigured(s.DB, p, relation, ids, req.Multipliers)
+	p, err = db.CreatePackageConfigured(s.DB, p, relation, ids, req.Multipliers)
 	if err != nil {
 		jsonErr(w, http.StatusBadRequest, "节点或套餐参数无效："+err.Error())
 		return
@@ -208,6 +214,7 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 		TrafficBytes *int64    `json:"traffic_bytes"`
 		CycleDays    *int      `json:"cycle_days"`
 		ResetDay     *int      `json:"reset_day"`
+		ResetMode    *string   `json:"reset_mode"`
 		Direction    string    `json:"direction"`
 		InboundIDs   []int64   `json:"inbound_ids"`
 		Multipliers  []float64 `json:"multipliers"`
@@ -241,6 +248,14 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.ResetDay = *req.ResetDay
+	}
+	if req.ResetMode != nil {
+		mode, err := db.NormalizeResetMode(*req.ResetMode)
+		if err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		p.ResetMode = mode
 	}
 	if req.Direction != "" {
 		if req.Direction != "oneway" && req.Direction != "twoway" {

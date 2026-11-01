@@ -1,0 +1,1 @@
+ALTER TABLE packages ADD COLUMN reset_mode TEXT NOT NULL DEFAULT '';

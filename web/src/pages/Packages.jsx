@@ -10,7 +10,7 @@ import { SpeedField } from '../components/SpeedField'
 import { formatSpeedLimit, kbpsFromForm, speedFormFromKbps } from '../lib/speed'
 
 const emptyForm = {
-  name: '', gb: '', direction: 'oneway', inbound_ids: [], multipliers: {},
+  name: '', gb: '', direction: 'oneway', reset_mode: 'anniversary', inbound_ids: [], multipliers: {},
   speed_value: '', speed_unit: 'mbps', sub_rule_preset: '', sub_rule_categories: [],
   site_filter_mode: '', site_deny_categories: [], site_deny_domains: '',
 }
@@ -43,6 +43,7 @@ function parseDenyLines(text) {
 
 function policyLine(p) {
   const bits = []
+  if (p.reset_mode === 'anniversary') bits.push('按开通日清零')
   if (p.speed_limit > 0) bits.push(`默认 ${formatSpeedLimit(p.speed_limit)}`)
   if (p.site_filter_mode === 'allow') bits.push('开户只允许指定站')
   else if (p.site_filter_mode === 'deny') bits.push('开户禁止指定站')
@@ -211,6 +212,7 @@ export default function Packages() {
       site_filter_mode: p.site_filter_mode || '',
       site_deny_categories: Array.isArray(p.site_deny_categories) ? p.site_deny_categories : [],
       site_deny_domains: Array.isArray(p.site_deny_domains) ? p.site_deny_domains.join('\n') : '',
+      reset_mode: p.reset_mode === 'anniversary' ? 'anniversary' : '',
     })
     setFormOpen(true)
   }
@@ -246,6 +248,7 @@ export default function Packages() {
       traffic_bytes: Math.round(gb * 1024 * 1024 * 1024),
       cycle_days: 0,
       direction: f.direction,
+      reset_mode: f.reset_mode === 'anniversary' ? 'anniversary' : 'none',
       inbound_ids: f.inbound_ids,
       multipliers: f.inbound_ids.map(id => {
         const n = Number(f.multipliers?.[id])
@@ -386,7 +389,7 @@ export default function Packages() {
                   </div>
                 </div>
                 <div className="machine-metrics">
-                  <Metric label="流量" value={trafficLabel(p.traffic_bytes)} />
+                  <Metric label={p.reset_mode === 'anniversary' ? '每月' : '流量'} value={trafficLabel(p.traffic_bytes)} />
                   <Metric label="计费" value={p.direction === 'twoway' ? '双向' : '单向'} />
                   <Metric label="节点" value={meta.all ? '0' : String(meta.count)} />
                   <Metric label="用户" value={String(n)} />
@@ -411,7 +414,7 @@ export default function Packages() {
             <Field label="名称">
               <input className="input-field" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} required autoFocus />
             </Field>
-            <Field label="流量 G" hint="留空 = 不限">
+            <Field label={f.reset_mode === 'anniversary' ? '每月流量 G' : '流量 G'} hint="留空 = 不限">
               <input className="input-field font-mono" type="number" min="0" step="0.1" value={f.gb} onChange={e => setF({ ...f, gb: e.target.value })} />
             </Field>
             <div>
@@ -421,6 +424,18 @@ export default function Packages() {
                 <button type="button" className={`seg-item${f.direction === 'twoway' ? ' is-on' : ''}`} onClick={() => setF({ ...f, direction: 'twoway' })}>双向</button>
               </div>
               <div className="text-[12px] text-ink-mut mt-1.5">{f.direction === 'twoway' ? '上行 + 下行计入额度' : '只计下行'}</div>
+            </div>
+          </div>
+          <div>
+            <div className="text-[12px] font-medium text-ink-soft mb-1.5">每月清零</div>
+            <div className="seg" role="group" aria-label="每月清零">
+              <button type="button" className={`seg-item${f.reset_mode === 'anniversary' ? ' is-on' : ''}`} onClick={() => setF({ ...f, reset_mode: 'anniversary' })}>按开通日</button>
+              <button type="button" className={`seg-item${f.reset_mode !== 'anniversary' ? ' is-on' : ''}`} onClick={() => setF({ ...f, reset_mode: '' })}>不清零</button>
+            </div>
+            <div className="text-[12px] text-ink-mut mt-1.5">
+              {f.reset_mode === 'anniversary'
+                ? '新开的号记下今天是几号，以后每月这一天清已用流量。首月按整月计。已有用户不会自动改。'
+                : '不按月清零。保存后已有用户的重置日也不会被改掉。'}
             </div>
           </div>
           <div>

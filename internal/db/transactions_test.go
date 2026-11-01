@@ -8,7 +8,7 @@ func TestCreateUserConfiguredRollsBackInvalidPackage(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if _, err := CreateUserConfigured(d, "alice", "hash", "plain", "user", "", 0, &Package{ID: 999}); err == nil {
+	if _, err := CreateUserConfigured(d, "alice", "hash", "plain", "user", "", 0, &Package{ID: 999}, 0); err == nil {
 		t.Fatal("expected invalid package error")
 	}
 	n, err := CountUsers(d)
@@ -52,5 +52,71 @@ func TestConfiguredPackageWritesAreAtomic(t *testing.T) {
 	}
 	if fresh.Name != "original" {
 		t.Fatalf("partial update remained: %q", fresh.Name)
+	}
+}
+
+func TestPackageResetModeRoundTrip(t *testing.T) {
+	d, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	pkg, err := CreatePackage(d, "monthly", 100, 0, 0, "oneway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.ResetMode != "" {
+		t.Fatalf("existing default %q", pkg.ResetMode)
+	}
+	pkg.ResetMode = ResetModeAnniversary
+	if err := UpdatePackage(d, pkg); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := GetPackage(d, pkg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.ResetMode != ResetModeAnniversary {
+		t.Fatalf("mode %q", fresh.ResetMode)
+	}
+	if _, err := NormalizeResetMode("weekly"); err == nil {
+		t.Fatal("expected invalid mode")
+	}
+	none, err := NormalizeResetMode("none")
+	if err != nil || none != "" {
+		t.Fatalf("none %q %v", none, err)
+	}
+}
+
+func TestCreateUserConfiguredWritesResetDay(t *testing.T) {
+	d, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	pkg, err := CreatePackage(d, "monthly", 100, 0, 0, "oneway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := CreateUserConfigured(d, "a", "hash", "plain", "user", "", 0, pkg, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.TrafficResetDay != 12 {
+		t.Fatalf("reset day %d", u.TrafficResetDay)
+	}
+	u2, err := CreateUserConfigured(d, "b", "hash", "plain", "user", "", 0, pkg, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u2.TrafficResetDay != 0 {
+		t.Fatalf("unset day %d", u2.TrafficResetDay)
+	}
+	again, err := GetUser(d, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.TrafficResetDay != 12 {
+		t.Fatalf("first user rewritten: %d", again.TrafficResetDay)
 	}
 }

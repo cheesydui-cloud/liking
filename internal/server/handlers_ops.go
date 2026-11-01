@@ -22,6 +22,7 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 			Remark    string `json:"remark"`
 			PackageID *int64 `json:"package_id"`
 			Days      int    `json:"days"`
+			Months    int    `json:"months"`
 		} `json:"users"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -38,17 +39,18 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	admin := userFromCtx(r.Context())
 	type row struct {
-		Username    string `json:"username"`
-		Password    string `json:"password,omitempty"`
-		SubToken    string `json:"sub_token,omitempty"`
-		ExpiresAt   int64  `json:"expires_at,omitempty"`
-		PkgExpires  int64  `json:"package_expires_at,omitempty"`
-		PackageName string `json:"package_name,omitempty"`
-		Remark      string `json:"remark,omitempty"`
-		SpeedLimit  int64  `json:"speed_limit,omitempty"`
-		TrafficCap  int64  `json:"traffic_cap,omitempty"`
-		Error       string `json:"error,omitempty"`
-		OK          bool   `json:"ok"`
+		Username        string `json:"username"`
+		Password        string `json:"password,omitempty"`
+		SubToken        string `json:"sub_token,omitempty"`
+		ExpiresAt       int64  `json:"expires_at,omitempty"`
+		PkgExpires      int64  `json:"package_expires_at,omitempty"`
+		PackageName     string `json:"package_name,omitempty"`
+		Remark          string `json:"remark,omitempty"`
+		SpeedLimit      int64  `json:"speed_limit,omitempty"`
+		TrafficCap      int64  `json:"traffic_cap,omitempty"`
+		TrafficResetDay int    `json:"traffic_reset_day,omitempty"`
+		Error           string `json:"error,omitempty"`
+		OK              bool   `json:"ok"`
 	}
 	out := make([]row, 0, len(req.Users))
 	okN := 0
@@ -74,20 +76,11 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 			out = append(out, rec)
 			continue
 		}
-		exp := int64(0)
-		if item.Days < 0 {
-			rec.Error = "天数无效"
+		exp, expErr := resolveCreateExpiry(s.DB, 0, item.Days, item.Months)
+		if expErr != nil {
+			rec.Error = expErr.Error()
 			out = append(out, rec)
 			continue
-		}
-		if item.Days > 0 {
-			got, err := expiryFromDays(item.Days)
-			if err != nil {
-				rec.Error = err.Error()
-				out = append(out, rec)
-				continue
-			}
-			exp = got
 		}
 		var pkg *db.Package
 		if item.PackageID != nil {
@@ -105,7 +98,7 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 			out = append(out, rec)
 			continue
 		}
-		u, err := db.CreateUserConfigured(s.DB, name, hash, pw, "user", item.Remark, exp, pkg)
+		u, err := db.CreateUserConfigured(s.DB, name, hash, pw, "user", item.Remark, exp, pkg, anniversaryResetDay(s.DB, pkg))
 		if err != nil {
 			if strings.Contains(strings.ToLower(err.Error()), "unique") {
 				rec.Error = "用户名已存在"
@@ -125,6 +118,7 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 		rec.Remark = u.Remark
 		rec.SpeedLimit = u.SpeedLimit
 		rec.TrafficCap = u.TrafficCap
+		rec.TrafficResetDay = u.TrafficResetDay
 		okN++
 		out = append(out, rec)
 	}
