@@ -13,7 +13,6 @@ import Settings from './pages/Settings'
 import Subscribe from './pages/Subscribe'
 import My from './pages/My'
 import MyNodes from './pages/MyNodes'
-import MyForwards from './pages/MyForwards'
 import { BrandMark } from './components/ui'
 
 function Loading() {
@@ -78,7 +77,7 @@ export default function App() {
               <Route path="/settings" element={<Settings />} />
               <Route path="/password" element={<Navigate to="/settings?tab=account" replace />} />
               <Route path="/my/nodes" element={<MyNodes />} />
-              <Route path="/my/forwards" element={<MyForwards />} />
+              <Route path="/my/forwards" element={<Forwards />} />
             </Route>
           </Route>
           <Route path="*" element={

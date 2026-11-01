@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { cacheGen, peekList, putList } from '../lib/listCache'
 import { startPoll } from '../lib/poll'
@@ -7,15 +6,13 @@ import { createOpLock } from '../lib/opLock'
 import { asArray, isAbort } from '../lib/safe'
 import { useToast, useDialog } from '../components/Layout'
 import { formatPortRange } from '../lib/ports'
-import { hopStatus, nodeStatus } from '../lib/status'
+import { hopStatus, isDirectNode, nodeStatus } from '../lib/status'
 import { parseShareURI } from '../lib/share'
 import {
   LAND_PROFILES, MAX_HOPS, inboundSettings, forwardKind, kindLabel, protoShort,
   formatSocks, hopText, hopProto, pathHops, landingText, usedPortsText, hopFromSaved,
-  relayPage, setRelayPage,
 } from '../lib/forwards'
-import { Badge, Empty, Field, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, Tabs } from '../components/ui'
-import MyForwards from './MyForwards'
+import { Badge, Empty, Field, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows } from '../components/ui'
 
 function emptyHop() {
   return { kind: 'panel', inbound_id: '', sk5_host: '', sk5_port: '1080', sk5_user: '', sk5_pass: '', uri: '' }
@@ -23,6 +20,8 @@ function emptyHop() {
 
 const emptyForm = {
   kind: 'chain',
+  entry_mode: 'node',
+  entry_id: '',
   server_id: '',
   name: '',
   profile: 'vless-reality-vision',
@@ -36,6 +35,18 @@ const emptyForm = {
   network: 'tcp',
   hops: [emptyHop()],
   enabled: true,
+}
+
+function cloneEntrySettings(inb) {
+  const st = inboundSettings(inb)
+  const out = {}
+  for (const k of ['dest', 'method', 'transport', 'sni', 'host', 'alpn', 'fingerprint', 'min_version', 'mode', 'xver', 'server_names', 'path', 'spider_x', 'reject_unknown_sni']) {
+    const v = st[k]
+    if (v == null || v === '') continue
+    if (Array.isArray(v) && v.length === 0) continue
+    out[k] = v
+  }
+  return out
 }
 
 function needsTLS(profile) {
@@ -68,7 +79,7 @@ function serializeHop(h) {
 
 function entryText(inb) {
   if (forwardKind(inb) === 'port') return `:${inb.port}`
-  return inb.name || `:${inb.port}`
+  return inb.server_name || inb.name || `:${inb.port}`
 }
 
 function pathLine(inb, byID) {
@@ -117,6 +128,8 @@ function formFromInbound(inb) {
   const st = inboundSettings(inb)
   return {
     kind: forwardKind(inb) || 'chain',
+    entry_mode: 'new',
+    entry_id: '',
     server_id: inb.server_id,
     name: inb.name || '',
     profile: inb.profile === 'port-forward' ? 'vless-reality-vision' : inb.profile,
@@ -204,9 +217,10 @@ function ForwardsPanel() {
     return m
   }, [servers])
 
-  const forwards = useMemo(() => list.filter(x => forwardKind(x) && relayPage(x) !== 'my'), [list])
+  const forwards = useMemo(() => list.filter(x => forwardKind(x)), [list])
+  const directs = useMemo(() => list.filter(x => isDirectNode(x)), [list])
   const landings = useMemo(
-    () => list.filter(x => x.line_kind === 'direct' && LAND_PROFILES.includes(x.profile) && Number(x.id) !== Number(editId)),
+    () => list.filter(x => isDirectNode(x) && LAND_PROFILES.includes(x.profile) && Number(x.id) !== Number(editId)),
     [list, editId],
   )
   const protoList = profiles.length ? profiles : [{ id: f.profile, title: f.profile, desc: '' }]
@@ -229,8 +243,15 @@ function ForwardsPanel() {
   }
   const openCreate = () => {
     reset()
-    const sid = servers[0]?.id || ''
-    setF({ ...emptyForm, server_id: sid, hops: [emptyHop()] })
+    const first = list.find(x => isDirectNode(x))
+    const mode = first ? 'node' : 'new'
+    setF({
+      ...emptyForm,
+      entry_mode: mode,
+      entry_id: first?.id || '',
+      server_id: mode === 'new' ? (servers[0]?.id || '') : '',
+      hops: [emptyHop()],
+    })
     setOpen(true)
   }
   const startEdit = (inb) => {
@@ -258,6 +279,27 @@ function ForwardsPanel() {
     setF({ ...f, hops: f.hops.filter((_, idx) => idx !== i) })
   }
 
+  const cloning = !editId && f.kind === 'chain' && f.entry_mode === 'node'
+  const entryTemplate = cloning ? byID.get(Number(f.entry_id)) : null
+  const templateId = entryTemplate ? Number(entryTemplate.id) : 0
+
+  const suggestedName = () => {
+    const entry = entryTemplate
+      ? (entryTemplate.server_name || entryTemplate.name || '')
+      : (serversByID.get(Number(f.server_id))?.name || '')
+    const parts = [entry]
+    for (const h of (f.hops.length ? f.hops : [])) {
+      if (h.kind === 'panel') {
+        const land = byID.get(Number(h.inbound_id))
+        if (land?.name) parts.push(land.name)
+        continue
+      }
+      const label = hopText(h, byID)
+      if (label && label !== '—' && label !== '落地已删除') parts.push(label)
+    }
+    return parts.filter(Boolean).join(' → ')
+  }
+
   const bodyFromForm = () => {
     const kind = f.kind
     if (kind === 'port') {
@@ -278,20 +320,28 @@ function ForwardsPanel() {
         exit_uri: '',
       }
     }
+    const template = cloning ? byID.get(Number(f.entry_id)) : null
+    if (cloning && !template) return null
     const existing = editId ? inboundSettings(byID.get(Number(editId))) : {}
-    const settings = setRelayPage({ ...existing }, 'admin')
-    const profile = f.profile
-    if (isReality(profile) && String(f.dest || '').trim()) settings.dest = f.dest.trim()
-    if (profile === 'ss2022') settings.method = f.method
-    if (profile === 'mieru') settings.transport = f.transport
+    const settings = template ? cloneEntrySettings(template) : { ...existing }
+    const profile = template ? template.profile : f.profile
+    const serverId = template ? template.server_id : f.server_id
+    const certId = template ? (template.cert_id || '') : f.cert_id
+    if (!template) {
+      if (isReality(profile) && String(f.dest || '').trim()) settings.dest = f.dest.trim()
+      if (profile === 'ss2022') settings.method = f.method
+      if (profile === 'mieru') settings.transport = f.transport
+    }
     const hops = f.hops.length ? f.hops : [emptyHop()]
     const last = hops[hops.length - 1]
     const mids = hops.slice(0, -1).map(serializeHop)
     if (mids.length) settings.hops = mids
     else delete settings.hops
+    let name = String(f.name || '').trim()
+    if (!name && !editId) name = suggestedName()
     const body = {
-      server_id: Number(f.server_id),
-      name: f.name,
+      server_id: Number(serverId),
+      name,
       profile,
       port: Number(f.port) || 0,
       listen: '0.0.0.0',
@@ -301,7 +351,7 @@ function ForwardsPanel() {
       exit_inbound_id: 0,
       exit_uri: '',
     }
-    if (f.cert_id) body.cert_id = Number(f.cert_id)
+    if (certId) body.cert_id = Number(certId)
     if (last.kind === 'panel') body.exit_inbound_id = Number(last.inbound_id) || 0
     else if (last.kind === 'uri') body.exit_uri = String(last.uri || '').trim()
     else body.exit_uri = formatSocks(last.sk5_host, last.sk5_port, last.sk5_user, last.sk5_pass)
@@ -310,7 +360,11 @@ function ForwardsPanel() {
 
   const save = async (e) => {
     e.preventDefault()
-    if (!Number(f.server_id)) { toast('请选择入口实例', 'error'); return }
+    if (cloning) {
+      if (!templateId) { toast('请选择要沿用的节点', 'error'); return }
+    } else if (!Number(f.server_id)) {
+      toast('请选择入口实例', 'error'); return
+    }
     const raw = String(f.port ?? '').trim()
     if (raw !== '') {
       const port = Number(raw)
@@ -327,12 +381,14 @@ function ForwardsPanel() {
       if (!hops.length) { toast('至少需要一跳落地', 'error'); return }
       if (hops.length > MAX_HOPS) { toast(`最多 ${MAX_HOPS} 跳`, 'error'); return }
       const seen = new Set()
+      if (templateId) seen.add(templateId)
       for (let i = 0; i < hops.length; i++) {
         const h = hops[i]
         const label = i === hops.length - 1 ? '落地' : `第 ${i + 1} 跳`
         if (h.kind === 'panel') {
           const id = Number(h.inbound_id)
           if (!id) { toast(`请选择${label}节点`, 'error'); return }
+          if (templateId && id === templateId) { toast('不能把被沿用的节点再当成这一跳', 'error'); return }
           if (seen.has(id)) { toast('路径里不能重复同一节点', 'error'); return }
           seen.add(id)
         } else if (h.kind === 'uri') {
@@ -350,7 +406,9 @@ function ForwardsPanel() {
       const p = Number(f.dest_port)
       if (!Number.isInteger(p) || p < 1 || p > 65535) { toast('目标端口无效', 'error'); return }
     }
-    if (f.kind !== 'port' && needsTLS(f.profile) && !Number(f.cert_id)) {
+    const saveProfile = cloning ? (entryTemplate?.profile || '') : f.profile
+    const saveCert = cloning ? (entryTemplate?.cert_id || 0) : f.cert_id
+    if (f.kind !== 'port' && needsTLS(saveProfile) && !Number(saveCert)) {
       toast('该协议需要 TLS 证书', 'error')
       return
     }
@@ -366,10 +424,13 @@ function ForwardsPanel() {
         }))) return
       }
     }
+    const body = bodyFromForm()
+    if (!body) { toast('请选择要沿用的节点', 'error'); return }
     setBusy(true)
     try {
-      const d = wasEdit ? await api.put(`/inbounds/${editId}`, bodyFromForm()) : await api.post('/inbounds', bodyFromForm())
+      const d = wasEdit ? await api.put(`/inbounds/${editId}`, body) : await api.post('/inbounds', body)
       if (d.apply_error) toast(d.apply_error, 'error')
+      else if (f.kind === 'chain') toast(wasEdit ? '已保存。到套餐里勾选这条入口，订阅才会带上。' : '已创建。到套餐里勾选这条入口，订阅才会带上。')
       else toast(wasEdit ? '已保存' : '已创建')
       closeForm()
       load()
@@ -381,7 +442,7 @@ function ForwardsPanel() {
     const next = !inb.enabled
     if (!next) {
       if (!(await dialog.confirm({
-        title: '停用转发',
+        title: '停用中转',
         message: `将停掉「${inb.name || inb.port}」的入口端口，在线用户会立刻断开。`,
         danger: true,
         okText: '停用',
@@ -407,7 +468,7 @@ function ForwardsPanel() {
   }
 
   const del = async (inb) => {
-    if (!(await dialog.confirm({ title: '删除转发', message: '入口端口会立刻停掉。链式入口会从订阅里消失。', danger: true }))) return
+    if (!(await dialog.confirm({ title: '删除中转', message: '入口会立刻停掉。链式入口会从订阅里消失。原来的节点不受影响。', danger: true }))) return
     await ops.current.run(`del-${inb.id}`, async () => {
       try {
         await api.del(`/inbounds/${inb.id}`)
@@ -417,10 +478,28 @@ function ForwardsPanel() {
     })
   }
 
-  const selectedServer = servers.find(s => Number(s.id) === Number(f.server_id))
-  const entryProfile = f.kind === 'port' ? 'port-forward' : f.profile
+  const selectedServer = entryTemplate
+    ? serversByID.get(Number(entryTemplate.server_id))
+    : servers.find(s => Number(s.id) === Number(f.server_id))
+  const entryCert = entryTemplate?.cert_id
+    ? certs.find(c => Number(c.id) === Number(entryTemplate.cert_id))
+    : null
   const hops = f.hops.length ? f.hops : [emptyHop()]
   const needsLanding = f.kind === 'chain' && hops.some(h => h.kind === 'panel')
+  const showNewEntry = editId || f.kind === 'port' || f.entry_mode !== 'node'
+  const groupedEntries = []
+  if (!showNewEntry) {
+    const seen = new Set()
+    for (const s of servers) {
+      const nodes = directs.filter(n => Number(n.server_id) === Number(s.id))
+      if (!nodes.length) continue
+      groupedEntries.push({ id: s.id, label: s.name, nodes })
+      nodes.forEach(n => seen.add(Number(n.id)))
+    }
+    const rest = directs.filter(n => !seen.has(Number(n.id)))
+    if (rest.length) groupedEntries.push({ id: 'rest', label: '其它', nodes: rest })
+  }
+  const nameHint = f.kind === 'chain' ? (suggestedName() || '可留空，按路径命名') : ''
 
   return (
     <div>
@@ -434,7 +513,7 @@ function ForwardsPanel() {
             <option value="port">端口中转</option>
           </select>
           <button type="button" className="btn-primary sm:ml-auto shrink-0" onClick={openCreate}>
-            <Icon name="plus" size={15} /> 新建转发
+            <Icon name="plus" size={15} /> 新建中转
           </button>
         </div>
       ) : null}
@@ -443,13 +522,13 @@ function ForwardsPanel() {
         {!ready ? (
           <SkeletonRows />
         ) : forwards.length === 0 ? (
-          <Empty title="还没有转发" hint="链式按跳走；端口中转只把本机端口转到别人的 IP。" action={
+          <Empty title="还没有中转" hint="默认入口加一跳落地。需要时再加跳。端口中转只把本机端口转到别人的 IP。" action={
             <button type="button" className="btn-primary" onClick={openCreate}>
-              <Icon name="plus" size={15} /> 新建转发
+              <Icon name="plus" size={15} /> 新建中转
             </button>
           } />
         ) : rows.length === 0 ? (
-          <Empty title="没有匹配的转发" hint="换个关键词或类型。" />
+          <Empty title="没有匹配的中转" hint="换个关键词或类型。" />
         ) : (
           <>
             <div className="hidden md:block table-wrap">
@@ -463,6 +542,9 @@ function ForwardsPanel() {
                       <tr key={inb.id} className={!inb.enabled ? 'opacity-50' : ''}>
                         <td className="min-w-0">
                           <PathHops inb={inb} byID={byID} serversByID={serversByID} />
+                          {inb.name && inb.name !== pathLine(inb, byID) ? (
+                            <div className="text-[12px] text-ink-soft mt-0.5 truncate">{inb.name}</div>
+                          ) : null}
                           <div className="text-[11px] text-ink-mut mt-0.5">{pathSub(inb, byID)}</div>
                         </td>
                         <td>
@@ -476,7 +558,7 @@ function ForwardsPanel() {
                         </td>
                         <td className="whitespace-nowrap">
                           <div className="icon-row">
-                            <button type="button" className="icon-btn" onClick={() => startEdit(inb)} aria-label="编辑转发" title="编辑">
+                            <button type="button" className="icon-btn" onClick={() => startEdit(inb)} aria-label="编辑中转" title="编辑">
                               <Icon name="pencil" size={14} />
                             </button>
                             <MoreMenu iconOnly items={[
@@ -501,6 +583,9 @@ function ForwardsPanel() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <PathHops inb={inb} byID={byID} serversByID={serversByID} />
+                        {inb.name && inb.name !== pathLine(inb, byID) ? (
+                          <div className="text-[12px] text-ink-soft mt-0.5 truncate">{inb.name}</div>
+                        ) : null}
                         <div className="text-[12px] text-ink-mut mt-0.5">
                           {kindLabel(k)}{n > 1 ? ` · ${n} 跳` : ''} · {pathSub(inb, byID)}
                           {!inb.enabled ? ' · 停用' : ''}
@@ -510,7 +595,7 @@ function ForwardsPanel() {
                         </div>
                       </div>
                       <div className="icon-row shrink-0">
-                        <button type="button" className="icon-btn" onClick={() => startEdit(inb)} aria-label="编辑转发" title="编辑">
+                        <button type="button" className="icon-btn" onClick={() => startEdit(inb)} aria-label="编辑中转" title="编辑">
                           <Icon name="pencil" size={14} />
                         </button>
                         <MoreMenu iconOnly items={[
@@ -530,7 +615,7 @@ function ForwardsPanel() {
 
       <Modal
         open={open}
-        title={editId ? '编辑转发' : '新建转发'}
+        title={editId ? '编辑中转' : '新建中转'}
         onClose={closeForm}
         footer={(
           <>
@@ -550,29 +635,75 @@ function ForwardsPanel() {
                 setF({ ...f, kind, hops: kind === 'chain' && (!f.hops || !f.hops.length) ? [emptyHop()] : f.hops })
               }}
             >
-              <option value="chain">链式转发</option>
+              <option value="chain">链式中转</option>
               <option value="port">端口中转</option>
             </select>
           </Field>
-          <Field label="入口实例">
-            <select className="input-field" value={f.server_id} onChange={e => setF({ ...f, server_id: e.target.value })} required>
-              <option value="">选择实例</option>
-              {servers.map(s => <option key={s.id} value={s.id}>{s.name}{s.public_host ? ` · ${s.public_host}` : ''}</option>)}
-            </select>
-          </Field>
-          {f.kind !== 'port' && (
+          {!editId && f.kind === 'chain' ? (
+            <div>
+              <div className="text-[12px] font-medium text-ink-soft mb-1.5">入口</div>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { id: 'node', title: '沿用节点' },
+                  { id: 'new', title: '新建入口' },
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    className={`node-pick ${f.entry_mode === opt.id ? 'is-on' : ''}`}
+                    aria-pressed={f.entry_mode === opt.id}
+                    onClick={() => setF({ ...f, entry_mode: opt.id })}
+                  >
+                    <span className="text-[13px] font-medium">{opt.title}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {showNewEntry ? (
+            <Field label="入口实例">
+              <select className="input-field" value={f.server_id} onChange={e => setF({ ...f, server_id: e.target.value })} required>
+                <option value="">选择实例</option>
+                {servers.map(s => <option key={s.id} value={s.id}>{s.name}{s.public_host ? ` · ${s.public_host}` : ''}</option>)}
+              </select>
+            </Field>
+          ) : (
+            <Field label="沿用节点" hint="会新建一条入口，协议和证书跟这个节点一样。原来的节点不动。">
+              <select className="input-field" value={f.entry_id} onChange={e => setF({ ...f, entry_id: e.target.value })} required>
+                <option value="">选择节点</option>
+                {groupedEntries.map(g => (
+                  <optgroup key={g.id} label={g.label}>
+                    {g.nodes.map(n => (
+                      <option key={n.id} value={n.id}>{n.name} · {protoShort(n.profile)} :{n.port}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </Field>
+          )}
+          {f.kind !== 'port' && showNewEntry ? (
             <Field label="入口协议" hint={editId ? '创建后不能改协议' : '用户连这个协议，再转到后面的跳。'}>
               <select className="input-field" value={f.profile} onChange={e => setF({ ...f, profile: e.target.value })} disabled={!!editId}>
                 {protoList.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
               </select>
             </Field>
-          )}
+          ) : null}
+          {!showNewEntry && entryTemplate ? (
+            <div className="text-[12px] text-ink-soft">
+              {entryTemplate.server_name || '入口'} · {protoShort(entryTemplate.profile)}
+              {entryTemplate.port ? ` :${entryTemplate.port}` : ''}
+              {entryCert ? ` · 证书 ${entryCert.name || entryCert.domains || entryCert.id}` : (needsTLS(entryTemplate.profile) ? ' · 没有证书' : '')}
+            </div>
+          ) : null}
+          {!showNewEntry && directs.length === 0 ? (
+            <div className="notice">还没有可沿用的节点。可以改成在机器上新建入口。</div>
+          ) : null}
           <div className="grid sm:grid-cols-2 gap-3">
             <Field label="名称" hint="可留空">
-              <input className="input-field" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder={entryProfile ? `${entryProfile}-端口` : ''} />
+              <input className="input-field" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder={nameHint} />
             </Field>
-            <Field label="监听端口" hint={usedPortsText(serversByID.get(Number(f.server_id)), list, editId)}>
-              <input className="input-field font-mono tabular-nums" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} placeholder={f.server_id ? `随机 ${formatPortRange(serversByID.get(Number(f.server_id)))}` : '随机'} inputMode="numeric" />
+            <Field label="监听端口" hint={usedPortsText(selectedServer, list, editId)}>
+              <input className="input-field font-mono tabular-nums" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} placeholder={selectedServer ? `随机 ${formatPortRange(selectedServer)}` : '随机'} inputMode="numeric" />
             </Field>
           </div>
           {f.kind === 'chain' && (
@@ -580,7 +711,7 @@ function ForwardsPanel() {
               {hops.map((h, i) => {
                 const last = i === hops.length - 1
                 const used = hopUsedIds(hops, i)
-                const opts = landings.filter(x => !used.has(Number(x.id)) || Number(x.id) === Number(h.inbound_id))
+                const opts = landings.filter(x => Number(x.id) !== templateId && (!used.has(Number(x.id)) || Number(x.id) === Number(h.inbound_id)))
                 return (
                   <div
                     key={i}
@@ -589,7 +720,7 @@ function ForwardsPanel() {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-[12px] font-medium text-ink-soft">
-                        {last ? `落地 · 第 ${i + 1} 跳` : `第 ${i + 1} 跳`}
+                        {hops.length === 1 ? '落地' : (last ? `落地 · 第 ${i + 1} 跳` : `第 ${i + 1} 跳`)}
                       </div>
                       {hops.length > 1 ? (
                         <button type="button" className="btn-ghost px-2 text-[12px]" onClick={() => removeHop(i)}>去掉</button>
@@ -680,7 +811,7 @@ function ForwardsPanel() {
               </Field>
             </>
           )}
-          {f.kind !== 'port' && needsTLS(f.profile) && (
+          {f.kind !== 'port' && showNewEntry && needsTLS(f.profile) && (
             <Field label="证书">
               <select className="input-field" value={f.cert_id} onChange={e => setF({ ...f, cert_id: e.target.value })}>
                 <option value="">选择证书</option>
@@ -688,12 +819,12 @@ function ForwardsPanel() {
               </select>
             </Field>
           )}
-          {f.kind !== 'port' && isReality(f.profile) && (
+          {f.kind !== 'port' && showNewEntry && isReality(f.profile) && (
             <Field label="REALITY dest" hint="伪装目标。可留空用默认。">
               <input className="input-field" value={f.dest} onChange={e => setF({ ...f, dest: e.target.value })} />
             </Field>
           )}
-          {f.kind !== 'port' && f.profile === 'ss2022' && (
+          {f.kind !== 'port' && showNewEntry && f.profile === 'ss2022' && (
             <Field label="加密">
               <select className="input-field" value={f.method} onChange={e => setF({ ...f, method: e.target.value })}>
                 <option value="2022-blake3-aes-256-gcm">2022-blake3-aes-256-gcm</option>
@@ -701,7 +832,7 @@ function ForwardsPanel() {
               </select>
             </Field>
           )}
-          {f.kind !== 'port' && f.profile === 'mieru' && (
+          {f.kind !== 'port' && showNewEntry && f.profile === 'mieru' && (
             <Field label="传输">
               <select className="input-field" value={f.transport} onChange={e => setF({ ...f, transport: e.target.value })}>
                 <option value="BOTH">BOTH（TCP + UDP）</option>
@@ -716,27 +847,23 @@ function ForwardsPanel() {
           {f.kind === 'chain' && selectedServer && !selectedServer.public_host ? (
             <div className="notice">入口机还没填公开地址。落地能建，用户连入口时需要地址。</div>
           ) : null}
+          {f.kind === 'chain' ? (
+            <div className="notice">保存后到套餐里勾选这条入口，订阅才会带上。不会自动勾选。</div>
+          ) : null}
         </form>
       </Modal>
     </div>
   )
 }
 
-const forwardTabs = [
-  { id: 'relay', label: '中转' },
-  { id: 'forward', label: '转发' },
-]
-
 export default function Forwards() {
-  const [searchParams, setSearchParams] = useSearchParams()
-  const requested = searchParams.get('tab')
-  const tab = forwardTabs.some(t => t.id === requested) ? requested : 'relay'
-  const goTab = (id) => setSearchParams(id === 'relay' ? {} : { tab: id }, { replace: true })
   return (
     <div>
-      <PageHead title="中转" />
-      <Tabs value={tab} onChange={goTab} items={forwardTabs} />
-      {tab === 'forward' ? <ForwardsPanel /> : <MyForwards embedded />}
+      <PageHead
+        title="中转"
+        desc="入口加一跳落地。需要时再加跳，最多 5 跳。保存后到套餐里勾选这条入口。"
+      />
+      <ForwardsPanel />
     </div>
   )
 }
