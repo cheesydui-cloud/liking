@@ -123,7 +123,7 @@ func (a *Agent) session(ctx context.Context) error {
 		Arch:         runtime.GOARCH,
 		LastRev:      lastRev,
 		Cores:        detectedCores(),
-		Caps:         []string{wsproto.CapCores, wsproto.CapProbe, wsproto.CapKick, wsproto.CapNFT, wsproto.CapAllowPort},
+		Caps:         []string{wsproto.CapCores, wsproto.CapProbe, wsproto.CapKick, wsproto.CapNFT, wsproto.CapWG, wsproto.CapAllowPort},
 	})
 	if err := a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeHello, ID: "hello", Payload: hello}); err != nil {
 		return err
@@ -174,7 +174,7 @@ func (a *Agent) session(ctx context.Context) error {
 		case err := <-errCh:
 			return err
 		case env := <-envCh:
-			if env.Type == wsproto.TypeApply || env.Type == wsproto.TypeEnsureCore || env.Type == wsproto.TypeRemoveCore || env.Type == wsproto.TypeProbe || env.Type == wsproto.TypeKick || env.Type == wsproto.TypeEnsureNFT || env.Type == wsproto.TypeAllowPort {
+			if env.Type == wsproto.TypeApply || env.Type == wsproto.TypeEnsureCore || env.Type == wsproto.TypeRemoveCore || env.Type == wsproto.TypeProbe || env.Type == wsproto.TypeKick || env.Type == wsproto.TypeEnsureNFT || env.Type == wsproto.TypeEnsureWG || env.Type == wsproto.TypeAllowPort {
 				go func(env wsproto.Envelope) {
 					var err error
 					switch env.Type {
@@ -190,6 +190,8 @@ func (a *Agent) session(ctx context.Context) error {
 						err = a.handleKick(ctx, ws, env)
 					case wsproto.TypeEnsureNFT:
 						err = a.handleEnsureNFT(ctx, ws, env)
+					case wsproto.TypeEnsureWG:
+						err = a.handleEnsureWG(ctx, ws, env)
 					case wsproto.TypeAllowPort:
 						err = a.handleAllowPort(ctx, ws, env)
 					}
@@ -443,6 +445,22 @@ func (a *Agent) handleEnsureNFT(ctx context.Context, ws *websocket.Conn, env wsp
 	}
 	p, _ := json.Marshal(wsproto.EnsureNFTAck{OK: ok, Error: msg, Have: have})
 	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeEnsureNFTAck, ID: env.ID, Payload: p})
+}
+
+func (a *Agent) handleEnsureWG(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {
+	err := installWG()
+	have := haveWG()
+	ok := err == nil && have
+	msg := ""
+	if !ok {
+		if err != nil {
+			msg = err.Error()
+		} else {
+			msg = "安装后仍找不到 wg"
+		}
+	}
+	p, _ := json.Marshal(wsproto.EnsureWGAck{OK: ok, Error: msg, Have: have})
+	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeEnsureWGAck, ID: env.ID, Payload: p})
 }
 
 func (a *Agent) handleApply(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {

@@ -893,7 +893,7 @@ export default function Nodes() {
               <Field label="家宽地址" hint="家宽自己的隧道地址。它的默认路由仍走宽带，不要写成 0.0.0.0/0。">
                 <input className="input-field font-mono" value={f.wg_exit} onChange={e => setF({ ...f, wg_exit: e.target.value })} placeholder="10.7.0.2/32" />
               </Field>
-              <div className="notice sm:col-span-2">客户连这条入口。家宽是隧道里的出口，不要另建节点，也不要放进套餐。保存后到「参数」里复制家宽配置，贴到家宽上执行。中转机需要已安装 wireguard-tools，面板不会下载它。套餐里勾选这一条，订阅才会带上。</div>
+              <div className="notice sm:col-span-2">客户连这条入口。家宽是隧道里的出口，不要另建节点，也不要放进套餐。保存后到「参数」里复制家宽配置，贴到家宽上执行。中转机缺 WireGuard 时，到实例菜单点「安装 WireGuard」。套餐里勾选这一条，订阅才会带上。</div>
             </>
           )}
           {destIsSelf && (

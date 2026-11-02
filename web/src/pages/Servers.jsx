@@ -274,6 +274,28 @@ export default function Servers() {
     setCoreSrv(s)
   }
 
+  const pushWG = async (s) => {
+    if (!s?.id) return
+    if (!s.online) {
+      toast('Agent 不在线，无法安装 WireGuard', 'error')
+      return
+    }
+    if (!s.can_push_wg) {
+      toast('该 Agent 还不支持安装 WireGuard。请先一键升级', 'error')
+      return
+    }
+    setBusyId(s.id)
+    try {
+      const d = await api.post(`/servers/${s.id}/push-wg`, {})
+      if (d.apply_error) toast(d.apply_error, 'error')
+      else toast('已安装 WireGuard')
+      await load()
+    } catch (e) {
+      toast(e.message, 'error')
+      if (e.code === 'agent_too_old') showInstall(s.id)
+    } finally { setBusyId(0) }
+  }
+
   const pushNft = async (s) => {
     if (!s?.id) return
     if (!s.online) {
@@ -336,6 +358,14 @@ export default function Servers() {
       return
     }
     await pushNft(s)
+  }
+
+  const wgCta = async (s) => {
+    if (!s.can_push_wg) {
+      await upgradeAgent(s)
+      return
+    }
+    await pushWG(s)
   }
 
   const pushCore = async () => {
@@ -651,6 +681,12 @@ export default function Servers() {
                       },
                       { label: '推送核心', hint: s.can_push_cores ? '安装或卸载 Xray / sing-box / Mita' : (s.online ? '需先升级 Agent' : '需在线'), onSelect: () => openCores(s) },
                       {
+                        label: '安装 WireGuard',
+                        hint: s.can_push_wg ? '安装 wg 和 wg-quick。已装则跳过' : (s.online ? '需先升级 Agent' : '需在线'),
+                        disabled: !s.online || busyId === s.id,
+                        onSelect: () => pushWG(s),
+                      },
+                      {
                         label: '安装 nftables',
                         hint: s.can_push_nft ? '拒绝中国 IP 需要。已装则跳过' : (s.online ? '需先升级 Agent' : '需在线'),
                         disabled: !s.online || busyId === s.id,
@@ -709,16 +745,23 @@ export default function Servers() {
                         </button>
                       </div>
                     ) : null}
+                    {/wireguard-tools/i.test(s.last_error) ? (
+                      <div className="px-3 pb-2">
+                        <button type="button" className="btn-primary h-8 w-full" disabled={busyId === s.id} onClick={() => wgCta(s)}>
+                          {busyId === s.id ? '处理中…' : (s.can_push_wg ? '安装 WireGuard' : '先升级 Agent')}
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
-                {!fresh && !(/nftables/i.test(s.last_error || '')) && s.needs_reinstall ? (
+                {!fresh && !(/nftables|wireguard-tools/i.test(s.last_error || '')) && s.needs_reinstall ? (
                   <div className="px-3 pb-2">
                     <button type="button" className="btn-primary h-8 w-full" onClick={() => showInstall(s.id)}>
                       <Icon name="copy" size={14} /> 复制安装命令
                     </button>
                   </div>
                 ) : null}
-                {!fresh && s.online && s.needs_upgrade && !s.needs_reinstall && !(/nftables/i.test(s.last_error || '')) ? (
+                {!fresh && s.online && s.needs_upgrade && !s.needs_reinstall && !(/nftables|wireguard-tools/i.test(s.last_error || '')) ? (
                   <div className="px-3 pb-2">
                     <button type="button" className="btn-primary h-8 w-full" disabled={busyId === s.id} onClick={() => upgradeAgent(s)}>
                       {busyId === s.id ? '升级中…' : '一键升级'}

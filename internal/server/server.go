@@ -130,6 +130,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/api/servers/{id}/push-core", s.handlePushCore)
 			r.Post("/api/servers/{id}/remove-core", s.handleRemoveCore)
 			r.Post("/api/servers/{id}/push-nft", s.handlePushNft)
+			r.Post("/api/servers/{id}/push-wg", s.handlePushWG)
 			r.Post("/api/servers/{id}/allow-port", s.handleAllowPort)
 			r.Post("/api/servers/{id}/rotate-token", s.handleRotateToken)
 			r.Post("/api/servers/{id}/dest-probe", s.handleDestProbe)

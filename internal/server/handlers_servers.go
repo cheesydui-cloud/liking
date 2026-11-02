@@ -50,6 +50,7 @@ func (s *Server) decorateServers(list []*db.Server) {
 		x.NeedsReinstall = x.Online == 1 && !version.CanRemoteUpgrade(x.AgentVer)
 		x.CanPushCores = s.Hub.HasCap(x.ID, wsproto.CapCores)
 		x.CanPushNft = s.Hub.HasCap(x.ID, wsproto.CapNFT)
+		x.CanPushWG = s.Hub.HasCap(x.ID, wsproto.CapWG)
 		x.CanAllowPort = s.Hub.HasCap(x.ID, wsproto.CapAllowPort)
 		if up, down, ok := s.Hub.Live(x.ID); ok {
 			x.NetUpBps = up

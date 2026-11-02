@@ -183,6 +183,54 @@ func (s *Server) handlePushNft(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, out)
 }
 
+func (s *Server) handlePushWG(w http.ResponseWriter, r *http.Request) {
+	id, err := chiID(r, "id")
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	srv, err := db.GetServer(s.DB, id)
+	if err != nil {
+		jsonErr(w, http.StatusNotFound, "服务器不存在")
+		return
+	}
+	if !s.Hub.IsOnline(id) {
+		jsonErr(w, http.StatusBadRequest, "Agent 不在线，无法安装 WireGuard")
+		return
+	}
+	osName, _, _ := s.Hub.ConnMeta(id)
+	if osName != "" && osName != "linux" {
+		jsonErr(w, http.StatusBadRequest, "需要 Linux 才能安装 WireGuard")
+		return
+	}
+	if !s.Hub.HasCap(id, wsproto.CapWG) {
+		jsonErrExtra(w, http.StatusBadRequest, "该 Agent 还不支持安装 WireGuard。请先一键升级 Agent。", map[string]any{"code": "agent_too_old"})
+		return
+	}
+	raw, err := s.Hub.SendRPC(id, wsproto.TypeEnsureWG, map[string]any{}, 3*time.Minute+30*time.Second)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var ack wsproto.EnsureWGAck
+	_ = json.Unmarshal(raw, &ack)
+	if !ack.OK {
+		msg := strings.TrimSpace(ack.Error)
+		if msg == "" {
+			msg = "安装 WireGuard 失败"
+		}
+		jsonErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	u := userFromCtx(r.Context())
+	db.AddAudit(s.DB, &u.ID, "agent.ensure_wg", srv.Name)
+	out := map[string]any{"ok": true, "have": ack.Have}
+	if err := s.pushServer(id); err != nil {
+		out["apply_error"] = err.Error()
+	}
+	jsonOK(w, out)
+}
+
 func (s *Server) handleAllowPort(w http.ResponseWriter, r *http.Request) {
 	id, err := chiID(r, "id")
 	if err != nil {

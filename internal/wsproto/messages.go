@@ -26,6 +26,8 @@ const (
 	TypeKickAck       = "kick_ack"
 	TypeEnsureNFT     = "ensure_nft"
 	TypeEnsureNFTAck  = "ensure_nft_ack"
+	TypeEnsureWG      = "ensure_wg"
+	TypeEnsureWGAck   = "ensure_wg_ack"
 	TypeAllowPort     = "allow_port"
 	TypeAllowPortAck  = "allow_port_ack"
 
@@ -33,6 +35,7 @@ const (
 	CapProbe     = "probe"
 	CapKick      = "kick"
 	CapNFT       = "nft"
+	CapWG        = "wireguard"
 	CapAllowPort = "allow_port"
 )
 
@@ -189,6 +192,12 @@ type KickAck struct {
 }
 
 type EnsureNFTAck struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+	Have  bool   `json:"have"`
+}
+
+type EnsureWGAck struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
 	Have  bool   `json:"have"`
