@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -44,17 +45,21 @@ func (c *Cores) applyWireGuard(raw json.RawMessage) error {
 		return nil
 	}
 	path := filepath.Join(c.dir, cfg.Iface+".conf")
-	if err := os.WriteFile(path, []byte(cfg.Conf), 0o600); err != nil {
-		return err
-	}
+	// Read the running file before replacing it. After an agent restart
+	// lastReq is empty; comparing only that would bounce a healthy tunnel
+	// and zero the kernel counters the panel still needs to catch up.
+	disk, _ := os.ReadFile(path)
 	var prev wsproto.WireGuardConfig
 	_ = json.Unmarshal(c.lastReq["wireguard"], &prev)
 	up := wgIfaceUp(cfg.Iface)
-	changed := wgInterfaceBlock(cfg.Conf) != wgInterfaceBlock(prev.Conf)
+	bounce := !up || wgNeedsBounce(cfg.Conf, prev.Conf, string(disk))
+	if err := os.WriteFile(path, []byte(cfg.Conf), 0o600); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	quick := lookBin("wg-quick")
-	if !up || changed {
+	if bounce {
 		if up {
 			c.captureWGHandoff(cfg.Iface)
 			if msg, err := runLimited(ctx, quick, "down", path); err != nil {
@@ -135,6 +140,7 @@ func (c *Cores) rememberWG(cfg wsproto.WireGuardConfig) {
 	}
 	c.wgPeers = next
 	c.wgPeerIP = byIP
+	saveWGLedger(c.dir, next, byIP)
 }
 
 func (c *Cores) clearWG(iface string) {
@@ -144,6 +150,7 @@ func (c *Cores) clearWG(iface string) {
 	c.wgIface = ""
 	c.wgPeers = nil
 	c.wgPeerIP = nil
+	saveWGLedger(c.dir, nil, nil)
 }
 
 // captureWGHandoff saves peer counters before wg-quick down resets them.
@@ -243,11 +250,10 @@ func (c *Cores) peekWireGuardPeers() ([]wsproto.WGPeerStat, bool) {
 
 func (c *Cores) wgEmailDeltas(raw []wsproto.WGPeerStat) ([]wsproto.Sample, map[string]bytePair, bool) {
 	c.mu.Lock()
-	peers := c.wgPeers
-	byIP := c.wgPeerIP
 	prev := c.wgLast
 	c.mu.Unlock()
-	if len(peers) == 0 {
+	peers, byIP := c.wgIdentityMaps()
+	if len(peers) == 0 && len(byIP) == 0 {
 		return nil, nil, false
 	}
 	var cum []wsproto.Sample
@@ -301,42 +307,58 @@ func parseWGDump(dump string, peers, byIP map[string]string) []wsproto.Sample {
 	return out
 }
 
-// parseWGPeerDump reads `wg show <iface> dump`. The first line is the
-// interface and is not a peer. Peer columns are public key, preshared key,
-// endpoint, allowed IPs, handshake, rx, tx, keepalive.
+// parseWGPeerDump reads `wg show <iface> dump` and `wg show all dump`.
+// An interface line is not a peer. `all dump` prefixes every line with the
+// interface name, which shifts rx/tx by one column. A line that is not a
+// peer is skipped, including a transfer line that has no allowed-ips.
 func parseWGPeerDump(dump string) []wsproto.WGPeerStat {
 	lines := strings.Split(strings.ReplaceAll(dump, "\r\n", "\n"), "\n")
 	var out []wsproto.WGPeerStat
-	seen := 0
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		seen++
-		if seen == 1 {
-			continue
-		}
 		cols := strings.Split(line, "\t")
-		if len(cols) < 7 {
+		shift := 0
+		if len(cols) >= 2 && !looksLikeWGKey(cols[0]) && looksLikeWGKey(cols[1]) {
+			shift = 1
+		}
+		if len(cols) < shift+7 {
 			continue
 		}
-		pub := strings.TrimSpace(cols[0])
-		if pub == "" || pub == "(none)" {
+		pub := strings.TrimSpace(cols[shift])
+		if pub == "" || pub == "(none)" || !wgDumpPeerKey(cols, shift) {
 			continue
 		}
-		rx, err1 := strconv.ParseInt(strings.TrimSpace(cols[5]), 10, 64)
-		tx, err2 := strconv.ParseInt(strings.TrimSpace(cols[6]), 10, 64)
+		rx, err1 := strconv.ParseInt(strings.TrimSpace(cols[shift+5]), 10, 64)
+		tx, err2 := strconv.ParseInt(strings.TrimSpace(cols[shift+6]), 10, 64)
 		if err1 != nil || err2 != nil || rx < 0 || tx < 0 {
 			continue
 		}
-		allowed := strings.TrimSpace(cols[3])
+		allowed := strings.TrimSpace(cols[shift+3])
 		if allowed == "(none)" {
 			allowed = ""
 		}
 		out = append(out, wsproto.WGPeerStat{PublicKey: pub, AllowedIPs: allowed, Rx: rx, Tx: tx})
 	}
 	return out
+}
+
+// wgDumpPeerKey accepts the short names used in tests and the base64 keys
+// `wg show` prints. An interface line has the private key in column 0 and
+// fewer than 7 peer columns, so it never reaches this check.
+func wgDumpPeerKey(cols []string, shift int) bool {
+	pub := strings.TrimSpace(cols[shift])
+	if pub == "" || pub == "(none)" {
+		return false
+	}
+	if looksLikeWGKey(pub) {
+		return true
+	}
+	// Unprefixed dump lines are peers once they have the peer column count.
+	// A name-prefixed line is a peer only when column 1 is a real key.
+	return shift == 0
 }
 
 // parseWGTransfer reads `wg show <iface> transfer`: public key, rx, tx.
@@ -371,10 +393,7 @@ func (c *Cores) annotateWGPeers(raw []wsproto.WGPeerStat) []wsproto.WGPeerStat {
 	if len(out) == 0 {
 		return out
 	}
-	c.mu.Lock()
-	peers := c.wgPeers
-	byIP := c.wgPeerIP
-	c.mu.Unlock()
+	peers, byIP := c.wgIdentityMaps()
 	if len(peers) == 0 && len(byIP) == 0 {
 		return out
 	}
@@ -408,6 +427,163 @@ func emailForWGPeer(pub, allowed string, peers, byIP map[string]string) string {
 
 func canonicalWGKey(s string) string {
 	return wsproto.CanonicalWGKey(s)
+}
+
+// wgNeedsBounce is true when the tunnel must be torn down. An empty previous
+// config is not enough: the on-disk conf is what wg-quick last applied, and
+// a peer-only change can syncconf without zeroing counters.
+func wgNeedsBounce(newConf, prevConf, diskConf string) bool {
+	base := prevConf
+	if strings.TrimSpace(wgInterfaceBlock(base)) == "" {
+		base = diskConf
+	}
+	if strings.TrimSpace(wgInterfaceBlock(base)) == "" {
+		return true
+	}
+	return wgInterfaceBlock(newConf) != wgInterfaceBlock(base)
+}
+
+func looksLikeWGKey(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "(none)" {
+		return false
+	}
+	if b, err := base64.StdEncoding.DecodeString(s); err == nil && len(b) == 32 {
+		return true
+	}
+	raw := strings.TrimRight(s, "=")
+	b, err := base64.RawStdEncoding.DecodeString(raw)
+	return err == nil && len(b) == 32
+}
+
+type wgLedger struct {
+	Peers map[string]string `json:"peers"`
+	IPs   map[string]string `json:"ips"`
+}
+
+func wgLedgerPath(dir string) string {
+	return filepath.Join(dir, "wg-peers.json")
+}
+
+func saveWGLedger(dir string, peers, byIP map[string]string) {
+	if strings.TrimSpace(dir) == "" {
+		return
+	}
+	path := wgLedgerPath(dir)
+	if len(peers) == 0 && len(byIP) == 0 {
+		_ = os.Remove(path)
+		return
+	}
+	body, err := json.Marshal(wgLedger{Peers: peers, IPs: byIP})
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path, body, 0o600)
+}
+
+func loadWGLedger(dir string) (map[string]string, map[string]string) {
+	if strings.TrimSpace(dir) == "" {
+		return nil, nil
+	}
+	body, err := os.ReadFile(wgLedgerPath(dir))
+	if err != nil {
+		return nil, nil
+	}
+	var led wgLedger
+	if json.Unmarshal(body, &led) != nil {
+		return nil, nil
+	}
+	return led.Peers, led.IPs
+}
+
+// wgIdentityMaps names a kernel peer after an agent restart. Memory is filled
+// only by a successful apply. The ledger and the conf comment survive that.
+func (c *Cores) wgIdentityMaps() (map[string]string, map[string]string) {
+	c.mu.Lock()
+	peers, byIP := c.wgPeers, c.wgPeerIP
+	iface := c.wgIface
+	dir := c.dir
+	c.mu.Unlock()
+	if len(peers) > 0 || len(byIP) > 0 {
+		return peers, byIP
+	}
+	if p, ip := loadWGLedger(dir); len(p) > 0 || len(ip) > 0 {
+		return p, ip
+	}
+	if strings.TrimSpace(iface) == "" {
+		iface = "likingwg0"
+	}
+	body, err := os.ReadFile(filepath.Join(dir, iface+".conf"))
+	if err != nil {
+		return nil, nil
+	}
+	return identityFromWGConf(string(body))
+}
+
+func identityFromWGConf(conf string) (map[string]string, map[string]string) {
+	peers := map[string]string{}
+	byIP := map[string]string{}
+	var email, pub string
+	var ips []string
+	flush := func() {
+		email = strings.TrimSpace(email)
+		pub = strings.TrimSpace(pub)
+		if pub == "" || email == "" || strings.HasPrefix(email, "relay.") {
+			email, pub, ips = "", "", nil
+			return
+		}
+		key := canonicalWGKey(pub)
+		peers[key] = email
+		for _, ip := range ips {
+			ip = strings.TrimSpace(ip)
+			if ip == "" || ip == "0.0.0.0/0" || ip == "::/0" || ip == "192.0.2.1/32" {
+				continue
+			}
+			if prev, ok := byIP[ip]; ok && prev != email {
+				byIP[ip] = ""
+				continue
+			}
+			byIP[ip] = email
+		}
+		email, pub, ips = "", "", nil
+	}
+	for _, line := range strings.Split(strings.ReplaceAll(conf, "\r\n", "\n"), "\n") {
+		trim := strings.TrimSpace(line)
+		if trim == "" {
+			continue
+		}
+		if strings.HasPrefix(trim, "[") {
+			flush()
+			continue
+		}
+		if rest, ok := strings.CutPrefix(trim, "#"); ok {
+			rest = strings.TrimSpace(rest)
+			if v, ok := strings.CutPrefix(rest, "liking-email="); ok {
+				email = strings.TrimSpace(v)
+			}
+			continue
+		}
+		parts := strings.SplitN(trim, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(parts[0])) {
+		case "publickey":
+			pub = strings.TrimSpace(parts[1])
+		case "allowedips":
+			for _, ip := range strings.Split(parts[1], ",") {
+				ip = strings.TrimSpace(ip)
+				if ip != "" {
+					ips = append(ips, ip)
+				}
+			}
+		}
+	}
+	flush()
+	if len(peers) == 0 && len(byIP) == 0 {
+		return nil, nil
+	}
+	return peers, byIP
 }
 
 func parseWGConfPeers(conf string) map[string][]string {

@@ -272,6 +272,22 @@ function userTone(u) {
   return 'is-pkg'
 }
 
+function wgSilent(u) {
+  return u?.wg_stats === 'missing' || u?.wg_stats === 'unmatched' || u?.wg_stats === 'offline'
+}
+
+function wgRate(u, bps) {
+  if (wgSilent(u) && !(Number(u.net_up_bps) > 0) && !(Number(u.net_down_bps) > 0)) return '未上报'
+  return fmtBps(bps)
+}
+
+function wgHint(u) {
+  if (u?.wg_stats === 'missing') return '入口 Agent 未上报 WireGuard 用量，请一键升级中转'
+  if (u?.wg_stats === 'unmatched') return '隧道有流量，但没对上这个用户'
+  if (u?.wg_stats === 'offline') return '入口 Agent 不在线，用量暂停'
+  return ''
+}
+
 function Metric({ label, value, danger, plain, tone }) {
   return (
     <div className={`metric${tone ? ` is-${tone}` : ''}`}>
@@ -955,6 +971,8 @@ export default function Users() {
             const capBps = speedLimitBps(u.speed_limit)
             const upOver = capBps > 0 && (u.net_up_bps || 0) > capBps
             const downOver = capBps > 0 && (u.net_down_bps || 0) > capBps
+            const hint = wgHint(u)
+            const ratePlain = wgSilent(u) && !(u.net_up_bps > 0) && !(u.net_down_bps > 0)
             return (
               <div key={u.id} className={`machine ${userTone(u)}`}>
                 <div className="machine-head">
@@ -984,6 +1002,11 @@ export default function Users() {
                         </span>
                       </div>
                     ) : null}
+                    {hint ? (
+                      <div className="machine-host">
+                        <span className="text-[12px] text-ink-mut truncate" title={hint}>{hint}</span>
+                      </div>
+                    ) : null}
                   </div>
                   <div className="machine-toolbar">
                     <button type="button" className="icon-btn" onClick={() => openEdit(u)} aria-label="编辑用户" title="编辑">
@@ -1010,8 +1033,8 @@ export default function Users() {
                   <Metric label="额度" value={cap > 0 ? fmtBytes(cap) : '不限'} />
                   <Metric label="计费" value={u.direction === 'twoway' ? '双向' : '单向'} plain />
                   <Metric label="已用" value={fmtBytes(used)} />
-                  <Metric label="上行" value={fmtBps(u.net_up_bps)} tone={upOver ? undefined : 'up'} danger={upOver} />
-                  <Metric label="下行" value={fmtBps(u.net_down_bps)} tone={downOver ? undefined : 'down'} danger={downOver} />
+                  <Metric label="上行" value={wgRate(u, u.net_up_bps)} plain={ratePlain} tone={ratePlain || upOver ? undefined : 'up'} danger={upOver} />
+                  <Metric label="下行" value={wgRate(u, u.net_down_bps)} plain={ratePlain} tone={ratePlain || downOver ? undefined : 'down'} danger={downOver} />
                 </div>
                 <div className="machine-meter">
                   <Meter value={used} max={cap} />

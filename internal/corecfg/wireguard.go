@@ -453,6 +453,12 @@ func HubConfig(in *db.Inbound, clients []*db.Client) (string, []wgPeer, error) {
 		st.String("private_key"), st.String("address"), in.Port, st.Int("mtu", WGDefaultMTU), st.Int("fwmark", WGDefaultFwMark))
 	fmt.Fprintf(&b, "PostUp = %s\nPostDown = %s\n", hubPostUp(st, in.Port), hubPostDown(st, in.Port))
 	for _, p := range peers {
+		// The comment is not a WireGuard key. A restarted agent reads it from
+		// the on-disk conf and can still name the peer after its memory map is gone.
+		if email := strings.TrimSpace(p.Email); email != "" && !p.Exit {
+			fmt.Fprintf(&b, "\n[Peer]\n# liking-email=%s\nPublicKey = %s\nAllowedIPs = %s\n", email, p.PublicKey, p.AllowedIPs)
+			continue
+		}
 		fmt.Fprintf(&b, "\n[Peer]\nPublicKey = %s\nAllowedIPs = %s\n", p.PublicKey, p.AllowedIPs)
 	}
 	if pub, addr := strings.TrimSpace(st.String("probe_public_key")), strings.TrimSpace(st.String("probe_address")); pub != "" && addr != "" {

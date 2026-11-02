@@ -64,6 +64,16 @@ type Hub struct {
 
 	wgMu     sync.Mutex
 	wgCursor map[string]wgCursor // serverID:clientID -> last kernel reading
+	wgReport map[int64]wgReport
+}
+
+// wgReport is the last WireGuard stats frame from one agent. The user card
+// uses it to say the entry agent is not reporting, instead of showing 0 B/s.
+type wgReport struct {
+	at       time.Time
+	reported bool
+	busy     int
+	matched  int
 }
 
 type portLive struct {
@@ -535,11 +545,50 @@ func billBytes(n int64, mult float64) (int64, bool) {
 }
 
 func (h *Hub) consumeStats(serverID int64, st wsproto.Stats) {
+	reported := st.HasWGPeers && len(st.WGPeers) > 0
 	var skipWGEmail map[string]struct{}
-	if st.HasWGPeers && len(st.WGPeers) > 0 {
+	if reported {
 		skipWGEmail = h.applyWGPeers(serverID, st.WGPeers)
 	}
+	h.noteWGReport(serverID, reported, st.WGPeers, len(skipWGEmail))
 	h.applySamples(serverID, st.Samples, skipWGEmail)
+}
+
+func (h *Hub) noteWGReport(serverID int64, reported bool, peers []wsproto.WGPeerStat, matched int) {
+	busy := 0
+	for _, p := range peers {
+		if p.Rx < 0 || p.Tx < 0 || wgPeerUnbilled(p.AllowedIPs) {
+			continue
+		}
+		if !wgPeerFallbackOK(p) || (p.Rx == 0 && p.Tx == 0) {
+			continue
+		}
+		busy++
+	}
+	h.wgMu.Lock()
+	defer h.wgMu.Unlock()
+	if h.wgReport == nil {
+		h.wgReport = map[int64]wgReport{}
+	}
+	h.wgReport[serverID] = wgReport{at: time.Now(), reported: reported, busy: busy, matched: matched}
+}
+
+// WGStats is "ok", "missing", or "unmatched" for the user card.
+// A silent frame means this agent is not sending kernel peers.
+func (h *Hub) WGStats(serverID int64) string {
+	if h == nil {
+		return "missing"
+	}
+	h.wgMu.Lock()
+	rep, ok := h.wgReport[serverID]
+	h.wgMu.Unlock()
+	if !ok || time.Since(rep.at) > 20*time.Second || !rep.reported {
+		return "missing"
+	}
+	if rep.busy > 0 && rep.matched == 0 {
+		return "unmatched"
+	}
+	return "ok"
 }
 
 func (h *Hub) applyStats(serverID int64, samples []wsproto.Sample) {

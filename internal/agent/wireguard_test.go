@@ -121,6 +121,71 @@ func TestParseWGTransferAndEmptyDump(t *testing.T) {
 	}
 }
 
+func TestWGNeedsBounceUsesDiskConf(t *testing.T) {
+	iface := "[Interface]\nPrivateKey = abc\nAddress = 10.7.0.1/24\nListenPort = 10433\nPostUp = iptables -I FORWARD 1 -i %i -j ACCEPT\n"
+	disk := iface + "\n[Peer]\nPublicKey = old\nAllowedIPs = 10.7.0.10/32\n"
+	next := iface + "\n[Peer]\n# liking-email=u1.i0\nPublicKey = new\nAllowedIPs = 10.7.0.11/32\n"
+	if wgNeedsBounce(next, "", disk) {
+		t.Fatal("peer-only change against the on-disk conf must not bounce")
+	}
+	changed := strings.Replace(iface, "PostUp = iptables", "PostUp = true", 1) + "\n[Peer]\nPublicKey = new\nAllowedIPs = 10.7.0.11/32\n"
+	if !wgNeedsBounce(changed, "", disk) {
+		t.Fatal("PostUp change must bounce")
+	}
+	if !wgNeedsBounce(next, "", "") {
+		t.Fatal("no previous conf must bounce")
+	}
+}
+
+func TestWGLedgerAnnotatesAfterRestart(t *testing.T) {
+	dir := t.TempDir()
+	raw := make([]byte, 32)
+	for i := range raw {
+		raw[i] = byte(i + 1)
+	}
+	pub := base64.StdEncoding.EncodeToString(raw)
+	saveWGLedger(dir, map[string]string{pub: "u1.i2"}, map[string]string{"10.7.0.10/32": "u1.i2"})
+	c := &Cores{dir: dir, wgLast: map[string]bytePair{"u1.i2": {up: 80, down: 20}}}
+	peers := []wsproto.WGPeerStat{{PublicKey: pub, AllowedIPs: "10.7.0.10/32", Rx: 100, Tx: 40}}
+	got := c.annotateWGPeers(peers)
+	if len(got) != 1 || got[0].Email != "u1.i2" {
+		t.Fatalf("annotate %+v", got)
+	}
+	deltas, _, ok := c.wgEmailDeltas(got)
+	if !ok || len(deltas) != 1 || deltas[0].Email != "u1.i2" || deltas[0].Up != 20 || deltas[0].Down != 20 {
+		t.Fatalf("ledger delta %+v %v", deltas, ok)
+	}
+}
+
+func TestIdentityFromWGConf(t *testing.T) {
+	raw := make([]byte, 32)
+	for i := range raw {
+		raw[i] = byte(i + 4)
+	}
+	pub := base64.StdEncoding.EncodeToString(raw)
+	conf := "[Interface]\nPrivateKey = abc\n\n[Peer]\nPublicKey = exit\nAllowedIPs = 0.0.0.0/0\n\n[Peer]\n# liking-email=u1.i2\nPublicKey = " + pub + "\nAllowedIPs = 10.7.0.10/32\n"
+	peers, byIP := identityFromWGConf(conf)
+	if peers[pub] != "u1.i2" || byIP["10.7.0.10/32"] != "u1.i2" {
+		t.Fatalf("identity %+v %+v", peers, byIP)
+	}
+	if _, ok := peers["exit"]; ok || byIP["0.0.0.0/0"] != "" {
+		t.Fatal("exit comment missing must not be a customer")
+	}
+}
+
+func TestParseWGAllDumpDoesNotShiftRealKey(t *testing.T) {
+	raw := make([]byte, 32)
+	for i := range raw {
+		raw[i] = byte(i + 1)
+	}
+	pub := base64.StdEncoding.EncodeToString(raw)
+	dump := "likingwg0\tprivkey\tpubkey\t10433\toff\nlikingwg0\t" + pub + "\tnone\t1.2.3.4:9\t10.7.0.10/32\t1\t80\t20\t25\n"
+	got := parseWGPeerDump(dump)
+	if len(got) != 1 || got[0].PublicKey != pub || got[0].Rx != 80 || got[0].Tx != 20 || got[0].AllowedIPs != "10.7.0.10/32" {
+		t.Fatalf("shifted %+v", got)
+	}
+}
+
 func TestWGJSONListenPort(t *testing.T) {
 	raw := []byte("{\"iface\":\"likingwg0\",\"conf\":\"[Interface]\\nListenPort = 10433\\n\\n[Peer]\\nPublicKey = a\\n\"}")
 	if wgJSONListenPort(raw) != 10433 {

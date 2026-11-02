@@ -115,15 +115,28 @@ func (h *Hub) applyWGPeers(serverID int64, peers []wsproto.WGPeerStat) map[strin
 		in     *db.Inbound
 	}
 	var found []resolved
+	var pending []wsproto.WGPeerStat
+	taken := map[int64]struct{}{}
 	for _, p := range peers {
 		if p.Rx < 0 || p.Tx < 0 || wgPeerUnbilled(p.AllowedIPs) {
 			continue
 		}
 		c, in := h.clientForWGPeer(serverID, p)
 		if c == nil || in == nil {
+			// A /32 with traffic is one customer. A wider net is the home
+			// tunnel, and a transfer line with no address can be the exit.
+			if wgPeerFallbackOK(p) && (p.Rx > 0 || p.Tx > 0) {
+				pending = append(pending, p)
+			}
 			continue
 		}
 		found = append(found, resolved{peer: p, client: c, in: in})
+		taken[c.ID] = struct{}{}
+	}
+	if len(pending) == 1 {
+		if c, in := h.soleFreeWGClient(serverID, taken); c != nil && in != nil {
+			found = append(found, resolved{peer: pending[0], client: c, in: in})
+		}
 	}
 	matched := map[string]struct{}{}
 	for _, r := range found {
@@ -261,6 +274,63 @@ func (h *Hub) wgCatchUp(c *db.Client, rx, tx int64) (int64, int64) {
 	}
 	raw := totals[c.InboundID]
 	return wgGap(rx, raw.Up), wgGap(tx, raw.Down)
+}
+
+// wgPeerFallbackOK is a customer /32 the key lookup missed. Empty allowed
+// IPs and anything wider than /32 stay unmatched so the exit is not billed
+// to the only user on the machine.
+func wgPeerFallbackOK(p wsproto.WGPeerStat) bool {
+	ips := splitWGAllowed(p.AllowedIPs)
+	if len(ips) == 0 {
+		return false
+	}
+	for _, ip := range ips {
+		switch ip {
+		case "0.0.0.0/0", "::/0", corecfg.WGProbeAddress, "(none)":
+			return false
+		}
+		if i := strings.IndexByte(ip, '/'); i > 0 {
+			n, err := strconv.Atoi(strings.TrimSpace(ip[i+1:]))
+			if err != nil || n < 32 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (h *Hub) soleFreeWGClient(serverID int64, taken map[int64]struct{}) (*db.Client, *db.Inbound) {
+	ins, err := db.ListInboundsByServer(h.DB, serverID)
+	if err != nil {
+		return nil, nil
+	}
+	var found *db.Client
+	var foundIn *db.Inbound
+	for _, in := range ins {
+		if in == nil || in.Profile != corecfg.ProfileWireGuard {
+			continue
+		}
+		list, err := db.ListClientsByInbound(h.DB, in.ID)
+		if err != nil {
+			continue
+		}
+		for _, c := range list {
+			if c == nil || strings.HasPrefix(c.Email, "relay.") {
+				continue
+			}
+			if _, ok := taken[c.ID]; ok {
+				continue
+			}
+			if _, ok := h.wgInboundOnServer(serverID, c); !ok {
+				continue
+			}
+			if found != nil && found.ID != c.ID {
+				return nil, nil
+			}
+			found, foundIn = c, in
+		}
+	}
+	return found, foundIn
 }
 
 func wgUUIDCandidates(ip string) []string {

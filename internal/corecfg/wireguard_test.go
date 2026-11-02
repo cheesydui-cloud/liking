@@ -109,6 +109,9 @@ func TestWireGuardAddressesAndConf(t *testing.T) {
 	if !strings.Contains(hub, "AllowedIPs = 0.0.0.0/0") || !strings.Contains(hub, "AllowedIPs = 10.7.0.10/32") || !strings.Contains(hub, "AllowedIPs = 10.7.0.11/32") {
 		t.Fatalf("peers\n%s", hub)
 	}
+	if !strings.Contains(hub, "# liking-email=u1.i0") || !strings.Contains(hub, "# liking-email=u2.i0") {
+		t.Fatalf("peer email comment\n%s", hub)
+	}
 	if !strings.Contains(hub, "TCPMSS --set-mss 1240") || !strings.Contains(hub, "AllowedIPs = "+WGProbeAddress) {
 		t.Fatalf("mss or probe\n%s", hub)
 	}

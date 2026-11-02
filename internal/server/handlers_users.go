@@ -56,6 +56,10 @@ func adminUserViewPW(u *db.User, loginPW string) any {
 }
 
 func adminUserViewLive(u *db.User, loginPW string, live []userLiveNode) any {
+	return adminUserViewWG(u, loginPW, live, "")
+}
+
+func adminUserViewWG(u *db.User, loginPW string, live []userLiveNode, wgStats string) any {
 	if u == nil {
 		return nil
 	}
@@ -63,12 +67,62 @@ func adminUserViewLive(u *db.User, loginPW string, live []userLiveNode) any {
 		*db.User
 		Password  string         `json:"password,omitempty"`
 		LiveNodes []userLiveNode `json:"live_nodes,omitempty"`
+		WGStats   string         `json:"wg_stats,omitempty"`
 	}
 	pw := ""
 	if u.Role != "admin" {
 		pw = loginPW
 	}
-	return view{User: u, Password: pw, LiveNodes: live}
+	return view{User: u, Password: pw, LiveNodes: live, WGStats: wgStats}
+}
+
+// userWGStats tells the card why a WireGuard rate is zero. An older agent
+// never sends kernel peers, so a measured 0 B/s would hide that. VLESS-only
+// users stay empty and keep their own rate.
+func (s *Server) userWGStats(uid int64) string {
+	if s == nil || s.Hub == nil || s.DB == nil || uid <= 0 {
+		return ""
+	}
+	list, err := db.ListClientsByUser(s.DB, uid)
+	if err != nil || len(list) == 0 {
+		return ""
+	}
+	worst := ""
+	seen := map[int64]struct{}{}
+	for _, c := range list {
+		if c == nil || !c.Enabled || strings.HasPrefix(c.Email, "relay.") {
+			continue
+		}
+		in, err := db.GetInbound(s.DB, c.InboundID)
+		if err != nil || in == nil || !in.Enabled || in.Profile != corecfg.ProfileWireGuard {
+			continue
+		}
+		if _, ok := seen[in.ServerID]; ok {
+			continue
+		}
+		seen[in.ServerID] = struct{}{}
+		srv, err := db.GetServer(s.DB, in.ServerID)
+		if err != nil || srv == nil || srv.Online != 1 {
+			if worst != "unmatched" && worst != "missing" {
+				worst = "offline"
+			}
+			continue
+		}
+		switch s.Hub.WGStats(in.ServerID) {
+		case "unmatched":
+			return "unmatched"
+		case "missing":
+			worst = "missing"
+		default:
+			if worst == "" {
+				worst = "ok"
+			}
+		}
+	}
+	if worst == "ok" {
+		return ""
+	}
+	return worst
 }
 
 func (s *Server) userLiveNodes(uid int64) []userLiveNode {
@@ -111,7 +165,7 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 			u.NetUpBps = up
 			u.NetDownBps = down
 		}
-		out = append(out, adminUserViewLive(u, "", s.userLiveNodes(u.ID)))
+		out = append(out, adminUserViewWG(u, "", s.userLiveNodes(u.ID), s.userWGStats(u.ID)))
 	}
 	jsonOK(w, map[string]any{"users": out})
 }
