@@ -498,19 +498,21 @@ export default function Packages() {
                               onClick={() => toggleNode(n.id)}
                               aria-pressed={on}
                             >
-                              <span className={`node-check${on ? ' is-on' : ''}`} aria-hidden>{on ? <Icon name="check" size={11} /> : null}</span>
-                              <span className="min-w-0 flex items-center gap-2">
-                                <span className={`pkg-node-name truncate${n.enabled === false ? ' text-ink-mut' : ''}`}>{n.name}</span>
-                                {n.line_kind === 'chain' ? <Badge tone="muted">链式</Badge> : null}
-                                {n.enabled === false ? <Badge tone="muted">停用</Badge> : null}
-                              </span>
-                              <span className="pkg-node-meta">
-                                <span>{protoShort(n.profile)}</span>
-                                <span className="pkg-node-port">:{n.port}</span>
+                              <span className={`node-check${on ? ' is-on' : ''}`} aria-hidden>{on ? <Icon name="check" size={12} /> : null}</span>
+                              <span className="pkg-node-copy">
+                                <span className="pkg-node-title">
+                                  <span className={`pkg-node-name truncate${n.enabled === false ? ' text-ink-mut' : ''}`}>{n.name}</span>
+                                  {n.line_kind === 'chain' ? <Badge tone="muted">链式</Badge> : null}
+                                  {n.enabled === false ? <Badge tone="muted">停用</Badge> : null}
+                                </span>
+                                <span className="pkg-node-meta">
+                                  <span>{protoShort(n.profile)}</span>
+                                  <span className="pkg-node-port">:{n.port}</span>
+                                </span>
                               </span>
                             </button>
                             {on ? (
-                              <label className="pkg-mult-wrap">
+                              <label className="pkg-mult-wrap" onClick={e => e.stopPropagation()}>
                                 倍率
                                 <input
                                   className="input-field pkg-mult tabular-nums"
@@ -522,7 +524,7 @@ export default function Packages() {
                                   onChange={e => setF(prev => ({ ...prev, multipliers: { ...prev.multipliers, [n.id]: e.target.value } }))}
                                 />
                               </label>
-                            ) : <span />}
+                            ) : null}
                           </div>
                         )
                       })}
