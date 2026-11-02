@@ -61,6 +61,7 @@ function protoShort(profile) {
     case 'anytls': return 'AnyTLS'
     case 'mieru': return 'Mieru'
     case 'socks5': return 'SOCKS5'
+    case 'wireguard': return 'WireGuard'
     case 'port-forward': return '中转'
     default: return profile || ''
   }
@@ -497,7 +498,7 @@ export default function Packages() {
                               onClick={() => toggleNode(n.id)}
                               aria-pressed={on}
                             >
-                              <span className={`node-check${on ? ' is-on' : ''}`} aria-hidden>{on ? '✓' : ''}</span>
+                              <span className={`node-check${on ? ' is-on' : ''}`} aria-hidden>{on ? <Icon name="check" size={11} /> : null}</span>
                               <span className="min-w-0 flex items-center gap-2">
                                 <span className={`pkg-node-name truncate${n.enabled === false ? ' text-ink-mut' : ''}`}>{n.name}</span>
                                 {n.line_kind === 'chain' ? <Badge tone="muted">链式</Badge> : null}
