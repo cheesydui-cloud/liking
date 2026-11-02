@@ -36,6 +36,7 @@ export function protoShort(profile) {
     case 'anytls': return 'AnyTLS'
     case 'mieru': return 'Mieru'
     case 'socks5': return 'SOCKS5'
+    case 'wireguard': return 'WireGuard'
     case 'port-forward': return '中转'
     default: return profile || ''
   }

@@ -143,6 +143,7 @@ const emptyLine = {
   line_kind: 'direct', cert_id: 0, enabled: true, reject_cn: false,
   dest: 'www.cloudflare.com:443', sni: '', path: '', host: '', mode: 'auto',
   method: '2022-blake3-aes-256-gcm', transport: 'BOTH',
+  wg_network: '10.7.0.0/24', wg_address: '10.7.0.1/24', wg_exit: '10.7.0.2/32',
   fingerprint: 'chrome', short_ids: '', xver: 0, spider_x: '',
   min_version: '1.3', alpn: 'h2,http/1.1', reject_unknown_sni: true,
   rotate_keys: false, settings: {},
@@ -195,7 +196,7 @@ function inboundParamRows(inb) {
     ['path', st.path],
     ['host', st.host],
     ['mode', st.mode],
-    ['public_key', st.public_key],
+    ['public_key', inb.profile === 'wireguard' ? '' : st.public_key],
     ['short_id', short],
     ['fingerprint', st.fingerprint],
     ['spider_x', st.spider_x],
@@ -206,9 +207,14 @@ function inboundParamRows(inb) {
     ['method', st.method],
     ['server_password', st.server_password],
     ['transport', st.transport],
+    ['隧道网段', st.network],
+    ['中转机地址', st.address],
+    ['家宽地址', st.exit_address],
+    ['中转机公钥', st.public_key && inb.profile === 'wireguard' ? st.public_key : ''],
+    ['家宽公钥', st.exit_public_key],
     ['dest_host', st.dest_host],
     ['dest_port', st.dest_port],
-    ['network', st.network],
+    ['network', inb.profile === 'wireguard' ? '' : st.network],
   ].filter(([, v]) => v)
 }
 
@@ -246,6 +252,7 @@ function protoShort(profile) {
     case 'anytls': return 'AnyTLS'
     case 'mieru': return 'Mieru'
     case 'socks5': return 'SOCKS5'
+    case 'wireguard': return 'WireGuard'
     case 'port-forward': return '中转'
     default: return profile || ''
   }
@@ -300,6 +307,9 @@ function formFromInbound(inb) {
     alpn: alpn || 'h2,http/1.1',
     reject_unknown_sni: st.reject_unknown_sni !== false,
     rotate_keys: false,
+    wg_network: st.network || '10.7.0.0/24',
+    wg_address: st.address || '10.7.0.1/24',
+    wg_exit: st.exit_address || '10.7.0.2/32',
     settings: st,
   }
 }
@@ -430,6 +440,14 @@ export default function Nodes() {
     }
     if (profile === 'ss2022') settings.method = f.method
     if (profile === 'mieru') settings.transport = f.transport
+    if (profile === 'wireguard') {
+      const network = String(f.wg_network || '').trim()
+      const address = String(f.wg_address || '').trim()
+      const exit = String(f.wg_exit || '').trim()
+      if (network) settings.network = network
+      if (address) settings.address = address
+      if (exit) settings.exit_address = exit
+    }
     const body = {
       server_id: Number(f.server_id),
       name: f.name,
@@ -438,7 +456,7 @@ export default function Nodes() {
       listen: f.listen || '0.0.0.0',
       line_kind: 'direct',
       enabled: f.enabled !== false,
-      reject_cn: !!f.reject_cn,
+      reject_cn: profile === 'wireguard' ? false : !!f.reject_cn,
       settings,
     }
     if (f.cert_id) body.cert_id = Number(f.cert_id)
@@ -553,6 +571,12 @@ export default function Nodes() {
   const copyShare = async (inb) => {
     try {
       const d = await api.get(`/inbounds/${inb.id}/share`)
+      if (inb.profile === 'wireguard' && d?.conf) {
+        setShareText(d.conf)
+        try { await copyText(d.conf); toast('已复制当前账号的 WireGuard 配置') }
+        catch { toast('请从窗口里复制配置', 'error') }
+        return
+      }
       if (!d?.uri) {
         toast('这个节点还没有分享链接', 'error')
         return
@@ -702,7 +726,7 @@ export default function Nodes() {
                               { label: '参数', onSelect: () => setParamInb(inb) },
                               { label: '探测端口', onSelect: () => probeListen(inb) },
                               { sep: true },
-                              { label: inb.reject_cn ? '允许中国 IP' : '拒绝中国 IP', onSelect: () => toggleRejectCN(inb) },
+                              ...(inb.profile === 'wireguard' ? [] : [{ label: inb.reject_cn ? '允许中国 IP' : '拒绝中国 IP', onSelect: () => toggleRejectCN(inb) }]),
                               { label: inb.enabled ? '停用' : '启用', onSelect: () => toggle(inb) },
                               { sep: true },
                               { label: '删除', danger: true, onSelect: () => delLine(inb.id) },
@@ -795,6 +819,7 @@ export default function Nodes() {
           <Field label="端口" hint={selectedServer ? usedPortsText(selectedServer, list, editId) : '不填则随机，避开已用端口'}>
             <input className="input-field" type="number" min="1" max="65535" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} placeholder={selectedServer ? `随机 ${formatPortRange(selectedServer)}` : '随机'} />
           </Field>
+          {f.profile !== 'wireguard' && (
           <label className="flex items-start gap-2 sm:col-span-2 text-[13px] text-ink-soft select-none">
             <input type="checkbox" className="mt-0.5" checked={!!f.reject_cn} onChange={e => setF({ ...f, reject_cn: e.target.checked })} />
             <span>
@@ -802,6 +827,7 @@ export default function Nodes() {
               <span className="block text-[12px] text-ink-mut mt-0.5">大陆家里直连失败，海外中转仍可进。认 IP，不是账号。</span>
             </span>
           </label>
+          )}
           {meta?.need_tls && (
             <Field label="TLS 证书" hint="在设置里签发或上传">
               <select className="input-field" value={f.cert_id} onChange={e => setF({ ...f, cert_id: e.target.value })}>
@@ -856,15 +882,31 @@ export default function Nodes() {
           {f.profile === 'socks5' && (
             <div className="notice sm:col-span-2">SOCKS5 走 sing-box，用户名密码认证，可 UDP。浏览器和 Clash 可直连，也可当链式落地。</div>
           )}
+          {f.profile === 'wireguard' && (
+            <>
+              <Field label="隧道网段" hint="客户从 .10 起分配。已经分出去的地址不会改。">
+                <input className="input-field font-mono" value={f.wg_network} onChange={e => setF({ ...f, wg_network: e.target.value })} placeholder="10.7.0.0/24" />
+              </Field>
+              <Field label="中转机地址" hint="掩码要和网段一致，例如 10.7.0.1/24。">
+                <input className="input-field font-mono" value={f.wg_address} onChange={e => setF({ ...f, wg_address: e.target.value })} placeholder="10.7.0.1/24" />
+              </Field>
+              <Field label="家宽地址" hint="家宽自己的隧道地址。它的默认路由仍走宽带，不要写成 0.0.0.0/0。">
+                <input className="input-field font-mono" value={f.wg_exit} onChange={e => setF({ ...f, wg_exit: e.target.value })} placeholder="10.7.0.2/32" />
+              </Field>
+              <div className="notice sm:col-span-2">客户连这条入口。家宽是隧道里的出口，不要另建节点，也不要放进套餐。保存后到「参数」里复制家宽配置，贴到家宽上执行。中转机需要已安装 wireguard-tools，面板不会下载它。套餐里勾选这一条，订阅才会带上。</div>
+            </>
+          )}
           {destIsSelf && (
             <div className="notice sm:col-span-2">dest 指向了这台机器自己，伪装会失效，也无法保存。请改成 microsoft / apple 这类真实网站。</div>
           )}
+          {f.profile !== 'wireguard' && (
           <div className="sm:col-span-2">
             <button type="button" className="row-act" onClick={() => setShowAdv(v => !v)} aria-expanded={showAdv}>
               {showAdv ? '收起高级选项' : '高级选项 / SNI / 指纹 / 密钥'}
             </button>
           </div>
-          {showAdv && (
+          )}
+          {showAdv && f.profile !== 'wireguard' && (
             <>
               <Field label="监听地址" hint="一般保持 0.0.0.0">
                 <input className="input-field" value={f.listen} onChange={e => setF({ ...f, listen: e.target.value })} />
@@ -955,10 +997,10 @@ export default function Nodes() {
               )}
             </>
           )}
-          {Number(f.port) === 443 && (
+          {Number(f.port) === 443 && f.profile !== 'wireguard' && (
             <div className="notice sm:col-span-2">443 很容易被 Nginx / 其它面板占用。建议改成 8443 或其它空闲端口。</div>
           )}
-          {missingCore && (
+          {missingCore && f.profile !== 'wireguard' && (
             <div className="notice sm:col-span-2">这台实例还没有 {meta.core}。创建后会自动从 GitHub 下载并拉起，第一次可能要等一会儿。实例需要能访问 GitHub。</div>
           )}
         </form>
@@ -974,6 +1016,23 @@ export default function Nodes() {
           )}
         </>
       }>
+        {paramInb?.profile === 'wireguard' && (
+          <div className="mb-4">
+            <div className="kicker mb-1">家宽配置</div>
+            {paramInb.exit_conf ? (
+              <>
+                <p className="text-[12px] text-ink-mut mb-2">贴到美国家宽上保存成 wg0.conf，再执行 wg-quick up。家宽不要装 Agent，也不要放进套餐。AllowedIPs 只有隧道网段，默认路由仍走家宽。</p>
+                <pre className="text-[12px] font-mono p-3 overflow-x-auto whitespace-pre-wrap" style={{ background: 'var(--color-fill)' }}>{paramInb.exit_conf}</pre>
+                <button type="button" className="btn-primary mt-2" onClick={async () => {
+                  try { await copyText(paramInb.exit_conf); toast('已复制家宽配置') }
+                  catch { toast('请手动选中复制', 'error') }
+                }}><Icon name="copy" size={15} /> 复制家宽配置</button>
+              </>
+            ) : (
+              <p className="text-[12px] text-ink-mut">{paramInb.exit_conf_error || '还没有家宽配置。先给这台实例填公开地址。'}</p>
+            )}
+          </div>
+        )}
         {paramInb && inboundParamRows(paramInb).map(([k, v]) => (
           <div key={k} className="param-row">
             <div className="kicker">{k}</div>
@@ -987,19 +1046,19 @@ export default function Nodes() {
         <p className="text-[12px] text-ink-mut mt-3">这些是服务端参数，不能直接导入客户端。点节点上的「复制」拿协议链接。</p>
       </Modal>
 
-      <Modal open={!!shareText} title="节点链接" onClose={() => setShareText('') } footer={
+      <Modal open={!!shareText} title={String(shareText).includes('[Interface]') ? 'WireGuard 配置' : '节点链接'} onClose={() => setShareText('')} footer={
         <>
           <button type="button" className="btn-ghost" onClick={() => setShareText('')}>关闭</button>
           <button type="button" className="btn-primary" onClick={async () => {
-            try { await copyText(shareText); toast('已复制节点链接') }
+            try { await copyText(shareText); toast(String(shareText).includes('[Interface]') ? '已复制 WireGuard 配置' : '已复制节点链接') }
             catch { toast('请手动选中复制', 'error') }
           }}>
             <Icon name="copy" size={15} /> 复制
           </button>
         </>
       }>
-        <p className="text-[12px] text-ink-mut mb-2">粘贴到小火箭 / v2rayN / Nekobox 即可导入。</p>
-        <code className="block text-[12px] break-all font-mono p-3" style={{ background: 'var(--color-fill)' }}>{shareText}</code>
+        <p className="text-[12px] text-ink-mut mb-2">{String(shareText).includes('[Interface]') ? '保存成 .conf 后用官方 WireGuard、OpenWrt 或客户端导入。Clash 和 sing-box 订阅里已经带上这一条。' : '粘贴到小火箭 / v2rayN / Nekobox 即可导入。'}</p>
+        <code className={`block text-[12px] font-mono p-3 ${String(shareText).includes('[Interface]') ? 'whitespace-pre-wrap' : 'break-all'}`} style={{ background: 'var(--color-fill)' }}>{shareText}</code>
       </Modal>
     </div>
   )

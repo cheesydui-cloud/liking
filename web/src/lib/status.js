@@ -1,8 +1,9 @@
 export function serverHasCore(s, core) {
+  const want = String(core || 'xray').toLowerCase().replace('sing-box', 'singbox')
+  if (want === 'wireguard') return true
   if (!s?.cores) return true
   const have = String(s.cores).split(',').map(x => x.trim().toLowerCase().replace('sing-box', 'singbox')).filter(Boolean)
   if (!have.length) return true
-  const want = String(core || 'xray').toLowerCase().replace('sing-box', 'singbox')
   return have.includes(want)
 }
 

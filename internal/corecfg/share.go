@@ -103,6 +103,8 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 		}
 		uri := FormatSocksURI(&SocksTarget{Host: host, Port: in.Port, User: user, Pass: c.Password})
 		return uri + "#" + name, nil
+	case ProfileWireGuard:
+		return wireGuardShareURI(in, c)
 	case ProfileMieru:
 		// Shadowrocket: mierus://user:pass@host?udp=1&port=39198&profile=default
 		user := c.Username

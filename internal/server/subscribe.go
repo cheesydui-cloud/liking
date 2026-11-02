@@ -265,6 +265,7 @@ func subRuleNames(d *sql.DB, u *db.User) []string {
 func buildSingboxSub(d *sql.DB, u *db.User, clients []*db.Client, over map[int64]bool) ([]byte, error) {
 	var tags []string
 	var outs []any
+	var endpoints []any
 	for _, c := range clients {
 		if c == nil || !c.Enabled {
 			continue
@@ -283,10 +284,21 @@ func buildSingboxSub(d *sql.DB, u *db.User, clients []*db.Client, over map[int64
 			}
 			continue
 		}
+		if ep := corecfg.SingboxEndpoint(ob); ep != nil {
+			endpoints = append(endpoints, ep)
+			if tag, ok := ep["tag"].(string); ok && tag != "" {
+				tags = append(tags, tag)
+			}
+			continue
+		}
 		outs = append(outs, ob)
 		if tag, ok := ob["tag"].(string); ok {
 			tags = append(tags, tag)
 		}
 	}
-	return json.MarshalIndent(corecfg.SingboxClientDocument(outs, tags, subRuleNames(d, u)), "", "  ")
+	doc := corecfg.SingboxClientDocument(outs, tags, subRuleNames(d, u))
+	if len(endpoints) > 0 {
+		doc["endpoints"] = endpoints
+	}
+	return json.MarshalIndent(doc, "", "  ")
 }

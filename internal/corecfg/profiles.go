@@ -18,11 +18,13 @@ const (
 	ProfileAnyTLS             = "anytls"
 	ProfileMieru              = "mieru"
 	ProfileSOCKS5             = "socks5"
+	ProfileWireGuard          = "wireguard"
 	ProfilePortForward        = "port-forward"
 
-	CoreXray    = "xray"
-	CoreSingbox = "singbox"
-	CoreMita    = "mita"
+	CoreXray      = "xray"
+	CoreSingbox   = "singbox"
+	CoreMita      = "mita"
+	CoreWireGuard = "wireguard"
 
 	DefaultRealityDest = "www.cloudflare.com:443"
 )
@@ -47,6 +49,7 @@ func Catalog() []Meta {
 		{ID: ProfileAnyTLS, Title: "AnyTLS + TCP + TLS", Core: CoreSingbox, NeedTLS: true, Direct: true, Desc: "sing-box 实现，需要证书。不能当链式落地。"},
 		{ID: ProfileMieru, Title: "Mieru", Core: CoreMita, Direct: true, Desc: "只当入口，不能当链式落地。可同时开 TCP / UDP。"},
 		{ID: ProfileSOCKS5, Title: "SOCKS5", Core: CoreSingbox, Landing: true, Direct: true, Desc: "用户名密码认证，可 UDP。浏览器和 Clash 可直连。走 sing-box。可当链式落地。"},
+		{ID: ProfileWireGuard, Title: "WireGuard", Core: CoreWireGuard, Direct: true, Desc: "客户、中转机和家宽出口在同一条隧道里，流量从家宽网卡出去。套餐只勾选这条入口。中转机要有 wireguard-tools。"},
 	}
 }
 
@@ -74,6 +77,8 @@ func CoreFor(profile string) string {
 		return CoreSingbox
 	case ProfileMieru:
 		return CoreMita
+	case ProfileWireGuard:
+		return CoreWireGuard
 	default:
 		return CoreXray
 	}
@@ -122,6 +127,8 @@ func Spec(profile string) (protocol, network, security string) {
 		return "mieru", "tcp", "none"
 	case ProfileSOCKS5:
 		return "socks", "tcp", "none"
+	case ProfileWireGuard:
+		return "wireguard", "udp", "none"
 	case ProfilePortForward:
 		return "dokodemo-door", "tcp", "none"
 	default:
@@ -429,6 +436,18 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 				return err
 			}
 			st["hold_pass"] = pw
+		}
+	case ProfileWireGuard:
+		if in.LineKind == "chain" || strings.TrimSpace(in.ExitURI) != "" || (in.ExitInboundID != nil && *in.ExitInboundID != 0) {
+			return fmt.Errorf("WireGuard 不能当链式入口或落地")
+		}
+		in.LineKind = "direct"
+		in.ExitInboundID = nil
+		in.ExitURI = ""
+		in.RejectCN = false
+		delete(st, "hops")
+		if err := normalizeWireGuard(st); err != nil {
+			return err
 		}
 	case ProfilePortForward:
 		host := strings.TrimSpace(st.String("dest_host"))

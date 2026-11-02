@@ -81,12 +81,24 @@ type ApplyConfig struct {
 	Xray        json.RawMessage `json:"xray,omitempty"`
 	Singbox     json.RawMessage `json:"singbox,omitempty"`
 	Mita        json.RawMessage `json:"mita,omitempty"`
+	WireGuard   json.RawMessage `json:"wireguard,omitempty"`
 	XrayAPI     string          `json:"xray_api,omitempty"`
 	SingboxAPI  string          `json:"singbox_api,omitempty"`
 	SpeedLimits []SpeedLimit    `json:"speed_limits,omitempty"`
 	AcctMarks   []AcctMark      `json:"acct_marks,omitempty"`
 	DisableIPv6 bool            `json:"disable_ipv6"`
 	RejectCN    RejectCN        `json:"reject_cn"`
+}
+
+type WireGuardPeer struct {
+	PublicKey string `json:"public_key"`
+	Email     string `json:"email,omitempty"`
+}
+
+type WireGuardConfig struct {
+	Iface string          `json:"iface"`
+	Conf  string          `json:"conf,omitempty"`
+	Peers []WireGuardPeer `json:"peers,omitempty"`
 }
 
 type ApplyAck struct {
@@ -97,16 +109,16 @@ type ApplyAck struct {
 }
 
 type Stats struct {
-	Samples      []Sample `json:"samples"`
-	NetUp        int64    `json:"net_up_bps,omitempty"`
-	NetDown      int64    `json:"net_down_bps,omitempty"`
-	HasNet       bool     `json:"has_net,omitempty"`
-	Cores        []string `json:"cores,omitempty"`
-	CoresRunning []string `json:"cores_running,omitempty"`
-	DiskFree     int64    `json:"disk_free,omitempty"`
-	DiskTotal    int64    `json:"disk_total,omitempty"`
-	MemAvail     int64    `json:"mem_avail,omitempty"`
-	MemTotal     int64    `json:"mem_total,omitempty"`
+	Samples      []Sample   `json:"samples"`
+	NetUp        int64      `json:"net_up_bps,omitempty"`
+	NetDown      int64      `json:"net_down_bps,omitempty"`
+	HasNet       bool       `json:"has_net,omitempty"`
+	Cores        []string   `json:"cores,omitempty"`
+	CoresRunning []string   `json:"cores_running,omitempty"`
+	DiskFree     int64      `json:"disk_free,omitempty"`
+	DiskTotal    int64      `json:"disk_total,omitempty"`
+	MemAvail     int64      `json:"mem_avail,omitempty"`
+	MemTotal     int64      `json:"mem_total,omitempty"`
 	LoadMilli    int64      `json:"load_milli,omitempty"`
 	Conns        int        `json:"conns,omitempty"`
 	Ports        []PortRate `json:"ports,omitempty"`

@@ -40,6 +40,9 @@ type Cores struct {
 	xrayLast         map[string]bytePair
 	singboxStatsLast map[string]bytePair
 	acctMarks        []wsproto.AcctMark
+	wgIface          string
+	wgPeers          map[string]string
+	wgLast           map[string]bytePair
 	flowLast         map[string]bytePair
 	portLast         map[int]bytePair
 	flowAt           time.Time
@@ -56,6 +59,8 @@ func NewCores(dir string) *Cores {
 		dir: dir, procs: map[string]*proc{}, last: map[string]json.RawMessage{}, lastReq: map[string]json.RawMessage{},
 		clashLast: map[string]clashSnap{}, mitaLast: map[string]bytePair{}, xrayLast: map[string]bytePair{},
 		singboxStatsLast: map[string]bytePair{},
+		wgPeers:          map[string]string{},
+		wgLast:           map[string]bytePair{},
 		crashes:          map[string][]time.Time{},
 		stopWatch:        make(chan struct{}),
 	}
@@ -151,6 +156,7 @@ func (c *Cores) Apply(cfg wsproto.ApplyConfig) error {
 	take(xrayErr)
 	take(singErr)
 	take(c.applyMita(cfg.Mita))
+	take(c.applyWireGuard(cfg.WireGuard))
 	c.acctMarks = append([]wsproto.AcctMark(nil), cfg.AcctMarks...)
 	applyAcctMarks(c.acctMarks)
 	if len(errs) > 0 {

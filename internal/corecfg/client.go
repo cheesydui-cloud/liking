@@ -57,7 +57,16 @@ func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
 		created := false
 		c, err := db.GetClient(d, in.ID, u.ID)
 		if err == sql.ErrNoRows {
-			c, err = newClient(u, in)
+			if in.Profile == ProfileWireGuard {
+				var peers []*db.Client
+				peers, err = db.ListClientsByInbound(d, in.ID)
+				if err != nil {
+					return nil, err
+				}
+				c, err = NewWireGuardClient(u, in, peers)
+			} else {
+				c, err = newClient(u, in)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -134,6 +143,8 @@ func newClient(u *db.User, in *db.Inbound) (*db.Client, error) {
 			return nil, err
 		}
 		c.Password = pw
+	case ProfileWireGuard:
+		return nil, fmt.Errorf("WireGuard 客户端要分配隧道地址")
 	default:
 		id, err := NewUUID()
 		if err != nil {

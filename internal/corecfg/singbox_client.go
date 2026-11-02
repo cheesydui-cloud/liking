@@ -2,6 +2,7 @@ package corecfg
 
 import (
 	"fmt"
+	"strings"
 
 	"liking/internal/db"
 )
@@ -89,9 +90,45 @@ func SingboxOutbound(in *db.Inbound, c *db.Client) (map[string]any, error) {
 		return ob, nil
 	case ProfileMieru:
 		return nil, ErrSkip
+	case ProfileWireGuard:
+		if strings.TrimSpace(c.Password) == "" || wgHost(c.UUID) == "" || st.String("public_key") == "" {
+			return nil, fmt.Errorf("WireGuard 客户端还没有密钥")
+		}
+		epTag := tag
+		return map[string]any{
+			"tag": epTag,
+			"_endpoint": map[string]any{
+				"type":        "wireguard",
+				"tag":         epTag,
+				"mtu":         st.Int("mtu", WGDefaultMTU),
+				"address":     []string{strings.TrimSpace(c.UUID)},
+				"private_key": strings.TrimSpace(c.Password),
+				"peers": []any{map[string]any{
+					"address":                       host,
+					"port":                          in.Port,
+					"public_key":                    st.String("public_key"),
+					"allowed_ips":                   []string{"0.0.0.0/0", "::/0"},
+					"persistent_keepalive_interval": st.Int("keepalive", WGDefaultKeepalive),
+				}},
+			},
+		}, nil
 	default:
 		return nil, fmt.Errorf("未知协议")
 	}
 }
 
 var ErrSkip = fmt.Errorf("skip")
+
+// SingboxEndpoint pulls a WireGuard endpoint out of an outbound map.
+// sing-box 1.14 uses the endpoint itself as the outbound tag.
+func SingboxEndpoint(ob map[string]any) map[string]any {
+	if ob == nil {
+		return nil
+	}
+	ep, _ := ob["_endpoint"].(map[string]any)
+	delete(ob, "_endpoint")
+	if len(ep) == 0 {
+		return nil
+	}
+	return ep
+}

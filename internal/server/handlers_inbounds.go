@@ -15,7 +15,7 @@ import (
 
 func inboundJSON(in *db.Inbound) map[string]any {
 	st := corecfg.ParseSettings(in.Settings)
-	return map[string]any{
+	m := map[string]any{
 		"id":              in.ID,
 		"server_id":       in.ServerID,
 		"name":            in.Name,
@@ -39,6 +39,20 @@ func inboundJSON(in *db.Inbound) map[string]any {
 		"server_host":     in.ServerHost,
 		"server_online":   in.ServerOnline,
 	}
+	withExitConf(m, in)
+	return m
+}
+
+func withExitConf(m map[string]any, in *db.Inbound) {
+	if in == nil || in.Profile != corecfg.ProfileWireGuard {
+		return
+	}
+	conf, err := corecfg.HomeConfig(in)
+	if err != nil {
+		m["exit_conf_error"] = err.Error()
+		return
+	}
+	m["exit_conf"] = conf
 }
 
 type inboundReq struct {
@@ -240,11 +254,17 @@ func (s *Server) handleInboundShare(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	jsonOK(w, map[string]any{
+	out := map[string]any{
 		"uri":      uri,
 		"username": u.Username,
 		"profile":  in.Profile,
-	})
+	}
+	if in.Profile == corecfg.ProfileWireGuard {
+		if conf, err := corecfg.WireGuardClientConf(in, c); err == nil {
+			out["conf"] = conf
+		}
+	}
+	jsonOK(w, out)
 }
 
 func (s *Server) handleDeleteInbound(w http.ResponseWriter, r *http.Request) {

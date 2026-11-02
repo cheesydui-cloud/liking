@@ -104,6 +104,12 @@ export default function MyNodes() {
   }, [filtered])
 
   const copyNode = async (n) => {
+    if (n?.profile === 'wireguard' && n.conf) {
+      setShareText(n.conf)
+      try { await copyText(n.conf); toast('已复制 WireGuard 配置') }
+      catch { toast('请从窗口里复制配置', 'error') }
+      return
+    }
     if (!n?.uri) {
       toast('这个节点还没有分享链接', 'error')
       return
@@ -299,19 +305,19 @@ export default function MyNodes() {
         </div>
       ) : null}
 
-      <Modal open={!!shareText} title="节点链接" onClose={() => setShareText('')} footer={
+      <Modal open={!!shareText} title={String(shareText).includes('[Interface]') ? 'WireGuard 配置' : '节点链接'} onClose={() => setShareText('')} footer={
         <>
           <button type="button" className="btn-ghost" onClick={() => setShareText('')}>关闭</button>
           <button type="button" className="btn-primary" onClick={async () => {
-            try { await copyText(shareText); toast('已复制节点链接') }
+            try { await copyText(shareText); toast(String(shareText).includes('[Interface]') ? '已复制 WireGuard 配置' : '已复制节点链接') }
             catch { toast('请手动选中复制', 'error') }
           }}>
             <Icon name="copy" size={15} /> 复制
           </button>
         </>
       }>
-        <p className="text-[12px] text-ink-mut mb-2">粘贴到小火箭 / v2rayN / Nekobox 即可导入。</p>
-        <code className="block text-[12px] break-all font-mono p-3" style={{ background: 'var(--color-fill)' }}>{shareText}</code>
+        <p className="text-[12px] text-ink-mut mb-2">{String(shareText).includes('[Interface]') ? '保存成 .conf 后用官方 WireGuard 或 OpenWrt 导入。Clash 和 sing-box 订阅里已经带上这一条。' : '粘贴到小火箭 / v2rayN / Nekobox 即可导入。'}</p>
+        <code className={`block text-[12px] font-mono p-3 ${String(shareText).includes('[Interface]') ? 'whitespace-pre-wrap' : 'break-all'}`} style={{ background: 'var(--color-fill)' }}>{shareText}</code>
       </Modal>
     </div>
   )

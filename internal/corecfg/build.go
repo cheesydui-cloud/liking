@@ -73,6 +73,10 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 	if err != nil {
 		return nil, err
 	}
+	wg, err := buildWireGuard(ins, clients)
+	if err != nil {
+		return nil, err
+	}
 
 	b := &Bundle{}
 	if xray != nil {
@@ -98,6 +102,13 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 		}
 		b.Apply.Mita = raw
 	}
+	if wg != nil {
+		raw, err := json.Marshal(wg)
+		if err != nil {
+			return nil, err
+		}
+		b.Apply.WireGuard = raw
+	}
 	b.Apply.SpeedLimits = collectSpeedLimits(ins, clients, speeds)
 	b.Apply.AcctMarks = collectAcctMarks(ins, clients)
 	b.Apply.DisableIPv6 = srv.DisableIPv6
@@ -106,6 +117,7 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 	sum.Write(b.Apply.Xray)
 	sum.Write(b.Apply.Singbox)
 	sum.Write(b.Apply.Mita)
+	sum.Write(b.Apply.WireGuard)
 	if raw, err := json.Marshal(b.Apply.SpeedLimits); err == nil {
 		sum.Write(raw)
 	}

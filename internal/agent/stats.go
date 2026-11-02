@@ -60,7 +60,8 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 	var clashNext map[string]clashSnap
 	var singNext map[string]bytePair
 	var mitaNext map[string]bytePair
-	xrayOK, clashOK, singOK, mitaOK := false, false, false, false
+	var wgNext map[string]bytePair
+	xrayOK, clashOK, singOK, mitaOK, wgOK := false, false, false, false, false
 	if samples, next, _, ok := c.peekXray(); ok {
 		all = append(all, samples...)
 		xrayNext, xrayOK = next, true
@@ -78,6 +79,10 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 	if samples, next, _, ok := c.peekMita(); ok {
 		all = append(all, samples...)
 		mitaNext, mitaOK = next, true
+	}
+	if samples, next, ok := c.peekWireGuard(); ok {
+		all = append(all, samples...)
+		wgNext, wgOK = next, true
 	}
 	// Core counters and socket marks measure the same interval. Vision splice
 	// freezes user>>> counters after the handshake while the marked socket
@@ -108,6 +113,9 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 			}
 			if mitaOK {
 				c.mitaLast = mitaNext
+			}
+			if wgOK {
+				c.wgLast = wgNext
 			}
 			if flowOK {
 				c.flowLast = flowNext

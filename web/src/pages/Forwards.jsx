@@ -218,12 +218,12 @@ function ForwardsPanel() {
   }, [servers])
 
   const forwards = useMemo(() => list.filter(x => forwardKind(x)), [list])
-  const directs = useMemo(() => list.filter(x => isDirectNode(x)), [list])
+  const directs = useMemo(() => list.filter(x => isDirectNode(x) && x.profile !== 'wireguard'), [list])
   const landings = useMemo(
     () => list.filter(x => isDirectNode(x) && LAND_PROFILES.includes(x.profile) && Number(x.id) !== Number(editId)),
     [list, editId],
   )
-  const protoList = profiles.length ? profiles : [{ id: f.profile, title: f.profile, desc: '' }]
+  const protoList = (profiles.length ? profiles : [{ id: f.profile, title: f.profile, desc: '' }]).filter(p => p.id !== 'wireguard' && p.id !== 'port-forward')
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -243,7 +243,7 @@ function ForwardsPanel() {
   }
   const openCreate = () => {
     reset()
-    const first = list.find(x => isDirectNode(x))
+    const first = list.find(x => isDirectNode(x) && x.profile !== 'wireguard')
     const mode = first ? 'node' : 'new'
     setF({
       ...emptyForm,

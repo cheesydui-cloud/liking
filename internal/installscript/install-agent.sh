@@ -26,6 +26,29 @@ unit_quote() {
   printf '"%s"' "$s"
 }
 
+# header_field reads the last matching header. Go sends X-Sha256, HTTP/2
+# sends x-sha256, and mawk ignores awk IGNORECASE, so match in bash.
+header_field() {
+  local name="$1" file="$2" line key val found=""
+  name="${name,,}"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    key="${line%%:*}"
+    if [[ "${key,,}" == "$name" ]]; then
+      val="${line#*:}"
+      val="${val#"${val%%[![:space:]]*}"}"
+      val="${val%"${val##*[![:space:]]}"}"
+      found="$val"
+    fi
+  done < "$file"
+  printf '%s' "$found"
+}
+
+if [[ "${LIKING_HEADER_TEST:-}" == 1 ]]; then
+  header_field "${1:-}" "${2:-}"
+  exit 0
+fi
+
 require_val() {
   if [[ -z "${2:-}" || "${2:-}" == --* ]]; then
     die "$1 需要值"
@@ -123,7 +146,7 @@ sig="$(od -An -tx1 -N4 "$tmpbin" | tr -d ' \n')"
 size="$(wc -c < "$tmpbin" | tr -d ' ')"
 [[ "$size" -gt 1048576 ]] || die "agent 文件过小 ($size)"
 [[ "$size" -le 83886080 ]] || die "agent 文件过大 ($size)"
-expected="$(awk 'BEGIN{IGNORECASE=1} /^X-SHA256:/{print $2; exit}' "$hdr" | tr -d '\r')"
+expected="$(header_field x-sha256 "$hdr")"
 [[ "$expected" =~ ^[0-9A-Fa-f]{64}$ ]] || die "响应缺少有效的 agent sha256"
 actual="$(sha256sum "$tmpbin" | awk '{print $1}')"
 [[ "${actual,,}" == "${expected,,}" ]] || die "agent sha256 不匹配"

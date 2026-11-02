@@ -143,6 +143,7 @@ type facingNode struct {
 	PeriodUp     int64  `json:"period_up"`
 	PeriodDown   int64  `json:"period_down"`
 	URI          string `json:"uri,omitempty"`
+	Conf         string `json:"conf,omitempty"`
 	Starred      bool   `json:"starred,omitempty"`
 }
 
@@ -336,6 +337,11 @@ func (s *Server) listFacingNodes(ids []int64, viewer *db.User, withURI bool, sta
 			if cl, err := db.GetClient(s.DB, in.ID, viewer.ID); err == nil && cl != nil && cl.Enabled {
 				if uri, err := corecfg.ShareURI(in, cl); err == nil {
 					n.URI = uri
+				}
+				if in.Profile == corecfg.ProfileWireGuard {
+					if conf, err := corecfg.WireGuardClientConf(in, cl); err == nil {
+						n.Conf = conf
+					}
 				}
 			}
 		}

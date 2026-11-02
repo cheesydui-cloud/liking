@@ -78,6 +78,15 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 		fmt.Fprintf(&b, "    username: %s\n", yq(clientSocksUser(c)))
 		fmt.Fprintf(&b, "    password: %s\n", yq(c.Password))
 		b.WriteString("    udp: true\n")
+	case ProfileWireGuard:
+		b.WriteString("    type: wireguard\n")
+		fmt.Fprintf(&b, "    ip: %s\n", yq(wgHost(c.UUID)))
+		fmt.Fprintf(&b, "    private-key: %s\n", yq(strings.TrimSpace(c.Password)))
+		fmt.Fprintf(&b, "    public-key: %s\n", yq(st.String("public_key")))
+		b.WriteString("    udp: true\n")
+		fmt.Fprintf(&b, "    mtu: %d\n", st.Int("mtu", WGDefaultMTU))
+		fmt.Fprintf(&b, "    persistent-keepalive: %d\n", st.Int("keepalive", WGDefaultKeepalive))
+		b.WriteString("    allowed-ips:\n      - 0.0.0.0/0\n      - ::/0\n")
 	case ProfileMieru:
 		b.WriteString("    type: mieru\n")
 		user := c.Username
