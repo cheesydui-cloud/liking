@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -380,6 +381,36 @@ func RotateSubToken(d *sql.DB, id int64) (string, error) {
 func ResetUserTraffic(d *sql.DB, id int64) error {
 	_, err := d.Exec(`UPDATE users SET used_up=0, used_down=0, cycle_start=? WHERE id=?`, now(), id)
 	return err
+}
+
+// maxUserBilledBytes is 1 PiB. Package quotas are a few hundred G.
+const maxUserBilledBytes int64 = 1 << 50
+
+var ErrUsedNegative = errors.New("已用流量不能为负")
+var ErrUsedTooBig = errors.New("已用流量过大")
+
+// SetUserBilledTraffic replaces the quota counter. Both 单向 and 双向 then
+// report this number. The billing cycle and daily history stay as they are.
+// Later samples add on top of this baseline.
+func SetUserBilledTraffic(d *sql.DB, id, billed int64) error {
+	if billed < 0 {
+		return ErrUsedNegative
+	}
+	if billed > maxUserBilledBytes {
+		return ErrUsedTooBig
+	}
+	res, err := d.Exec(`UPDATE users SET used_up=0, used_down=? WHERE id=?`, billed, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func AddUserTraffic(d *sql.DB, id int64, up, down int64) error {

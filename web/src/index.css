@@ -1154,6 +1154,17 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
   background: var(--color-fill);
 }
 
+.used-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+.used-edit-field { flex: 1 1 10rem; min-width: 0; }
+.used-edit .seg { flex: 0 0 auto; min-width: 5.5rem; }
+.used-edit .seg-item { min-width: 2.5rem; padding: 0 12px; }
+.used-edit-actions { display: flex; gap: 8px; }
+
 .pkg-section-head {
   display: flex;
   align-items: flex-end;
@@ -1834,6 +1845,10 @@ html.dark.page-aliyun .machine {
 
 @media (max-width: 639px) {
   .input-field { font-size: 16px; }
+  .used-edit { align-items: stretch; }
+  .used-edit .seg { height: 44px; align-self: flex-start; }
+  .used-edit-actions { width: 100%; }
+  .used-edit-actions > button { flex: 1; }
   .input-field:not(textarea):not(select) { min-height: 44px; height: 44px; }
   .unit-switch button { min-height: 44px; height: 44px; }
   .btn-primary, .btn-ghost, .btn-danger { min-height: 44px; }

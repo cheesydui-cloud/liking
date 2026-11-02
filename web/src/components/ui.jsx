@@ -377,7 +377,7 @@ export function DayBars({ days = [], className = '', legend = true, label = '' }
   )
 }
 
-export function Meter({ value = 0, max = 0, className = '', mark = 80 }) {
+export function Meter({ value = 0, max = 0, className = '', mark = 80, action = null }) {
   const used = Number(value) || 0
   const cap = Number(max) || 0
   const unlimited = !cap
@@ -386,9 +386,12 @@ export function Meter({ value = 0, max = 0, className = '', mark = 80 }) {
   const color = { ok: 'var(--color-ok)', warn: 'var(--color-warn)', danger: 'var(--color-danger)' }[tone]
   return (
     <div className={className}>
-      <div className="flex items-baseline justify-between gap-2 text-[12px] tabular-nums">
-        <span>{fmtBytes(used)}{unlimited ? '' : ` / ${fmtBytes(cap)}`}</span>
-        <span className="text-ink-mut">{unlimited ? '不限' : `${pct}%`}</span>
+      <div className={`flex flex-wrap justify-between gap-x-2 gap-y-1 text-[12px] tabular-nums ${action ? 'items-center' : 'items-baseline'}`}>
+        <span className="min-w-0">{fmtBytes(used)}{unlimited ? '' : ` / ${fmtBytes(cap)}`}</span>
+        <span className="flex items-center gap-2 shrink-0">
+          {action}
+          <span className="text-ink-mut">{unlimited ? '不限' : `${pct}%`}</span>
+        </span>
       </div>
       <div className="meter mt-1.5">
         <div className="meter-bar" style={{ width: unlimited ? '8%' : `${Math.max(pct, used ? 3 : 0)}%`, background: color, opacity: unlimited ? 0.35 : 1 }} />

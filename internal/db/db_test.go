@@ -1,6 +1,8 @@
 package db
 
 import (
+	"database/sql"
+	"errors"
 	"math"
 	"testing"
 	"time"
@@ -644,6 +646,73 @@ func TestClientByIdentityAndBilling(t *testing.T) {
 	u, _ = GetUser(d, u.ID)
 	if u.BilledBytes != 25 || u.Direction != "twoway" || u.TrafficCap != 1024 {
 		t.Fatalf("billing %+v", u)
+	}
+}
+
+func TestSetUserBilledTraffic(t *testing.T) {
+	d, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	u, err := CreateUser(d, "neo", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := GetUser(d, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AddUserTraffic(d, u.ID, 10, 15); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetUserBilledTraffic(d, u.ID, 500); err != nil {
+		t.Fatal(err)
+	}
+	got, err := GetUser(d, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.UsedUp != 0 || got.UsedDown != 500 || got.BilledBytes != 500 {
+		t.Fatalf("set %+v", got)
+	}
+	if got.CycleStart != before.CycleStart {
+		t.Fatalf("cycle moved %d -> %d", before.CycleStart, got.CycleStart)
+	}
+	if n := UserBilledBytes(got, &Package{Direction: "oneway"}); n != 500 {
+		t.Fatalf("oneway %d", n)
+	}
+	if n := UserBilledBytes(got, &Package{Direction: "twoway"}); n != 500 {
+		t.Fatalf("twoway %d", n)
+	}
+	if err := AddUserTraffic(d, u.ID, 3, 4); err != nil {
+		t.Fatal(err)
+	}
+	got, err = GetUser(d, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.UsedUp != 3 || got.UsedDown != 504 {
+		t.Fatalf("add on top %+v", got)
+	}
+	if n := UserBilledBytes(got, &Package{Direction: "oneway"}); n != 504 {
+		t.Fatalf("oneway add %d", n)
+	}
+	if n := UserBilledBytes(got, &Package{Direction: "twoway"}); n != 507 {
+		t.Fatalf("twoway add %d", n)
+	}
+	if err := SetUserBilledTraffic(d, u.ID, -1); !errors.Is(err, ErrUsedNegative) {
+		t.Fatalf("negative %v", err)
+	}
+	if err := SetUserBilledTraffic(d, u.ID, maxUserBilledBytes+1); !errors.Is(err, ErrUsedTooBig) {
+		t.Fatalf("too big %v", err)
+	}
+	if err := SetUserBilledTraffic(d, 99999, 1); err != sql.ErrNoRows {
+		t.Fatalf("missing %v", err)
+	}
+	got, _ = GetUser(d, u.ID)
+	if got.UsedUp != 3 || got.UsedDown != 504 {
+		t.Fatalf("rejected write changed %+v", got)
 	}
 }
 

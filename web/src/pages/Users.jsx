@@ -78,6 +78,27 @@ function bytesFromGB(s) {
   return Math.round(n * 1024 * 1024 * 1024)
 }
 
+function usedDraft(bytes) {
+  const n = Math.max(0, Number(bytes) || 0)
+  if (n >= 1024 ** 3) {
+    const g = n / 1024 ** 3
+    return { value: String(Math.round(g * 1000) / 1000), unit: 'G' }
+  }
+  const m = n / 1024 ** 2
+  return { value: String(Math.round(m * 100) / 100), unit: 'M' }
+}
+
+function bytesFromUsed(value, unit) {
+  const raw = String(value ?? '').trim()
+  if (raw === '') return null
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) return null
+  const mul = unit === 'G' ? 1024 ** 3 : 1024 ** 2
+  const bytes = Math.round(n * mul)
+  if (!Number.isSafeInteger(bytes) || bytes > 1024 ** 5) return null
+  return bytes
+}
+
 const emptyForm = { username: '', password: '', remark: '', package_id: '', duration: '3', days: '', expires: '', traffic_gb: '', enabled: true, traffic_reset_day: 0, speed_value: '', speed_unit: 'mbps' }
 
 function DurationPicker({ duration, days, onDuration, onDays }) {
@@ -497,6 +518,8 @@ export default function Users() {
   const [previewLoading, setPreviewLoading] = useState(false)
   const [trafficUser, setTrafficUser] = useState(null)
   const [trafficDetail, setTrafficDetail] = useState(null)
+  const [usedEdit, setUsedEdit] = useState(null)
+  const [usedBusy, setUsedBusy] = useState(false)
   const [q, setQ] = useState('')
   const [pkgFilter, setPkgFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -740,10 +763,19 @@ export default function Users() {
     await act(`del-${u.id}`, () => api.del(`/users/${u.id}`))
   }
 
+  const closeTraffic = () => {
+    trafficSeq.current += 1
+    setTrafficUser(null)
+    setTrafficDetail(null)
+    setUsedEdit(null)
+    setUsedBusy(false)
+  }
+
   const openTraffic = async (u) => {
     const seq = ++trafficSeq.current
     setTrafficUser(u)
     setTrafficDetail(null)
+    setUsedEdit(null)
     try {
       const d = await api.get(`/users/${u.id}/traffic?days=14`)
       if (seq !== trafficSeq.current) return
@@ -751,6 +783,67 @@ export default function Users() {
     } catch (e) {
       if (seq !== trafficSeq.current) return
       toast(e.message, 'error')
+    }
+  }
+
+  const switchUsedUnit = (unit) => {
+    setUsedEdit(prev => {
+      if (!prev || prev.unit === unit) return prev
+      const bytes = bytesFromUsed(prev.value, prev.unit)
+      if (bytes == null) return { ...prev, unit }
+      const div = unit === 'G' ? 1024 ** 3 : 1024 ** 2
+      const n = bytes / div
+      const rounded = unit === 'G' ? Math.round(n * 1000) / 1000 : Math.round(n * 100) / 100
+      return { value: String(rounded), unit }
+    })
+  }
+
+  const saveUsed = async (e) => {
+    e.preventDefault()
+    if (!trafficUser || !usedEdit || usedBusy) return
+    const original = billedBytes(trafficUser)
+    const draft = usedDraft(original)
+    const unchanged = usedEdit.value === draft.value && usedEdit.unit === draft.unit
+    const bytes = unchanged ? original : bytesFromUsed(usedEdit.value, usedEdit.unit)
+    if (bytes == null) {
+      toast('请填写有效的已用流量', 'error')
+      return
+    }
+    if (bytes === original) {
+      setUsedEdit(null)
+      return
+    }
+    const cap = trafficUser.traffic_cap || trafficCap(trafficUser, pkgs)
+    let message = `将把 ${trafficUser.username} 的已用流量改为 ${fmtBytes(bytes)}。订阅页会显示这个数。`
+    if (cap > 0 && bytes >= cap) message += '已达到额度，节点会从订阅摘掉。'
+    if (!(await dialog.confirm({
+      title: '修改已用流量',
+      message,
+      okText: '修改',
+      danger: cap > 0 && bytes >= cap,
+    }))) return
+    setUsedBusy(true)
+    try {
+      const d = await api.post(`/users/${trafficUser.id}/used-traffic`, { bytes })
+      const fresh = d.user
+      if (fresh) {
+        setTrafficUser(prev => (prev && prev.id === fresh.id ? { ...prev, ...fresh } : prev))
+        setList(prev => prev.map(x => (x.id === fresh.id ? { ...x, ...fresh } : x)))
+        if (editUser?.id === fresh.id) setEditUser(prev => (prev ? { ...prev, ...fresh } : prev))
+      }
+      setTrafficDetail(prev => (prev ? {
+        ...prev,
+        billed_bytes: fresh?.billed_bytes ?? bytes,
+        used_up: fresh?.used_up ?? 0,
+        used_down: fresh?.used_down ?? bytes,
+      } : prev))
+      setUsedEdit(null)
+      toast('已用流量已修改')
+      load()
+    } catch (err) {
+      toast(err.message, 'error')
+    } finally {
+      setUsedBusy(false)
     }
   }
 
@@ -1162,12 +1255,62 @@ export default function Users() {
         <p className="text-[12px] text-ink-mut mb-3">只读预览，不是管理员自己的订阅。不含该用户的分享链接。</p>
         <NodePreviewList data={previewData} error={previewErr} loading={previewLoading} />
       </Modal>
-      <Modal open={!!trafficUser} title={trafficUser ? `${trafficUser.username} 的流量` : '流量'} onClose={() => { trafficSeq.current += 1; setTrafficUser(null); setTrafficDetail(null) }} size="lg" footer={
-        <button type="button" className="btn-ghost" onClick={() => { trafficSeq.current += 1; setTrafficUser(null); setTrafficDetail(null) }}>关闭</button>
+      <Modal open={!!trafficUser} title={trafficUser ? `${trafficUser.username} 的流量` : '流量'} onClose={closeTraffic} size="lg" footer={
+        <button type="button" className="btn-ghost" onClick={closeTraffic}>关闭</button>
       }>
         {trafficUser && (
           <div>
-            <Meter className="mb-3" value={billedBytes(trafficUser)} max={trafficUser.traffic_cap || trafficCap(trafficUser, pkgs)} />
+            <Meter
+              className="mb-3"
+              value={billedBytes(trafficUser)}
+              max={trafficUser.traffic_cap || trafficCap(trafficUser, pkgs)}
+              action={(
+                <button
+                  type="button"
+                  className="row-act"
+                  onClick={() => setUsedEdit(prev => (prev ? null : usedDraft(billedBytes(trafficUser))))}
+                >
+                  {usedEdit ? '收起' : '改已用'}
+                </button>
+              )}
+            />
+            {usedEdit ? (
+              <form className="mb-3 p-3" style={{ background: 'var(--color-fill)' }} onSubmit={saveUsed}>
+                <div className="used-edit">
+                  <label className="used-edit-field block">
+                    <span className="block text-[12px] font-medium text-ink-soft mb-1.5">已用流量</span>
+                    <input
+                      className="input-field tabular-nums"
+                      type="number"
+                      min="0"
+                      step="any"
+                      inputMode="decimal"
+                      aria-label="已用流量"
+                      value={usedEdit.value}
+                      onChange={e => setUsedEdit(prev => (prev ? { ...prev, value: e.target.value } : prev))}
+                      autoFocus
+                    />
+                  </label>
+                  <div className="seg" role="group" aria-label="单位">
+                    {['M', 'G'].map(unit => (
+                      <button
+                        key={unit}
+                        type="button"
+                        className={`seg-item${usedEdit.unit === unit ? ' is-on' : ''}`}
+                        onClick={() => switchUsedUnit(unit)}
+                      >
+                        {unit}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="used-edit-actions">
+                    <button type="submit" className="btn-primary h-8" disabled={usedBusy}>{usedBusy ? '保存中…' : '保存'}</button>
+                    <button type="button" className="btn-ghost h-8" onClick={() => setUsedEdit(null)}>取消</button>
+                  </div>
+                </div>
+                <p className="text-[12px] text-ink-mut mt-2">1 G = 1024³ 字节。订阅页和小火箭会按这个数显示。之后的上网在这个数上继续加。近 14 日图表不改。</p>
+              </form>
+            ) : null}
             {trafficUser.direction === 'twoway' ? (
               <div className="text-[12px] text-ink-mut mb-3">双向：上行和下行都计入额度。节点倍率在入账时已乘过。</div>
             ) : trafficUser.direction === 'oneway' ? (

@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"strconv"
@@ -585,6 +586,52 @@ func (s *Server) handleResetTraffic(w http.ResponseWriter, r *http.Request) {
 	}
 	s.provisionAndSyncUser(u)
 	jsonOK(w, map[string]any{"ok": true, "user": adminUserView(u)})
+}
+
+func (s *Server) handleSetUserTraffic(w http.ResponseWriter, r *http.Request) {
+	id, err := chiID(r, "id")
+	if err != nil || id <= 0 {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	var req struct {
+		Bytes *int64 `json:"bytes"`
+	}
+	if err := decodeJSON(r, &req); err != nil || req.Bytes == nil {
+		jsonErr(w, http.StatusBadRequest, "请填写已用流量")
+		return
+	}
+	u, err := db.GetUser(s.DB, id)
+	if err != nil || u == nil {
+		jsonErr(w, http.StatusNotFound, "用户不存在")
+		return
+	}
+	if u.Role == "admin" {
+		jsonErr(w, http.StatusBadRequest, "不能修改管理员流量")
+		return
+	}
+	if err := db.SetUserBilledTraffic(s.DB, id, *req.Bytes); err != nil {
+		if err == sql.ErrNoRows {
+			jsonErr(w, http.StatusNotFound, "用户不存在")
+			return
+		}
+		if errors.Is(err, db.ErrUsedNegative) || errors.Is(err, db.ErrUsedTooBig) {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		jsonErr(w, http.StatusInternalServerError, "保存失败")
+		return
+	}
+	fresh, err := db.GetUser(s.DB, id)
+	if err != nil || fresh == nil {
+		jsonErr(w, http.StatusNotFound, "用户不存在")
+		return
+	}
+	if admin := userFromCtx(r.Context()); admin != nil {
+		db.AddAudit(s.DB, &admin.ID, "user.set_traffic", fresh.Username+" "+strconv.FormatInt(*req.Bytes, 10))
+	}
+	s.provisionAndSyncUser(fresh)
+	jsonOK(w, map[string]any{"ok": true, "user": adminUserView(fresh)})
 }
 
 func (s *Server) handleRotateSub(w http.ResponseWriter, r *http.Request) {
