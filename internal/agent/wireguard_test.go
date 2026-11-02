@@ -79,6 +79,33 @@ func TestParseWGDumpMatchesKeyOrAddress(t *testing.T) {
 	}
 }
 
+func TestParseWGPeerDumpKeepsExitForPanel(t *testing.T) {
+	dump := strings.Join([]string{
+		"priv\tpub\t10433\toff",
+		"exit\tnone\t(none)\t0.0.0.0/0\t1\t999\t999\toff",
+		"probe\tnone\t(none)\t192.0.2.1/32\t1\t1\t1\toff",
+		"client\tnone\t1.2.3.4:9\t10.7.0.10/32\t1\t80\t20\t25",
+	}, "\n")
+	got := parseWGPeerDump(dump)
+	if len(got) != 3 || got[2].PublicKey != "client" || got[2].Rx != 80 || got[2].Tx != 20 || got[2].AllowedIPs != "10.7.0.10/32" {
+		t.Fatalf("peers %+v", got)
+	}
+	if got[0].AllowedIPs != "0.0.0.0/0" || got[1].AllowedIPs != "192.0.2.1/32" {
+		t.Fatalf("unbilled peers %+v", got[:2])
+	}
+	c := &Cores{wgPeers: map[string]string{"client": "u1.i2"}, wgLast: map[string]bytePair{"u1.i2": {up: 80, down: 20}}}
+	deltas, next, ok := c.wgEmailDeltas(got)
+	if !ok || len(deltas) != 0 || next["u1.i2"].up != 80 {
+		t.Fatalf("no growth %+v %v %+v", deltas, ok, next)
+	}
+	got[2].Rx = 100
+	got[2].Tx = 35
+	deltas, _, ok = c.wgEmailDeltas(got)
+	if !ok || len(deltas) != 1 || deltas[0].Email != "u1.i2" || deltas[0].Up != 20 || deltas[0].Down != 15 {
+		t.Fatalf("email delta %+v %v", deltas, ok)
+	}
+}
+
 func TestWGJSONListenPort(t *testing.T) {
 	raw := []byte("{\"iface\":\"likingwg0\",\"conf\":\"[Interface]\\nListenPort = 10433\\n\\n[Peer]\\nPublicKey = a\\n\"}")
 	if wgJSONListenPort(raw) != 10433 {

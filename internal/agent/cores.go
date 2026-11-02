@@ -26,33 +26,38 @@ type proc struct {
 }
 
 type Cores struct {
-	dir              string
-	mu               sync.Mutex
-	collectMu        sync.Mutex
-	procs            map[string]*proc
-	last             map[string]json.RawMessage
-	lastReq          map[string]json.RawMessage
-	xrayAPI          string
-	xrayBin          string
-	singboxAPI       string
-	clashLast        map[string]clashSnap
-	mitaLast         map[string]bytePair
-	xrayLast         map[string]bytePair
-	singboxStatsLast map[string]bytePair
-	acctMarks        []wsproto.AcctMark
-	wgIface          string
-	wgPeers          map[string]string
-	wgPeerIP         map[string]string
-	wgLast           map[string]bytePair
-	flowLast         map[string]bytePair
-	portLast         map[int]bytePair
-	flowAt           time.Time
-	pendingPorts     []wsproto.PortRate
-	pendingHasPorts  bool
-	applyGen         uint64
-	crashes          map[string][]time.Time
-	stopWatch        chan struct{}
-	stopOnce         sync.Once
+	dir                 string
+	mu                  sync.Mutex
+	collectMu           sync.Mutex
+	procs               map[string]*proc
+	last                map[string]json.RawMessage
+	lastReq             map[string]json.RawMessage
+	xrayAPI             string
+	xrayBin             string
+	singboxAPI          string
+	clashLast           map[string]clashSnap
+	mitaLast            map[string]bytePair
+	xrayLast            map[string]bytePair
+	singboxStatsLast    map[string]bytePair
+	acctMarks           []wsproto.AcctMark
+	wgIface             string
+	wgPeers             map[string]string
+	wgPeerIP            map[string]string
+	wgLast              map[string]bytePair
+	flowLast            map[string]bytePair
+	portLast            map[int]bytePair
+	flowAt              time.Time
+	pendingPorts        []wsproto.PortRate
+	pendingHasPorts     bool
+	pendingWG           []wsproto.WGPeerStat
+	pendingHasWG        bool
+	pendingClearHandoff bool
+	wgHandoffMu         sync.Mutex
+	wgHandoff           []wsproto.WGPeerStat
+	applyGen            uint64
+	crashes             map[string][]time.Time
+	stopWatch           chan struct{}
+	stopOnce            sync.Once
 }
 
 func NewCores(dir string) *Cores {

@@ -499,16 +499,24 @@ func wgMSS(st Settings) int {
 
 func wgMSSUp(st Settings) string {
 	mss := wgMSS(st)
+	return "modprobe xt_TCPMSS 2>/dev/null || true; modprobe iptable_mangle 2>/dev/null || true; " +
+		wgMSSClamp("i", "iifname", mss) + "; " + wgMSSClamp("o", "oifname", mss)
+}
+
+// wgMSSClamp loads the TCPMSS target when it can. A missing module used to be
+// hidden by `|| true`, so the tunnel stayed up and large TCP stalled after a
+// few KB. nft is the fallback, and a failure still must not take the tunnel down.
+func wgMSSClamp(iptFlag, nftDir string, mss int) string {
 	return fmt.Sprintf(
-		"iptables -t mangle -C FORWARD -i %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || iptables -t mangle -I FORWARD 1 -i %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || true; iptables -t mangle -C FORWARD -o %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || iptables -t mangle -I FORWARD 1 -o %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || true",
-		mss, mss, mss, mss,
+		"iptables -t mangle -C FORWARD -%s %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || iptables -t mangle -I FORWARD 1 -%s %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || { nft list table ip liking_mss >/dev/null 2>&1 || nft add table ip liking_mss; nft list chain ip liking_mss forward >/dev/null 2>&1 || nft add chain ip liking_mss forward '{ type filter hook forward priority mangle; policy accept; }'; nft list chain ip liking_mss forward 2>/dev/null | grep -q '%s \"%%i\"' || nft add rule ip liking_mss forward %s \"%%i\" tcp flags syn tcp option maxseg size set %d; } || true",
+		iptFlag, mss, iptFlag, mss, nftDir, nftDir, mss,
 	)
 }
 
 func wgMSSDown(st Settings) string {
 	mss := wgMSS(st)
 	return fmt.Sprintf(
-		"iptables -t mangle -D FORWARD -i %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || true; iptables -t mangle -D FORWARD -o %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || true",
+		"iptables -t mangle -D FORWARD -i %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || true; iptables -t mangle -D FORWARD -o %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || true; nft delete table ip liking_mss 2>/dev/null || true",
 		mss, mss,
 	)
 }

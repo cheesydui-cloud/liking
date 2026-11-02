@@ -80,9 +80,18 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 		all = append(all, samples...)
 		mitaNext, mitaOK = next, true
 	}
-	if samples, next, ok := c.peekWireGuard(); ok {
-		all = append(all, samples...)
-		wgNext, wgOK = next, true
+	if peers, ok := c.peekWireGuardPeers(); ok {
+		c.pendingWG = peers
+		c.pendingHasWG = true
+		// Email deltas stay for an older panel. A 0.3.10 panel ignores them
+		// when HasWGPeers is set, so the same bytes are not billed twice.
+		if samples, next, ok := c.wgEmailDeltas(peers); ok {
+			all = append(all, samples...)
+			wgNext, wgOK = next, true
+		}
+	} else {
+		c.pendingWG = nil
+		c.pendingHasWG = false
 	}
 	// Core counters and socket marks measure the same interval. Vision splice
 	// freezes user>>> counters after the handshake while the marked socket
@@ -127,6 +136,12 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 		}
 		c.pendingPorts = nil
 		c.pendingHasPorts = false
+		if commit && c.pendingClearHandoff {
+			c.clearWGHandoff()
+		}
+		c.pendingClearHandoff = false
+		c.pendingWG = nil
+		c.pendingHasWG = false
 		c.collectMu.Unlock()
 	}
 	return merged, finish
@@ -136,6 +151,11 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 func (c *Cores) TakePorts() ([]wsproto.PortRate, bool) {
 	p, ok := c.pendingPorts, c.pendingHasPorts
 	return p, ok
+}
+
+// TakeWGPeers returns kernel peer counters from the open collect. Call it before finish.
+func (c *Cores) TakeWGPeers() ([]wsproto.WGPeerStat, bool) {
+	return c.pendingWG, c.pendingHasWG
 }
 
 func emailsOf(samples []wsproto.Sample) map[string]struct{} {

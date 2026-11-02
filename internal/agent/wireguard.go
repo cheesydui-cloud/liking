@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -56,6 +55,7 @@ func (c *Cores) applyWireGuard(raw json.RawMessage) error {
 	quick := lookBin("wg-quick")
 	if !up || changed {
 		if up {
+			c.captureWGHandoff(cfg.Iface)
 			if msg, err := runLimited(ctx, quick, "down", path); err != nil {
 				return fmt.Errorf("wireguard 关闭失败: %s", cmdErr(msg, err))
 			}
@@ -83,6 +83,7 @@ func (c *Cores) downWireGuard(iface string) error {
 	}
 	path := filepath.Join(c.dir, iface+".conf")
 	if wgIfaceUp(iface) {
+		c.captureWGHandoff(iface)
 		quick := lookBin("wg-quick")
 		if quick == "" {
 			return fmt.Errorf("wireguard-tools 未安装")
@@ -142,6 +143,98 @@ func (c *Cores) clearWG(iface string) {
 	c.wgPeerIP = nil
 }
 
+// captureWGHandoff saves peer counters before wg-quick down resets them.
+// Apply holds c.mu; this uses its own lock so the snapshot cannot deadlock.
+func (c *Cores) captureWGHandoff(iface string) {
+	peers, ok := readWGDump(iface)
+	if !ok || len(peers) == 0 {
+		return
+	}
+	c.wgHandoffMu.Lock()
+	c.wgHandoff = peers
+	c.wgHandoffMu.Unlock()
+}
+
+func (c *Cores) viewWGHandoff() ([]wsproto.WGPeerStat, bool) {
+	c.wgHandoffMu.Lock()
+	defer c.wgHandoffMu.Unlock()
+	if len(c.wgHandoff) == 0 {
+		return nil, false
+	}
+	return append([]wsproto.WGPeerStat(nil), c.wgHandoff...), true
+}
+
+func (c *Cores) clearWGHandoff() {
+	c.wgHandoffMu.Lock()
+	c.wgHandoff = nil
+	c.wgHandoffMu.Unlock()
+}
+
+func readWGDump(iface string) ([]wsproto.WGPeerStat, bool) {
+	iface = strings.TrimSpace(iface)
+	bin := lookBin("wg")
+	if bin == "" || iface == "" {
+		return nil, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "show", iface, "dump").Output()
+	if err != nil {
+		return nil, false
+	}
+	return parseWGPeerDump(string(out)), true
+}
+
+// peekWireGuardPeers reads kernel counters even when the in-memory email map
+// is empty. After an agent restart the tunnel can stay up while rememberWG
+// has not run; the panel matches these peers by public key and tunnel address.
+func (c *Cores) peekWireGuardPeers() ([]wsproto.WGPeerStat, bool) {
+	if peers, ok := c.viewWGHandoff(); ok {
+		c.pendingClearHandoff = true
+		return peers, true
+	}
+	c.pendingClearHandoff = false
+	c.mu.Lock()
+	configured := strings.TrimSpace(c.wgIface)
+	c.mu.Unlock()
+	iface := configured
+	if iface == "" {
+		iface = "likingwg0"
+		if _, err := os.Stat("/sys/class/net/" + iface); err != nil {
+			return nil, false
+		}
+	}
+	peers, ok := readWGDump(iface)
+	if !ok {
+		if configured != "" {
+			noteStatsFail("wireguard", fmt.Errorf("wg show %s dump", iface))
+		}
+		return nil, false
+	}
+	return peers, true
+}
+
+func (c *Cores) wgEmailDeltas(raw []wsproto.WGPeerStat) ([]wsproto.Sample, map[string]bytePair, bool) {
+	c.mu.Lock()
+	peers := c.wgPeers
+	byIP := c.wgPeerIP
+	prev := c.wgLast
+	c.mu.Unlock()
+	if len(peers) == 0 {
+		return nil, nil, false
+	}
+	var cum []wsproto.Sample
+	for _, p := range raw {
+		email := emailForWGPeer(p.PublicKey, p.AllowedIPs, peers, byIP)
+		if email == "" || strings.HasPrefix(email, "relay.") {
+			continue
+		}
+		cum = append(cum, wsproto.Sample{Email: email, Up: p.Rx, Down: p.Tx})
+	}
+	deltas, next := flowDeltas(prev, cum)
+	return deltas, next, true
+}
+
 func (c *Cores) peekWireGuard() ([]wsproto.Sample, map[string]bytePair, bool) {
 	c.mu.Lock()
 	iface := c.wgIface
@@ -170,8 +263,23 @@ func (c *Cores) peekWireGuard() ([]wsproto.Sample, map[string]bytePair, bool) {
 }
 
 func parseWGDump(dump string, peers, byIP map[string]string) []wsproto.Sample {
-	lines := strings.Split(strings.ReplaceAll(dump, "\r\n", "\n"), "\n")
 	var out []wsproto.Sample
+	for _, p := range parseWGPeerDump(dump) {
+		email := emailForWGPeer(p.PublicKey, p.AllowedIPs, peers, byIP)
+		if email == "" || strings.HasPrefix(email, "relay.") {
+			continue
+		}
+		out = append(out, wsproto.Sample{Email: email, Up: p.Rx, Down: p.Tx})
+	}
+	return out
+}
+
+// parseWGPeerDump reads `wg show <iface> dump`. The first line is the
+// interface and is not a peer. Peer columns are public key, preshared key,
+// endpoint, allowed IPs, handshake, rx, tx, keepalive.
+func parseWGPeerDump(dump string) []wsproto.WGPeerStat {
+	lines := strings.Split(strings.ReplaceAll(dump, "\r\n", "\n"), "\n")
+	var out []wsproto.WGPeerStat
 	seen := 0
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -186,8 +294,8 @@ func parseWGDump(dump string, peers, byIP map[string]string) []wsproto.Sample {
 		if len(cols) < 7 {
 			continue
 		}
-		email := emailForWGPeer(cols[0], cols[3], peers, byIP)
-		if email == "" || strings.HasPrefix(email, "relay.") {
+		pub := strings.TrimSpace(cols[0])
+		if pub == "" || pub == "(none)" {
 			continue
 		}
 		rx, err1 := strconv.ParseInt(strings.TrimSpace(cols[5]), 10, 64)
@@ -195,7 +303,11 @@ func parseWGDump(dump string, peers, byIP map[string]string) []wsproto.Sample {
 		if err1 != nil || err2 != nil || rx < 0 || tx < 0 {
 			continue
 		}
-		out = append(out, wsproto.Sample{Email: email, Up: rx, Down: tx})
+		allowed := strings.TrimSpace(cols[3])
+		if allowed == "(none)" {
+			allowed = ""
+		}
+		out = append(out, wsproto.WGPeerStat{PublicKey: pub, AllowedIPs: allowed, Rx: rx, Tx: tx})
 	}
 	return out
 }
@@ -207,6 +319,9 @@ func emailForWGPeer(pub, allowed string, peers, byIP map[string]string) string {
 	var found string
 	for _, ip := range strings.Split(allowed, ",") {
 		ip = strings.TrimSpace(ip)
+		if ip == "" || ip == "0.0.0.0/0" || ip == "::/0" || ip == "192.0.2.1/32" || ip == "(none)" {
+			continue
+		}
 		email := byIP[ip]
 		if email == "" {
 			continue
@@ -220,18 +335,7 @@ func emailForWGPeer(pub, allowed string, peers, byIP map[string]string) string {
 }
 
 func canonicalWGKey(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" || s == "(none)" {
-		return ""
-	}
-	if b, err := base64.StdEncoding.DecodeString(s); err == nil && len(b) == 32 {
-		return base64.StdEncoding.EncodeToString(b)
-	}
-	raw := strings.TrimRight(s, "=")
-	if b, err := base64.RawStdEncoding.DecodeString(raw); err == nil && len(b) == 32 {
-		return base64.StdEncoding.EncodeToString(b)
-	}
-	return s
+	return wsproto.CanonicalWGKey(s)
 }
 
 func parseWGConfPeers(conf string) map[string][]string {

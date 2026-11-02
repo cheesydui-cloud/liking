@@ -1350,6 +1350,51 @@ func ClientByEmail(d *sql.DB, email string) (*Client, error) {
 	return c, nil
 }
 
+func ClientsByUsernames(d *sql.DB, names []string) ([]*Client, error) {
+	ph, args := strPlaceholders(names)
+	if ph == "" {
+		return nil, nil
+	}
+	rows, err := d.Query(`SELECT id,inbound_id,user_id,email,uuid,password,username,enabled FROM clients WHERE username IN (`+ph+`) ORDER BY id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanClients(rows)
+}
+
+func ClientsByUUIDs(d *sql.DB, ids []string) ([]*Client, error) {
+	ph, args := strPlaceholders(ids)
+	if ph == "" {
+		return nil, nil
+	}
+	rows, err := d.Query(`SELECT id,inbound_id,user_id,email,uuid,password,username,enabled FROM clients WHERE uuid IN (`+ph+`) ORDER BY id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanClients(rows)
+}
+
+func strPlaceholders(vals []string) (string, []any) {
+	ph := make([]string, 0, len(vals))
+	args := make([]any, 0, len(vals))
+	seen := map[string]struct{}{}
+	for _, v := range vals {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		ph = append(ph, "?")
+		args = append(args, v)
+	}
+	return strings.Join(ph, ","), args
+}
+
 func ClientByIdentity(d *sql.DB, id string) (*Client, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {

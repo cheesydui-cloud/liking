@@ -18,6 +18,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"liking/internal/corecfg"
 	"liking/internal/db"
 	"liking/internal/wsproto"
 )
@@ -60,6 +61,9 @@ type Hub struct {
 	portMu sync.Mutex
 	ports  map[int64]map[int]portLive // serverID -> listen port -> bps
 	portAt map[int64]time.Time
+
+	wgMu     sync.Mutex
+	wgCursor map[string]wgCursor // serverID:clientID -> last kernel reading
 }
 
 type portLive struct {
@@ -301,7 +305,7 @@ func (h *Hub) readerLoop(parent context.Context, ac *agentConn) {
 			}
 			h.noteLive(ac, st)
 			h.notePorts(ac.serverID, st)
-			h.applyStats(ac.serverID, st.Samples)
+			h.consumeStats(ac.serverID, st)
 		case wsproto.TypeApplyAck, wsproto.TypeHelloAck, wsproto.TypeUpgradeAck, wsproto.TypeUninstallAck, wsproto.TypeEnsureCoreAck, wsproto.TypeRemoveCoreAck, wsproto.TypeProbeAck, wsproto.TypeKickAck, wsproto.TypeEnsureNFTAck, wsproto.TypeEnsureWGAck, wsproto.TypeAllowPortAck:
 			ac.dispatchAck(env)
 		default:
@@ -530,7 +534,18 @@ func billBytes(n int64, mult float64) (int64, bool) {
 	return int64(prod), true
 }
 
+func (h *Hub) consumeStats(serverID int64, st wsproto.Stats) {
+	h.applySamples(serverID, st.Samples, st.HasWGPeers)
+	if st.HasWGPeers {
+		h.applyWGPeers(serverID, st.WGPeers)
+	}
+}
+
 func (h *Hub) applyStats(serverID int64, samples []wsproto.Sample) {
+	h.applySamples(serverID, samples, false)
+}
+
+func (h *Hub) applySamples(serverID int64, samples []wsproto.Sample, skipWireGuard bool) {
 	day := db.ClockDay(h.DB)
 	touched := map[int64]struct{}{}
 	live := map[int64]map[int64]liveBytes{}
@@ -554,6 +569,9 @@ func (h *Hub) applyStats(serverID int64, samples []wsproto.Sample) {
 		}
 		in, err := db.GetInbound(h.DB, c.InboundID)
 		if err != nil || in == nil || in.ServerID != serverID {
+			continue
+		}
+		if skipWireGuard && in.Profile == corecfg.ProfileWireGuard {
 			continue
 		}
 		u, err := db.GetUser(h.DB, c.UserID)

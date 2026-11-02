@@ -112,20 +112,22 @@ type ApplyAck struct {
 }
 
 type Stats struct {
-	Samples      []Sample   `json:"samples"`
-	NetUp        int64      `json:"net_up_bps,omitempty"`
-	NetDown      int64      `json:"net_down_bps,omitempty"`
-	HasNet       bool       `json:"has_net,omitempty"`
-	Cores        []string   `json:"cores,omitempty"`
-	CoresRunning []string   `json:"cores_running,omitempty"`
-	DiskFree     int64      `json:"disk_free,omitempty"`
-	DiskTotal    int64      `json:"disk_total,omitempty"`
-	MemAvail     int64      `json:"mem_avail,omitempty"`
-	MemTotal     int64      `json:"mem_total,omitempty"`
-	LoadMilli    int64      `json:"load_milli,omitempty"`
-	Conns        int        `json:"conns,omitempty"`
-	Ports        []PortRate `json:"ports,omitempty"`
-	HasPorts     bool       `json:"has_ports,omitempty"`
+	Samples      []Sample     `json:"samples"`
+	NetUp        int64        `json:"net_up_bps,omitempty"`
+	NetDown      int64        `json:"net_down_bps,omitempty"`
+	HasNet       bool         `json:"has_net,omitempty"`
+	Cores        []string     `json:"cores,omitempty"`
+	CoresRunning []string     `json:"cores_running,omitempty"`
+	DiskFree     int64        `json:"disk_free,omitempty"`
+	DiskTotal    int64        `json:"disk_total,omitempty"`
+	MemAvail     int64        `json:"mem_avail,omitempty"`
+	MemTotal     int64        `json:"mem_total,omitempty"`
+	LoadMilli    int64        `json:"load_milli,omitempty"`
+	Conns        int          `json:"conns,omitempty"`
+	Ports        []PortRate   `json:"ports,omitempty"`
+	HasPorts     bool         `json:"has_ports,omitempty"`
+	WGPeers      []WGPeerStat `json:"wg_peers,omitempty"`
+	HasWGPeers   bool         `json:"has_wg_peers,omitempty"`
 }
 
 // PortRate is one listen port's realtime speed. It is display-only:
@@ -134,6 +136,17 @@ type PortRate struct {
 	Port    int   `json:"port"`
 	UpBps   int64 `json:"up_bps"`
 	DownBps int64 `json:"down_bps"`
+}
+
+// WGPeerStat is one kernel WireGuard peer's cumulative transfer.
+// Rx is bytes received from the peer (client upload). Tx is bytes sent to
+// the peer (client download). The agent reports every peer, including the
+// exit and the probe. The panel decides who is billed.
+type WGPeerStat struct {
+	PublicKey  string `json:"public_key"`
+	AllowedIPs string `json:"allowed_ips,omitempty"`
+	Rx         int64  `json:"rx"`
+	Tx         int64  `json:"tx"`
 }
 
 type Upgrade struct {

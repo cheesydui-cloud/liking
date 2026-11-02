@@ -112,6 +112,9 @@ func TestWireGuardAddressesAndConf(t *testing.T) {
 	if !strings.Contains(hub, "TCPMSS --set-mss 1240") || !strings.Contains(hub, "AllowedIPs = "+WGProbeAddress) {
 		t.Fatalf("mss or probe\n%s", hub)
 	}
+	if !strings.Contains(hub, "modprobe xt_TCPMSS") || !strings.Contains(hub, `nft add rule ip liking_mss forward iifname "%i"`) || strings.Contains(hub, "%!") {
+		t.Fatalf("mss module\n%s", hub)
+	}
 	probePub := ParseSettings(in.Settings).String("probe_public_key")
 	for _, p := range peers {
 		if p.PublicKey == probePub || p.AllowedIPs == WGProbeAddress {
