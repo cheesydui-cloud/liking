@@ -69,6 +69,76 @@ func TestParseSSListenAndFwmark(t *testing.T) {
 	}
 }
 
+func TestWGListenRateSkipsExitAndFirstSight(t *testing.T) {
+	peers := []wsproto.WGPeerStat{
+		{PublicKey: "exit", AllowedIPs: "0.0.0.0/0", Rx: 900000, Tx: 800000},
+		{PublicKey: "probe", AllowedIPs: "192.0.2.1/32", Rx: 50, Tx: 50},
+		{PublicKey: "home", AllowedIPs: "10.7.0.0/24", Rx: 700000, Tx: 700000},
+		{Email: "relay.i1", PublicKey: "relay", AllowedIPs: "10.7.0.2/32", Rx: 400000, Tx: 400000},
+		{Email: "u1", PublicKey: "cust", AllowedIPs: "10.7.0.11/32", Rx: 1000, Tx: 5000},
+	}
+	up, down, next, ok := wgListenDelta(wgListenCursor{}, peers, 5)
+	if !ok || up != 0 || down != 0 || !next.seen || next.up != 1000 || next.down != 5000 {
+		t.Fatalf("first sight %+v %d %d %v", next, up, down, ok)
+	}
+	peers[4].Rx = 6000
+	peers[4].Tx = 5000
+	up, down, next, ok = wgListenDelta(next, peers, 5)
+	if !ok || up != 1000 || down != 0 || next.up != 6000 {
+		t.Fatalf("delta %d %d %+v", up, down, next)
+	}
+	if _, _, _, ok = wgListenDelta(next, []wsproto.WGPeerStat{{AllowedIPs: "0.0.0.0/0", Rx: 1, Tx: 1}}, 5); ok {
+		t.Fatal("exit must not become a listen rate")
+	}
+}
+
+func TestPeekFlowsOverlaysWireGuardListen(t *testing.T) {
+	c := NewCores(t.TempDir())
+	defer c.Close()
+	c.lastReq["wireguard"] = []byte(`{"iface":"likingwg0","conf":"[Interface]\nListenPort = 10433\n"}`)
+	c.pendingWG = []wsproto.WGPeerStat{
+		{AllowedIPs: "0.0.0.0/0", Rx: 9, Tx: 9},
+		{AllowedIPs: "10.7.0.11/32", Rx: 1000, Tx: 2000},
+	}
+	old := readFlowSources
+	readFlowSources = func() (flowSources, error) {
+		return flowSources{
+			conntrack: "ipv4 2 tcp 6 1 ESTABLISHED src=1.2.3.4 dst=10.0.0.5 sport=1 dport=443 packets=1 bytes=10 src=10.0.0.5 dst=1.2.3.4 sport=443 dport=1 packets=1 bytes=10 mark=0",
+			local:     map[string]struct{}{"10.0.0.5": {}},
+		}, nil
+	}
+	defer func() { readFlowSources = old }()
+	_, _, _, ok := c.peekFlows()
+	if !ok || !c.pendingWGListenOK {
+		t.Fatal("overlay cursor")
+	}
+	var first wsproto.PortRate
+	for _, p := range c.pendingPorts {
+		if p.Port == 10433 {
+			first = p
+		}
+	}
+	if first.UpBps != 0 || first.DownBps != 0 {
+		t.Fatalf("absolute counters became a rate %+v", first)
+	}
+	c.wgListenCur = c.pendingWGListen
+	c.pendingWG[1].Rx = 3500
+	c.pendingWG[1].Tx = 7000
+	_, _, _, ok = c.peekFlows()
+	if !ok {
+		t.Fatal("second peek")
+	}
+	var got wsproto.PortRate
+	for _, p := range c.pendingPorts {
+		if p.Port == 10433 {
+			got = p
+		}
+	}
+	if got.UpBps != 500 || got.DownBps != 1000 {
+		t.Fatalf("listen rate %+v", got)
+	}
+}
+
 func TestPortRatesStayDistinct(t *testing.T) {
 	prev := map[int]bytePair{443: {up: 1000, down: 2000}, 8443: {up: 10, down: 20}}
 	cur := map[int]bytePair{443: {up: 6000, down: 2000}, 8443: {up: 10, down: 20}}

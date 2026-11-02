@@ -70,6 +70,30 @@ type inboundReq struct {
 	RejectCN      *bool           `json:"reject_cn"`
 }
 
+// inboundLiveRates picks the node-card speed. Other protocols trust the
+// listen-port rate, which conntrack can see. Kernel WireGuard UDP creates no
+// such rows, so a fresh 0 B/s must not hide the customer rate already shown
+// on the user cards. A non-zero port rate is used only when no customer is
+// moving, which is the agent overlay after that agent is upgraded.
+func inboundLiveRates(profile string, portUp, portDown int64, portOK bool, userUp, userDown int64, userOK bool) (int64, int64, bool) {
+	if profile == corecfg.ProfileWireGuard {
+		if userOK && (userUp > 0 || userDown > 0) {
+			return userUp, userDown, true
+		}
+		if portOK && (portUp > 0 || portDown > 0) {
+			return portUp, portDown, true
+		}
+		if userOK {
+			return userUp, userDown, true
+		}
+		return portUp, portDown, portOK
+	}
+	if portOK {
+		return portUp, portDown, true
+	}
+	return userUp, userDown, userOK
+}
+
 func (s *Server) handleListInbounds(w http.ResponseWriter, r *http.Request) {
 	list, err := db.ListInbounds(s.DB)
 	if err != nil {
@@ -85,10 +109,9 @@ func (s *Server) handleListInbounds(w http.ResponseWriter, r *http.Request) {
 			m["used_down"] = t.Down
 		}
 		if s.Hub != nil {
-			if up, down, ok := s.Hub.PortLive(in.ServerID, in.Port); ok {
-				m["net_up_bps"] = up
-				m["net_down_bps"] = down
-			} else if up, down, ok := s.Hub.InboundUserLive(in.ID); ok {
+			pu, pd, pok := s.Hub.PortLive(in.ServerID, in.Port)
+			uu, ud, uok := s.Hub.InboundUserLive(in.ID)
+			if up, down, ok := inboundLiveRates(in.Profile, pu, pd, pok, uu, ud, uok); ok {
 				m["net_up_bps"] = up
 				m["net_down_bps"] = down
 			}

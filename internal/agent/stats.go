@@ -135,9 +135,13 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 				c.portLast = portNext
 				c.flowAt = time.Now()
 			}
+			if c.pendingWGListenOK {
+				c.wgListenCur = c.pendingWGListen
+			}
 		}
 		c.pendingPorts = nil
 		c.pendingHasPorts = false
+		c.pendingWGListenOK = false
 		if commit && c.pendingClearHandoff {
 			c.clearWGHandoff()
 		}

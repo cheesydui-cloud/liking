@@ -577,8 +577,10 @@ func flowCumul(src flowSources, listen map[int]struct{}, emails map[uint32]strin
 func (c *Cores) peekFlows() ([]wsproto.Sample, map[string]bytePair, map[int]bytePair, bool) {
 	c.mu.Lock()
 	listen := listenPortsLocked(c.last)
+	wgPort := 0
 	if p := wgJSONListenPort(c.lastReq["wireguard"]); p > 0 {
 		listen = appendListenPort(listen, p)
+		wgPort = p
 	}
 	marks := append([]wsproto.AcctMark(nil), c.acctMarks...)
 	c.mu.Unlock()
@@ -613,6 +615,14 @@ func (c *Cores) peekFlows() ([]wsproto.Sample, map[string]bytePair, map[int]byte
 		}
 	}
 	ports, portNext := portRatesFrom(c.portLast, portCumul, listen, dt)
+	if wgPort > 0 {
+		upBps, downBps, next, overlayOK := wgListenDelta(c.wgListenCur, c.pendingWG, dt)
+		if overlayOK {
+			c.pendingWGListen = next
+			c.pendingWGListenOK = true
+			ports = applyWGListenRate(ports, wgPort, upBps, downBps)
+		}
+	}
 	c.pendingPorts = ports
 	c.pendingHasPorts = true
 	var cum []wsproto.Sample
@@ -695,4 +705,97 @@ func portRatesFrom(prev map[int]bytePair, cur map[int]bytePair, listen []int, dt
 		})
 	}
 	return out, next
+}
+
+// wgListenCursor is the last customer-peer total seen on the WireGuard listen
+// port. The first sample is a baseline, not a rate.
+type wgListenCursor struct {
+	seen     bool
+	up, down int64
+}
+
+// wgListenDelta turns customer peer counters into a listen-port rate.
+// Kernel UDP on that port does not appear in conntrack, so the node card
+// would stay at 0. Exit, probe, relay, and any prefix wider than one host
+// are left out. The result is display-only and must not be billed.
+func wgListenDelta(prev wgListenCursor, peers []wsproto.WGPeerStat, dt float64) (upBps, downBps int64, next wgListenCursor, ok bool) {
+	up, down, has := wgCustomerListenCumul(peers)
+	if !has {
+		return 0, 0, prev, false
+	}
+	if dt < 0.2 || dt > 60 {
+		dt = 5
+	}
+	next = wgListenCursor{seen: true, up: up, down: down}
+	if !prev.seen {
+		return 0, 0, next, true
+	}
+	var dUp, dDown int64
+	if up >= prev.up {
+		dUp = up - prev.up
+	}
+	if down >= prev.down {
+		dDown = down - prev.down
+	}
+	return int64(float64(dUp) / dt), int64(float64(dDown) / dt), next, true
+}
+
+func wgCustomerListenCumul(peers []wsproto.WGPeerStat) (up, down int64, ok bool) {
+	for _, p := range peers {
+		if !wgDisplayPeer(p) {
+			continue
+		}
+		up += p.Rx
+		down += p.Tx
+		ok = true
+	}
+	return
+}
+
+func wgDisplayPeer(p wsproto.WGPeerStat) bool {
+	if strings.HasPrefix(strings.TrimSpace(p.Email), "relay.") {
+		return false
+	}
+	raw := strings.TrimSpace(p.AllowedIPs)
+	if raw == "" || raw == "(none)" {
+		return false
+	}
+	any := false
+	for _, ip := range strings.Split(raw, ",") {
+		ip = strings.TrimSpace(ip)
+		if ip == "" {
+			continue
+		}
+		any = true
+		switch ip {
+		case "0.0.0.0/0", "::/0", "192.0.2.1/32", "(none)":
+			return false
+		}
+		if i := strings.IndexByte(ip, '/'); i >= 0 {
+			n, err := strconv.Atoi(strings.TrimSpace(ip[i+1:]))
+			if err != nil || n < 32 {
+				return false
+			}
+		}
+	}
+	return any
+}
+
+func applyWGListenRate(ports []wsproto.PortRate, port int, up, down int64) []wsproto.PortRate {
+	if port <= 0 {
+		return ports
+	}
+	for i := range ports {
+		if ports[i].Port != port {
+			continue
+		}
+		if up > ports[i].UpBps {
+			ports[i].UpBps = up
+		}
+		if down > ports[i].DownBps {
+			ports[i].DownBps = down
+		}
+		return ports
+	}
+	return append(ports, wsproto.PortRate{Port: port, UpBps: up, DownBps: down})
 }

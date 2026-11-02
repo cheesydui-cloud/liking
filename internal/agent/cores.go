@@ -47,6 +47,9 @@ type Cores struct {
 	flowLast            map[string]bytePair
 	portLast            map[int]bytePair
 	flowAt              time.Time
+	wgListenCur         wgListenCursor
+	pendingWGListen     wgListenCursor
+	pendingWGListenOK   bool
 	pendingPorts        []wsproto.PortRate
 	pendingHasPorts     bool
 	pendingWG           []wsproto.WGPeerStat

@@ -159,30 +159,77 @@ func (s *Server) probeWireGuardListen(w http.ResponseWriter, in *db.Inbound, hos
 	}
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	start := time.Now()
-	resp, err := wgProbeExchange(addr, payload, 4*time.Second)
-	if err != nil {
-		msg := "不通"
-		if ne, ok := err.(net.Error); ok && ne.Timeout() {
-			msg = "超时"
-		} else if strings.TrimSpace(err.Error()) != "" {
-			msg = err.Error()
+	resp, udpErr := wgProbeExchange(addr, payload, 3*time.Second)
+	if udpErr == nil && corecfg.WireGuardReplyOK(resp) {
+		writeListenProbeOK(w, out, time.Since(start))
+		return
+	}
+	// This provider drops the panel's UDP before it reaches the socket.
+	// The delay listener accepts TCP on the same public port.
+	if d, ok := dialListenOK(addr, 3*time.Second); ok {
+		writeListenProbeOK(w, out, d)
+		return
+	}
+	// Public packets from the panel can still be filtered. The agent is
+	// already connected and can confirm the listener on the machine.
+	if in != nil {
+		if d, ok := wgLocalListenProbe(s, in.ServerID, port); ok {
+			writeListenProbeOK(w, out, d)
+			return
 		}
-		out["error"] = msg
-		jsonOK(w, out)
-		return
 	}
-	if !corecfg.WireGuardReplyOK(resp) {
-		out["error"] = "不通"
-		jsonOK(w, out)
-		return
+	msg := "不通"
+	if ne, ok := udpErr.(net.Error); ok && ne.Timeout() {
+		msg = "超时"
+	} else if udpErr != nil && strings.TrimSpace(udpErr.Error()) != "" {
+		msg = udpErr.Error()
 	}
-	ms := time.Since(start).Milliseconds()
+	out["error"] = msg
+	jsonOK(w, out)
+}
+
+func writeListenProbeOK(w http.ResponseWriter, out map[string]any, d time.Duration) {
+	ms := d.Milliseconds()
 	if ms < 1 {
 		ms = 1
 	}
 	out["ok"] = true
 	out["latency_ms"] = ms
 	jsonOK(w, out)
+}
+
+func dialListenOK(addr string, timeout time.Duration) (time.Duration, bool) {
+	start := time.Now()
+	conn, err := listenDialTimeout("tcp", addr, timeout)
+	if err != nil {
+		return 0, false
+	}
+	_ = conn.Close()
+	return time.Since(start), true
+}
+
+// wgLocalListenProbe asks the online agent to TCP-dial its own delay listener.
+// It does not bill anything and does not open a new public path.
+var wgLocalListenProbe = func(s *Server, serverID int64, port int) (time.Duration, bool) {
+	if s == nil || s.Hub == nil || serverID == 0 || port < 1 || port > 65535 {
+		return 0, false
+	}
+	if !s.Hub.IsOnline(serverID) || !s.Hub.HasCap(serverID, wsproto.CapProbe) {
+		return 0, false
+	}
+	raw, err := s.Hub.SendRPC(serverID, wsproto.TypeProbe, wsproto.Probe{Host: "127.0.0.1", Port: port}, 4*time.Second)
+	if err != nil {
+		return 0, false
+	}
+	var ack wsproto.ProbeAck
+	if json.Unmarshal(raw, &ack) != nil || !ack.OK {
+		return 0, false
+	}
+	ms := ack.LatencyMS
+	if ms < 1 {
+		ms = 1
+	}
+	return time.Duration(ms) * time.Millisecond, true
 }
 
 func (s *Server) handleInboundProbe(w http.ResponseWriter, r *http.Request) {
