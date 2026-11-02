@@ -2,6 +2,20 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.3.6 — 2026-11-02
+
+装好 WireGuard 之后，实例卡片会在 Agent 旁边显示 WireGuard，和 Xray、sing-box、Mita 同一行。
+
+### 变更
+- Agent 发现 `wg` 和 `wg-quick` 后，把 WireGuard 写进上报的核心列表。卡片用蓝色标签显示
+- 推送核心的下拉和卸载列表仍只有 Xray、sing-box、Mita。WireGuard 继续从实例菜单安装
+- 机器上已经装了其他核心时，WireGuard 节点仍会进入订阅
+
+### 升级注意
+- 先在面板机器执行 `liking-upgrade`
+- 要显示这个标签的中转机再一键升级 Agent 到 0.3.6。0.3.5 不会上报 WireGuard
+- 回滚：`liking-upgrade --release v0.3.5`
+
 ## v0.3.5 — 2026-11-02
 
 实例菜单可以直接安装 WireGuard，不用再登录中转机。

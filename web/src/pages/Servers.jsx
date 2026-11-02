@@ -922,9 +922,9 @@ export default function Servers() {
                 </Field>
                 <div>
                   <div className="text-[12px] font-medium text-ink-soft mb-1">已安装</div>
-                  {parseCores(coreSrv.cores).length === 0 ? (
+                  {parseCores(coreSrv.cores).filter(c => c !== 'wireguard').length === 0 ? (
                     <div className="text-[13px] text-ink-mut py-2">还没有探测到内核。</div>
-                  ) : parseCores(coreSrv.cores).map(c => (
+                  ) : parseCores(coreSrv.cores).filter(c => c !== 'wireguard').map(c => (
                     <div key={c} className="core-installed">
                       <span className={`core-tag is-${c}`}>{coreLabel(c)}</span>
                       <button type="button" className="row-act" style={{ color: 'var(--color-danger)' }} disabled={busy} onClick={() => removeCore(c)}>卸载</button>

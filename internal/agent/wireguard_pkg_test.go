@@ -5,6 +5,27 @@ import (
 	"testing"
 )
 
+func TestDetectedCoresIncludesWireGuard(t *testing.T) {
+	old := haveWG
+	defer func() { haveWG = old }()
+	haveWG = func() bool { return true }
+	found := false
+	for _, c := range detectedCores() {
+		if c == "wireguard" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("wireguard missing from detected cores")
+	}
+	haveWG = func() bool { return false }
+	for _, c := range detectedCores() {
+		if c == "wireguard" {
+			t.Fatal("wireguard reported without tools")
+		}
+	}
+}
+
 func TestInstallWGUsesApt(t *testing.T) {
 	oldOS, oldHave, oldMgr, oldRun, oldProbe := wgGOOS, haveWG, wgPkgManagers, wgPkgRun, modprobeWG
 	wgGOOS = "linux"

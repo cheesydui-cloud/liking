@@ -12,6 +12,7 @@ export function parseCores(s) {
 }
 
 export function coreLabel(id) {
+  if (id === 'wireguard') return 'WireGuard'
   const x = CORE_OPTIONS.find(c => c.id === id)
   return x ? x.label : id
 }

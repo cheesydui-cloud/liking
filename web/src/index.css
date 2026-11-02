@@ -1705,6 +1705,7 @@ html.dark.page-aliyun .machine {
 .core-tag.is-xray { color: var(--color-ok); }
 .core-tag.is-singbox { color: var(--color-down); }
 .core-tag.is-mita { color: var(--color-warn); }
+.core-tag.is-wireguard { color: #3b6fd8; }
 .line-tag {
   margin-left: 6px;
   font-size: 11px;

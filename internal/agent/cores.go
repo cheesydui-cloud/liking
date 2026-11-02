@@ -79,6 +79,9 @@ func detectedCores() []string {
 	if lookBin("mita") != "" {
 		out = append(out, "mita")
 	}
+	if haveWG() {
+		out = append(out, "wireguard")
+	}
 	return out
 }
 

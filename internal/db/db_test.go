@@ -71,7 +71,7 @@ func TestOpenMigrateAndCRUD(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, _ = GetServer(d, s.ID)
-	if s.Cores != "xray" || !ServerHasCore(s, "xray") || ServerHasCore(s, "mita") {
+	if s.Cores != "xray" || !ServerHasCore(s, "xray") || ServerHasCore(s, "mita") || !ServerHasCore(s, "wireguard") {
 		t.Fatalf("cores %+v", s)
 	}
 	if err := SetServerCores(d, s.ID, []string{"xray", "mita"}); err != nil {

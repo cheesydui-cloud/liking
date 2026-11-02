@@ -720,7 +720,7 @@ func ServerHasCore(s *Server, core string) bool {
 		return true
 	}
 	want := normalizeCoreName(core)
-	if want == "" {
+	if want == "" || want == "wireguard" {
 		return true
 	}
 	for _, c := range strings.Split(s.Cores, ",") {
