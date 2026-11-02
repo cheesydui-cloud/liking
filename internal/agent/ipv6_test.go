@@ -71,6 +71,26 @@ func TestApplyDisableIPv6MissingProc(t *testing.T) {
 	}
 }
 
+func TestIPv6KickOnlyAfterDisable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "disable_ipv6")
+	if err := os.WriteFile(path, []byte("0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if ipv6SysctlDisabled(path) {
+		t.Fatal("enabled sysctl looked disabled")
+	}
+	if err := os.WriteFile(path, []byte("1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if !ipv6SysctlDisabled(path) {
+		t.Fatal("disabled sysctl was not seen")
+	}
+	if ipv6SysctlDisabled(filepath.Join(dir, "missing")) {
+		t.Fatal("missing file should not kick")
+	}
+}
+
 func TestListNetIfaces(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"lo", "eth0"} {

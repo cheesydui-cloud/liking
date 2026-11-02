@@ -25,9 +25,13 @@ const (
 	WGDefaultKeepalive = 25
 	WGDefaultFwMark    = 51820
 	WGDefaultTable     = 100
-	WGClientDNS        = "1.1.1.1"
-	WGProbeAddress     = "192.0.2.1/32"
-	wgClientStart      = 10
+	// WGExitListenPort is the home machine's fixed UDP port. The entry dials
+	// this port. The home must not pick a random port on bounce, or the
+	// entry's endpoint stops answering. 51820 is not the entry's public port.
+	WGExitListenPort = 51820
+	WGClientDNS      = "1.1.1.1"
+	WGProbeAddress   = "192.0.2.1/32"
+	wgClientStart    = 10
 )
 
 func GenerateWireGuardKeyPair() (priv, pub string, err error) {
@@ -357,7 +361,42 @@ func persistWGProbe(d *sql.DB, in *db.Inbound) error {
 	return db.UpdateInbound(d, in)
 }
 
-func buildWireGuard(serverID int64, ins []*db.Inbound, all []*db.Inbound, clients map[int64][]*db.Client) (*wsproto.WireGuardConfig, error) {
+func wireGuardExitHost(d *sql.DB, ins []*db.Inbound) (string, error) {
+	var id int64
+	for _, in := range ins {
+		if in == nil || !in.Enabled || in.Profile != ProfileWireGuard {
+			continue
+		}
+		next := WGExitServerID(in)
+		if next == 0 {
+			continue
+		}
+		if id != 0 && id != next {
+			return "", fmt.Errorf("一条入口不能同时指向两台家宽")
+		}
+		id = next
+	}
+	if id == 0 {
+		return "", nil
+	}
+	if d == nil {
+		return "", fmt.Errorf("家宽没有公开地址，入口无法连过去")
+	}
+	srv, err := db.GetServer(d, id)
+	if err != nil {
+		return "", fmt.Errorf("家宽实例: %w", err)
+	}
+	host := strings.TrimSpace(srv.PublicHost)
+	if host == "" {
+		host = strings.TrimSpace(srv.ConnectIP)
+	}
+	if host == "" {
+		return "", fmt.Errorf("家宽没有公开地址，入口无法连过去")
+	}
+	return host, nil
+}
+
+func buildWireGuard(serverID int64, ins []*db.Inbound, all []*db.Inbound, clients map[int64][]*db.Client, exitHost string) (*wsproto.WireGuardConfig, error) {
 	var found []*db.Inbound
 	for _, in := range ins {
 		if in != nil && in.Profile == ProfileWireGuard {
@@ -390,7 +429,7 @@ func buildWireGuard(serverID int64, ins []*db.Inbound, all []*db.Inbound, client
 			return nil, fmt.Errorf("这台机器已是家宽出口，不能再在上面建 WireGuard 节点")
 		}
 		in := enabled[0]
-		conf, peers, err := HubConfig(in, clients[in.ID])
+		conf, peers, err := HubConfig(in, clients[in.ID], exitHost)
 		if err != nil {
 			return nil, err
 		}
@@ -416,7 +455,7 @@ func buildWireGuard(serverID int64, ins []*db.Inbound, all []*db.Inbound, client
 	return nil, nil
 }
 
-func HubConfig(in *db.Inbound, clients []*db.Client) (string, []wgPeer, error) {
+func HubConfig(in *db.Inbound, clients []*db.Client, exitHost string) (string, []wgPeer, error) {
 	if in == nil || in.Profile != ProfileWireGuard {
 		return "", nil, fmt.Errorf("不是 WireGuard 节点")
 	}
@@ -426,6 +465,10 @@ func HubConfig(in *db.Inbound, clients []*db.Client) (string, []wgPeer, error) {
 	}
 	if st.String("private_key") == "" || st.String("exit_public_key") == "" {
 		return "", nil, fmt.Errorf("WireGuard 密钥还没生成")
+	}
+	exitHost = strings.TrimSpace(exitHost)
+	if WGExitServerID(in) != 0 && exitHost == "" {
+		return "", nil, fmt.Errorf("家宽没有公开地址，入口无法连过去")
 	}
 	var peers []wgPeer
 	peers = append(peers, wgPeer{
@@ -460,6 +503,16 @@ func HubConfig(in *db.Inbound, clients []*db.Client) (string, []wgPeer, error) {
 			continue
 		}
 		fmt.Fprintf(&b, "\n[Peer]\nPublicKey = %s\nAllowedIPs = %s\n", p.PublicKey, p.AllowedIPs)
+		if p.Exit && exitHost != "" {
+			// The home cannot complete a handshake to the entry's public port
+			// on this provider. The entry dials the home's fixed listen port
+			// instead, and keepalive keeps that path up.
+			ka := st.Int("keepalive", WGDefaultKeepalive)
+			if ka <= 0 {
+				ka = WGDefaultKeepalive
+			}
+			fmt.Fprintf(&b, "Endpoint = %s\nPersistentKeepalive = %d\n", hostPort(exitHost, WGExitListenPort), ka)
+		}
 	}
 	if pub, addr := strings.TrimSpace(st.String("probe_public_key")), strings.TrimSpace(st.String("probe_address")); pub != "" && addr != "" {
 		fmt.Fprintf(&b, "\n[Peer]\nPublicKey = %s\nAllowedIPs = %s\n", pub, addr)
@@ -499,6 +552,20 @@ func wgTCPAllowUp(port int) string {
 		return ""
 	}
 	return fmt.Sprintf("; iptables -C INPUT -p tcp --dport %d -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport %d -j ACCEPT 2>/dev/null || true", port, port)
+}
+
+func wgUDPAllowUp(port int) string {
+	if port < 1 || port > 65535 {
+		return ""
+	}
+	return fmt.Sprintf("; iptables -C INPUT -p udp --dport %d -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p udp --dport %d -j ACCEPT 2>/dev/null || true", port, port)
+}
+
+func wgUDPAllowDown(port int) string {
+	if port < 1 || port > 65535 {
+		return ""
+	}
+	return fmt.Sprintf("; iptables -D INPUT -p udp --dport %d -j ACCEPT 2>/dev/null || true", port)
 }
 
 func wgTCPAllowDown(port int) string {
@@ -558,12 +625,12 @@ func HomeConfig(in *db.Inbound) (string, error) {
 		return "", fmt.Errorf("还没有隧道网段")
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "[Interface]\nPrivateKey = %s\nAddress = %s\nMTU = %d\nTable = off\n",
-		st.String("exit_private_key"), st.String("exit_address"), st.Int("mtu", WGDefaultMTU))
-	fmt.Fprintf(&b, "PostUp = sysctl -w net.ipv4.ip_forward=1; ip route replace %s dev %%i; iptables -C FORWARD -i %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %%i -j ACCEPT; iptables -C FORWARD -o %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %%i -j ACCEPT; iface=$(ip route show default | awk '{print $5; exit}'); iptables -t nat -C POSTROUTING -s %s -o \"$iface\" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s %s -o \"$iface\" -j MASQUERADE; %s\n",
-		network, network, network, wgMSSUp(st))
-	fmt.Fprintf(&b, "PostDown = ip route del %s dev %%i 2>/dev/null || true; iptables -D FORWARD -i %%i -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o %%i -j ACCEPT 2>/dev/null || true; iface=$(ip route show default | awk '{print $5; exit}'); iptables -t nat -D POSTROUTING -s %s -o \"$iface\" -j MASQUERADE 2>/dev/null || true; %s\n",
-		network, network, wgMSSDown(st))
+	fmt.Fprintf(&b, "[Interface]\nPrivateKey = %s\nAddress = %s\nListenPort = %d\nMTU = %d\nTable = off\n",
+		st.String("exit_private_key"), st.String("exit_address"), WGExitListenPort, st.Int("mtu", WGDefaultMTU))
+	fmt.Fprintf(&b, "PostUp = sysctl -w net.ipv4.ip_forward=1; ip route replace %s dev %%i; iptables -C FORWARD -i %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %%i -j ACCEPT; iptables -C FORWARD -o %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %%i -j ACCEPT; iface=$(ip route show default | awk '{print $5; exit}'); iptables -t nat -C POSTROUTING -s %s -o \"$iface\" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s %s -o \"$iface\" -j MASQUERADE; %s%s\n",
+		network, network, network, wgMSSUp(st), wgUDPAllowUp(WGExitListenPort))
+	fmt.Fprintf(&b, "PostDown = ip route del %s dev %%i 2>/dev/null || true; iptables -D FORWARD -i %%i -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o %%i -j ACCEPT 2>/dev/null || true; iface=$(ip route show default | awk '{print $5; exit}'); iptables -t nat -D POSTROUTING -s %s -o \"$iface\" -j MASQUERADE 2>/dev/null || true; %s%s\n",
+		network, network, wgMSSDown(st), wgUDPAllowDown(WGExitListenPort))
 	fmt.Fprintf(&b, "\n[Peer]\nPublicKey = %s\nEndpoint = %s\nAllowedIPs = %s\nPersistentKeepalive = %d\n",
 		st.String("public_key"), hostPort(host, in.Port), network, st.Int("keepalive", WGDefaultKeepalive))
 	return b.String(), nil

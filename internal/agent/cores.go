@@ -619,6 +619,7 @@ func (c *Cores) watchLoop() {
 			return
 		case <-t.C:
 			c.watchOnce()
+			c.keepWireGuard()
 		}
 	}
 }

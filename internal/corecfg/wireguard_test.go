@@ -90,7 +90,7 @@ func TestWireGuardAddressesAndConf(t *testing.T) {
 	}
 	c1.Enabled = true
 	c2.Enabled = true
-	hub, peers, err := HubConfig(in, []*db.Client{c2, c1})
+	hub, peers, err := HubConfig(in, []*db.Client{c2, c1}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,6 +148,25 @@ func TestWireGuardAddressesAndConf(t *testing.T) {
 	}
 	if !strings.Contains(home, "Endpoint = cm.example:51820") {
 		t.Fatalf("endpoint\n%s", home)
+	}
+	if !strings.Contains(home, "ListenPort = 51820") || !strings.Contains(home, "iptables -I INPUT 1 -p udp --dport 51820 -j ACCEPT") {
+		t.Fatalf("home listen\n%s", home)
+	}
+	stExit := ParseSettings(in.Settings)
+	stExit["exit_server_id"] = 9
+	in.Settings = mustSettings(stExit)
+	if _, _, missErr := HubConfig(in, []*db.Client{c1}, ""); missErr == nil {
+		t.Fatal("missing exit host should fail")
+	}
+	dial, dialPeers, dialErr := HubConfig(in, []*db.Client{c1}, "198.51.100.9")
+	if dialErr != nil {
+		t.Fatal(dialErr)
+	}
+	if !strings.Contains(dial, "Endpoint = 198.51.100.9:51820") || !strings.Contains(dial, "PersistentKeepalive = 25") {
+		t.Fatalf("exit dial\n%s", dial)
+	}
+	if len(dialPeers) == 0 || !dialPeers[0].Exit || !strings.Contains(dial, "AllowedIPs = 0.0.0.0/0\nEndpoint") {
+		t.Fatalf("exit peer order\n%s", dial)
 	}
 	st := ParseSettings(in.Settings)
 	if strings.Contains(home, st.String("private_key")) || strings.Contains(hub, st.String("exit_private_key")) {
@@ -299,6 +318,9 @@ func TestBuildWireGuardHomeExit(t *testing.T) {
 	if !strings.Contains(hubConf, "ListenPort = 51820") || strings.Contains(hubConf, exitPriv) {
 		t.Fatalf("hub\n%s", hubConf)
 	}
+	if !strings.Contains(hubConf, "Endpoint = 198.51.100.9:51820") || !strings.Contains(hubConf, "PersistentKeepalive = 25") {
+		t.Fatalf("hub should dial home\n%s", hubConf)
+	}
 	if !strings.Contains(hubConf, "TCPMSS --set-mss 1240") || !strings.Contains(hubConf, WGProbeAddress) {
 		t.Fatalf("hub mss\n%s", hubConf)
 	}
@@ -342,6 +364,9 @@ func TestBuildWireGuardHomeExit(t *testing.T) {
 	if !strings.Contains(homeConf, exitPriv) || !strings.Contains(homeConf, "Endpoint = 203.0.113.8:51820") || !strings.Contains(homeConf, "AllowedIPs = 10.7.0.0/24") || strings.Contains(homeConf, "0.0.0.0/0") || strings.Contains(homeConf, `"email"`) {
 		t.Fatalf("home\n%s", homeConf)
 	}
+	if !strings.Contains(homeConf, "ListenPort = 51820") || !strings.Contains(homeConf, "iptables -I INPUT 1 -p udp --dport 51820 -j ACCEPT") {
+		t.Fatalf("home listen\n%s", homeConf)
+	}
 	idle, err := Build(d, other.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -373,6 +398,18 @@ func TestBuildWireGuardHomeExit(t *testing.T) {
 	}
 	if len(down.Apply.WireGuard) != 0 {
 		t.Fatalf("disabled exit should leave home empty %s", down.Apply.WireGuard)
+	}
+	created.Enabled = true
+	if err := db.UpdateInbound(d, created); err != nil {
+		t.Fatal(err)
+	}
+	home.PublicHost = ""
+	home.ConnectIP = ""
+	if err := db.UpdateServer(d, home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(d, transit.ID); err == nil {
+		t.Fatal("empty exit host should fail the hub build")
 	}
 }
 

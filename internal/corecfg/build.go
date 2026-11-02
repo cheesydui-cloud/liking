@@ -81,7 +81,11 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 			return nil, err
 		}
 	}
-	wg, err := buildWireGuard(serverID, ins, all, clients)
+	exitHost, err := wireGuardExitHost(d, ins)
+	if err != nil {
+		return nil, err
+	}
+	wg, err := buildWireGuard(serverID, ins, all, clients, exitHost)
 	if err != nil {
 		return nil, err
 	}

@@ -7,26 +7,42 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 const ipv6SysctlName = "99-liking-disable-ipv6.conf"
 
 var (
-	ipv6ProcGlob   = "/proc/sys/net/ipv6/conf/*/disable_ipv6"
-	ipv6SysctlPath = "/etc/sysctl.d/" + ipv6SysctlName
-	ipv6NetDir     = "/sys/class/net"
+	ipv6ProcGlob       = "/proc/sys/net/ipv6/conf/*/disable_ipv6"
+	ipv6SysctlPath     = "/etc/sysctl.d/" + ipv6SysctlName
+	ipv6NetDir         = "/sys/class/net"
+	ipv6AllDisablePath = "/proc/sys/net/ipv6/conf/all/disable_ipv6"
 )
 
 func applyDisableIPv6(disable bool) {
 	if runtime.GOOS != "linux" {
 		return
 	}
+	// Read before the write. A successful networkctl reconfigure of eth0
+	// deletes WireGuard policy rules, and this used to run on every apply
+	// while IPv6 was already enabled.
+	wasDisabled := ipv6SysctlDisabled(ipv6AllDisablePath)
 	applyDisableIPv6To(disable, ipv6ProcGlob, ipv6SysctlPath)
 	if disable {
 		flushIPv6Addrs()
-	} else {
+		return
+	}
+	if wasDisabled {
 		kickIPv6Addrs()
 	}
+}
+
+func ipv6SysctlDisabled(path string) bool {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(b)) == "1"
 }
 
 func applyDisableIPv6To(disable bool, procGlob, sysctlPath string) {

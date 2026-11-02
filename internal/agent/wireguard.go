@@ -42,8 +42,10 @@ func (c *Cores) applyWireGuard(raw json.RawMessage) error {
 	if bytesEqual(raw, c.lastReq["wireguard"]) && wgIfaceUp(cfg.Iface) {
 		c.rememberWG(cfg)
 		c.armWGDelay(cfg.Conf)
+		keepWGPath(c.dir, cfg.Iface, cfg.Conf)
 		return nil
 	}
+	noteWGDial(c.dir, cfg.Iface)
 	path := filepath.Join(c.dir, cfg.Iface+".conf")
 	// Read the running file before replacing it. After an agent restart
 	// lastReq is empty; comparing only that would bounce a healthy tunnel
@@ -81,6 +83,7 @@ func (c *Cores) applyWireGuard(raw json.RawMessage) error {
 	c.lastReq["wireguard"] = append(json.RawMessage(nil), raw...)
 	c.rememberWG(cfg)
 	c.armWGDelay(cfg.Conf)
+	keepWGPath(c.dir, cfg.Iface, cfg.Conf)
 	return nil
 }
 
