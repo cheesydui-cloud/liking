@@ -451,7 +451,7 @@ func HubConfig(in *db.Inbound, clients []*db.Client) (string, []wgPeer, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[Interface]\nPrivateKey = %s\nAddress = %s\nListenPort = %d\nMTU = %d\nTable = off\nFwMark = %d\n",
 		st.String("private_key"), st.String("address"), in.Port, st.Int("mtu", WGDefaultMTU), st.Int("fwmark", WGDefaultFwMark))
-	fmt.Fprintf(&b, "PostUp = %s\nPostDown = %s\n", hubPostUp(st), hubPostDown(st))
+	fmt.Fprintf(&b, "PostUp = %s\nPostDown = %s\n", hubPostUp(st, in.Port), hubPostDown(st, in.Port))
 	for _, p := range peers {
 		fmt.Fprintf(&b, "\n[Peer]\nPublicKey = %s\nAllowedIPs = %s\n", p.PublicKey, p.AllowedIPs)
 	}
@@ -461,28 +461,45 @@ func HubConfig(in *db.Inbound, clients []*db.Client) (string, []wgPeer, error) {
 	return b.String(), peers, nil
 }
 
-func hubPostUp(st Settings) string {
+func hubPostUp(st Settings, port int) string {
 	mark := st.Int("fwmark", WGDefaultFwMark)
 	table := st.Int("route_table", WGDefaultTable)
 	hub := wgHost(st.String("address"))
 	exit := wgHost(st.String("exit_address"))
 	network := strings.TrimSpace(st.String("network"))
 	return fmt.Sprintf(
-		"sysctl -w net.ipv4.ip_forward=1; sysctl -w net.ipv4.conf.%%i.rp_filter=2; iptables -C FORWARD -i %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %%i -j ACCEPT; iptables -C FORWARD -o %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %%i -j ACCEPT; ip rule del fwmark %d lookup main priority 40 2>/dev/null || true; ip rule add fwmark %d lookup main priority 40; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule add from %s lookup main priority 50; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule add from %s lookup main priority 50; ip rule del from %s lookup %d priority 100 2>/dev/null || true; ip rule add from %s lookup %d priority 100; ip route replace default dev %%i table %d; %s",
-		mark, mark, hub, hub, exit, exit, network, table, network, table, table, wgMSSUp(st),
+		"sysctl -w net.ipv4.ip_forward=1; sysctl -w net.ipv4.conf.%%i.rp_filter=2; iptables -C FORWARD -i %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %%i -j ACCEPT; iptables -C FORWARD -o %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %%i -j ACCEPT; ip rule del fwmark %d lookup main priority 40 2>/dev/null || true; ip rule add fwmark %d lookup main priority 40; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule add from %s lookup main priority 50; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule add from %s lookup main priority 50; ip rule del from %s lookup %d priority 100 2>/dev/null || true; ip rule add from %s lookup %d priority 100; ip route replace default dev %%i table %d; %s%s",
+		mark, mark, hub, hub, exit, exit, network, table, network, table, table, wgMSSUp(st), wgTCPAllowUp(port),
 	)
 }
 
-func hubPostDown(st Settings) string {
+func hubPostDown(st Settings, port int) string {
 	mark := st.Int("fwmark", WGDefaultFwMark)
 	table := st.Int("route_table", WGDefaultTable)
 	hub := wgHost(st.String("address"))
 	exit := wgHost(st.String("exit_address"))
 	network := strings.TrimSpace(st.String("network"))
 	return fmt.Sprintf(
-		"ip rule del fwmark %d lookup main priority 40 2>/dev/null || true; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule del from %s lookup %d priority 100 2>/dev/null || true; ip route del default dev %%i table %d 2>/dev/null || true; iptables -D FORWARD -i %%i -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o %%i -j ACCEPT 2>/dev/null || true; %s",
-		mark, hub, exit, network, table, table, wgMSSDown(st),
+		"ip rule del fwmark %d lookup main priority 40 2>/dev/null || true; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule del from %s lookup %d priority 100 2>/dev/null || true; ip route del default dev %%i table %d 2>/dev/null || true; iptables -D FORWARD -i %%i -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o %%i -j ACCEPT 2>/dev/null || true; %s%s",
+		mark, hub, exit, network, table, table, wgMSSDown(st), wgTCPAllowDown(port),
 	)
+}
+
+// wgTCPAllowUp lets a delay-test SYN reach the accept-and-close listener.
+// The provider may still drop TCP before it arrives. Failure must not take
+// the tunnel down, so every clause ends with || true.
+func wgTCPAllowUp(port int) string {
+	if port < 1 || port > 65535 {
+		return ""
+	}
+	return fmt.Sprintf("; iptables -C INPUT -p tcp --dport %d -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport %d -j ACCEPT 2>/dev/null || true", port, port)
+}
+
+func wgTCPAllowDown(port int) string {
+	if port < 1 || port > 65535 {
+		return ""
+	}
+	return fmt.Sprintf("; iptables -D INPUT -p tcp --dport %d -j ACCEPT 2>/dev/null || true", port)
 }
 
 func wgMSS(st Settings) int {

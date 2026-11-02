@@ -136,6 +136,7 @@ func writeClashGroups(b *strings.Builder, names, selected []string) {
 	writeClashGroup(b, GroupAuto, "url-test", func(b *strings.Builder) {
 		fmt.Fprintf(b, "    url: %s\n", ClientHealthCheckURL)
 		b.WriteString("    interval: 300\n")
+		b.WriteString("    timeout: 10000\n")
 		b.WriteString("    lazy: false\n")
 	}, auto)
 	for _, c := range cats {

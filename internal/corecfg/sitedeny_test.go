@@ -636,7 +636,7 @@ func TestClientHealthCheckURL(t *testing.T) {
 		t.Fatalf("health %s", ClientHealthCheckURL)
 	}
 	doc := ClashDocument([]string{"jp"}, "  - name: \"jp\"\n    type: ss\n", nil)
-	if !strings.Contains(doc, "url: "+ClientHealthCheckURL) {
+	if !strings.Contains(doc, "url: "+ClientHealthCheckURL) || !strings.Contains(doc, "timeout: 10000") {
 		t.Fatalf("clash health\n%s", doc)
 	}
 	if strings.Contains(doc, "gstatic.com") {
@@ -650,7 +650,7 @@ func TestClientHealthCheckURL(t *testing.T) {
 			continue
 		}
 		found = true
-		if m["url"] != ClientHealthCheckURL {
+		if m["url"] != ClientHealthCheckURL || m["timeout"] != "10s" {
 			t.Fatalf("singbox health %+v", m)
 		}
 	}

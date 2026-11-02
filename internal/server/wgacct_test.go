@@ -140,3 +140,129 @@ func TestWGPeerAccounting(t *testing.T) {
 		t.Fatalf("old email path %+v", u.UsedUp)
 	}
 }
+
+func TestWGPeerMissFallsBackToEmail(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	tok, err := db.RandomHex(8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := db.CreateServer(d, "entry", "1.1.1.1", tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := db.CreateInbound(d, &db.Inbound{
+		ServerID: srv.ID, Name: "ces", Profile: "wireguard", Protocol: "wireguard",
+		Network: "udp", Security: "none", Core: "wireguard", Listen: "0.0.0.0",
+		Port: 10433, Enabled: true, Settings: "{}", LineKind: "direct",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := db.CreateUser(d, "miss", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	email := db.EmailFor(u.ID, in.ID)
+	if err := db.UpsertClient(d, &db.Client{
+		InboundID: in.ID, UserID: u.ID, Email: email, UUID: "10.7.0.10/32",
+		Username: "client-key", Password: "priv", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(d)
+	h.consumeStats(srv.ID, wsproto.Stats{
+		HasWGPeers: true,
+		Samples:    []wsproto.Sample{{Email: email, Up: 50, Down: 60}},
+		WGPeers:    []wsproto.WGPeerStat{{PublicKey: "other", AllowedIPs: "10.9.9.9/32", Rx: 1000, Tx: 1000}},
+	})
+	u, _ = db.GetUser(d, u.ID)
+	if u.UsedUp != 50 || u.UsedDown != 60 {
+		t.Fatalf("unmatched peer dropped email %+v %+v", u.UsedUp, u.UsedDown)
+	}
+
+	h.consumeStats(srv.ID, wsproto.Stats{
+		HasWGPeers: true,
+		Samples:    []wsproto.Sample{{Email: email, Up: 7, Down: 8}},
+	})
+	u, _ = db.GetUser(d, u.ID)
+	if u.UsedUp != 57 || u.UsedDown != 68 {
+		t.Fatalf("empty peer flag dropped email %+v %+v", u.UsedUp, u.UsedDown)
+	}
+}
+
+func TestWGPeerAddressAndEmailMatch(t *testing.T) {
+	if got := wgUUIDCandidates("10.7.0.10"); len(got) != 2 || got[0] != "10.7.0.10" || got[1] != "10.7.0.10/32" {
+		t.Fatalf("bare %v", got)
+	}
+	if got := wgUUIDCandidates("10.7.0.10/32"); len(got) != 2 || got[1] != "10.7.0.10" {
+		t.Fatalf("prefix %v", got)
+	}
+	if wgUUIDCandidates("0.0.0.0/0") != nil || wgUUIDCandidates("192.0.2.1/32") != nil {
+		t.Fatal("unbilled address became a candidate")
+	}
+
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	tok, err := db.RandomHex(8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := db.CreateServer(d, "entry", "1.1.1.1", tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := db.CreateInbound(d, &db.Inbound{
+		ServerID: srv.ID, Name: "ces", Profile: "wireguard", Protocol: "wireguard",
+		Network: "udp", Security: "none", Core: "wireguard", Listen: "0.0.0.0",
+		Port: 10433, Enabled: true, Settings: "{}", LineKind: "direct",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := db.CreateUser(d, "addr", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	email := db.EmailFor(u.ID, in.ID)
+	if err := db.UpsertClient(d, &db.Client{
+		InboundID: in.ID, UserID: u.ID, Email: email, UUID: "10.7.0.10/32",
+		Username: "stored-key", Password: "priv", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(d)
+	h.consumeStats(srv.ID, wsproto.Stats{
+		HasWGPeers: true,
+		Samples:    []wsproto.Sample{{Email: email, Up: 99999, Down: 99999}},
+		WGPeers:    []wsproto.WGPeerStat{{PublicKey: "transfer-only", AllowedIPs: "10.7.0.10", Rx: 100, Tx: 40}},
+	})
+	u, _ = db.GetUser(d, u.ID)
+	if u.UsedUp != 100 || u.UsedDown != 40 {
+		t.Fatalf("bare address %+v %+v", u.UsedUp, u.UsedDown)
+	}
+	if _, _, ok := h.UserLive(u.ID); ok {
+		t.Fatal("first sight must not show a rate")
+	}
+
+	h.consumeStats(srv.ID, wsproto.Stats{
+		HasWGPeers: true,
+		Samples:    []wsproto.Sample{{Email: email, Up: 99999, Down: 99999}},
+		WGPeers:    []wsproto.WGPeerStat{{PublicKey: "nope", Email: email, Rx: 180, Tx: 90}},
+	})
+	u, _ = db.GetUser(d, u.ID)
+	if u.UsedUp != 180 || u.UsedDown != 90 {
+		t.Fatalf("email match %+v %+v", u.UsedUp, u.UsedDown)
+	}
+	up, down, ok := h.UserLive(u.ID)
+	if !ok || up != 16 || down != 10 {
+		t.Fatalf("live %d %d %v", up, down, ok)
+	}
+}

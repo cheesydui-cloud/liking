@@ -21,6 +21,7 @@ func SingboxClientDocument(proxyOutbounds []any, tags []string, selected []strin
 			"outbounds": autoMembers,
 			"url":       ClientHealthCheckURL,
 			"interval":  "5m",
+			"timeout":   "10s",
 		},
 	}
 	cats := SelectedCategories(selected)

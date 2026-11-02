@@ -108,7 +108,7 @@ func wgPeerUnbilled(allowed string) bool {
 	return false
 }
 
-func (h *Hub) applyWGPeers(serverID int64, peers []wsproto.WGPeerStat) {
+func (h *Hub) applyWGPeers(serverID int64, peers []wsproto.WGPeerStat) map[string]struct{} {
 	type resolved struct {
 		peer   wsproto.WGPeerStat
 		client *db.Client
@@ -125,8 +125,14 @@ func (h *Hub) applyWGPeers(serverID int64, peers []wsproto.WGPeerStat) {
 		}
 		found = append(found, resolved{peer: p, client: c, in: in})
 	}
+	matched := map[string]struct{}{}
+	for _, r := range found {
+		if r.client != nil && r.client.Email != "" {
+			matched[r.client.Email] = struct{}{}
+		}
+	}
 	if len(found) == 0 {
-		return
+		return nil
 	}
 
 	type bill struct {
@@ -164,7 +170,7 @@ func (h *Hub) applyWGPeers(serverID int64, peers []wsproto.WGPeerStat) {
 		})
 	}
 	if len(bills) == 0 {
-		return
+		return matched
 	}
 
 	day := db.ClockDay(h.DB)
@@ -227,7 +233,7 @@ func (h *Hub) applyWGPeers(serverID int64, peers []wsproto.WGPeerStat) {
 	if len(items) > 0 {
 		if err := db.AddTrafficBatch(h.DB, day, items); err != nil {
 			log.Printf("hub: wireguard traffic: %v", err)
-			return
+			return matched
 		}
 	}
 	h.wgMu.Lock()
@@ -244,6 +250,7 @@ func (h *Hub) applyWGPeers(serverID int64, peers []wsproto.WGPeerStat) {
 			h.OnTrafficUpdate(uid)
 		}
 	}
+	return matched
 }
 
 func (h *Hub) wgCatchUp(c *db.Client, rx, tx int64) (int64, int64) {
@@ -256,17 +263,42 @@ func (h *Hub) wgCatchUp(c *db.Client, rx, tx int64) (int64, int64) {
 	return wgGap(rx, raw.Up), wgGap(tx, raw.Down)
 }
 
+func wgUUIDCandidates(ip string) []string {
+	ip = strings.TrimSpace(ip)
+	switch ip {
+	case "", "(none)", "0.0.0.0/0", "::/0", corecfg.WGProbeAddress:
+		return nil
+	}
+	if i := strings.IndexByte(ip, '/'); i > 0 {
+		host := strings.TrimSpace(ip[:i])
+		if host == "" || host == ip {
+			return []string{ip}
+		}
+		return []string{ip, host}
+	}
+	return []string{ip, ip + "/32"}
+}
+
 func (h *Hub) clientForWGPeer(serverID int64, p wsproto.WGPeerStat) (*db.Client, *db.Inbound) {
 	if c, in := h.wgClientByKey(serverID, p.PublicKey); c != nil {
 		return c, in
 	}
+	if email := strings.TrimSpace(p.Email); email != "" && !strings.HasPrefix(email, "relay.") {
+		c, err := db.ClientByIdentity(h.DB, email)
+		if err == nil && c != nil {
+			if in, ok := h.wgInboundOnServer(serverID, c); ok {
+				return c, in
+			}
+		}
+	}
 	var found *db.Client
 	var foundIn *db.Inbound
 	for _, ip := range splitWGAllowed(p.AllowedIPs) {
-		if ip == "0.0.0.0/0" || ip == "::/0" || ip == corecfg.WGProbeAddress {
+		cands := wgUUIDCandidates(ip)
+		if len(cands) == 0 {
 			continue
 		}
-		list, err := db.ClientsByUUIDs(h.DB, []string{ip})
+		list, err := db.ClientsByUUIDs(h.DB, cands)
 		if err != nil || len(list) == 0 {
 			continue
 		}

@@ -54,6 +54,10 @@ type Cores struct {
 	pendingClearHandoff bool
 	wgHandoffMu         sync.Mutex
 	wgHandoff           []wsproto.WGPeerStat
+	wgDelayMu           sync.Mutex
+	wgDelayLn           net.Listener
+	wgDelayPort         int
+	wgDelayGen          uint64
 	applyGen            uint64
 	crashes             map[string][]time.Time
 	stopWatch           chan struct{}
@@ -594,6 +598,7 @@ func (c *Cores) StopAll() {
 	applySpeedLimits(nil)
 	clearRejectCN()
 	clearAllowNFT()
+	c.stopWGDelay()
 }
 
 func (c *Cores) Close() {

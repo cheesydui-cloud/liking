@@ -299,6 +299,9 @@ func TestBuildWireGuardHomeExit(t *testing.T) {
 	if !strings.Contains(hubConf, "TCPMSS --set-mss 1240") || !strings.Contains(hubConf, WGProbeAddress) {
 		t.Fatalf("hub mss\n%s", hubConf)
 	}
+	if !strings.Contains(hubConf, "iptables -C INPUT -p tcp --dport 51820 -j ACCEPT") {
+		t.Fatalf("hub tcp allow\n%s", hubConf)
+	}
 	pkg, err := db.CreatePackage(d, "ce", 0, 30, 2, "twoway")
 	if err != nil {
 		t.Fatal(err)

@@ -1009,6 +1009,7 @@ export default function Users() {
                   {Number(u.traffic_reset_day) > 0 ? <Metric label="清零" value={`每月 ${u.traffic_reset_day} 号`} plain /> : null}
                   <Metric label="额度" value={cap > 0 ? fmtBytes(cap) : '不限'} />
                   <Metric label="计费" value={u.direction === 'twoway' ? '双向' : '单向'} plain />
+                  <Metric label="已用" value={fmtBytes(used)} />
                   <Metric label="上行" value={fmtBps(u.net_up_bps)} tone={upOver ? undefined : 'up'} danger={upOver} />
                   <Metric label="下行" value={fmtBps(u.net_down_bps)} tone={downOver ? undefined : 'down'} danger={downOver} />
                 </div>

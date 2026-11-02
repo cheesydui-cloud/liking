@@ -535,17 +535,18 @@ func billBytes(n int64, mult float64) (int64, bool) {
 }
 
 func (h *Hub) consumeStats(serverID int64, st wsproto.Stats) {
-	h.applySamples(serverID, st.Samples, st.HasWGPeers)
-	if st.HasWGPeers {
-		h.applyWGPeers(serverID, st.WGPeers)
+	var skipWGEmail map[string]struct{}
+	if st.HasWGPeers && len(st.WGPeers) > 0 {
+		skipWGEmail = h.applyWGPeers(serverID, st.WGPeers)
 	}
+	h.applySamples(serverID, st.Samples, skipWGEmail)
 }
 
 func (h *Hub) applyStats(serverID int64, samples []wsproto.Sample) {
-	h.applySamples(serverID, samples, false)
+	h.applySamples(serverID, samples, nil)
 }
 
-func (h *Hub) applySamples(serverID int64, samples []wsproto.Sample, skipWireGuard bool) {
+func (h *Hub) applySamples(serverID int64, samples []wsproto.Sample, skipWGEmail map[string]struct{}) {
 	day := db.ClockDay(h.DB)
 	touched := map[int64]struct{}{}
 	live := map[int64]map[int64]liveBytes{}
@@ -571,8 +572,10 @@ func (h *Hub) applySamples(serverID int64, samples []wsproto.Sample, skipWireGua
 		if err != nil || in == nil || in.ServerID != serverID {
 			continue
 		}
-		if skipWireGuard && in.Profile == corecfg.ProfileWireGuard {
-			continue
+		if in.Profile == corecfg.ProfileWireGuard {
+			if _, skip := skipWGEmail[c.Email]; skip {
+				continue
+			}
 		}
 		u, err := db.GetUser(h.DB, c.UserID)
 		if err != nil || u == nil {

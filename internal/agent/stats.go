@@ -80,11 +80,13 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 		all = append(all, samples...)
 		mitaNext, mitaOK = next, true
 	}
-	if peers, ok := c.peekWireGuardPeers(); ok {
+	if peers, ok := c.peekWireGuardPeers(); ok && len(peers) > 0 {
+		peers = c.annotateWGPeers(peers)
 		c.pendingWG = peers
 		c.pendingHasWG = true
-		// Email deltas stay for an older panel. A 0.3.10 panel ignores them
-		// when HasWGPeers is set, so the same bytes are not billed twice.
+		// Email deltas stay for an older panel, and for a peer the panel
+		// cannot match. A matched peer is billed from the kernel counters,
+		// so the panel skips that email and the same bytes are not added twice.
 		if samples, next, ok := c.wgEmailDeltas(peers); ok {
 			all = append(all, samples...)
 			wgNext, wgOK = next, true

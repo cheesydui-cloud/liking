@@ -145,6 +145,7 @@ type PortRate struct {
 type WGPeerStat struct {
 	PublicKey  string `json:"public_key"`
 	AllowedIPs string `json:"allowed_ips,omitempty"`
+	Email      string `json:"email,omitempty"`
 	Rx         int64  `json:"rx"`
 	Tx         int64  `json:"tx"`
 }

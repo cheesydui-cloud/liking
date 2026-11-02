@@ -106,6 +106,21 @@ func TestParseWGPeerDumpKeepsExitForPanel(t *testing.T) {
 	}
 }
 
+func TestParseWGTransferAndEmptyDump(t *testing.T) {
+	dump := "priv\tpub\t10433\toff\n"
+	if peers := parseWGPeerDump(dump); len(peers) != 0 {
+		t.Fatalf("interface line is not a peer %+v", peers)
+	}
+	xfer := "client\t80\t20\nexit\t9\t9\n"
+	got := parseWGTransfer(xfer)
+	if len(got) != 2 || got[0].PublicKey != "client" || got[0].Rx != 80 || got[0].Tx != 20 || got[0].AllowedIPs != "" {
+		t.Fatalf("transfer %+v", got)
+	}
+	if peers := parseWGPeerDump(xfer); len(peers) != 0 {
+		t.Fatalf("transfer must not be read as dump %+v", peers)
+	}
+}
+
 func TestWGJSONListenPort(t *testing.T) {
 	raw := []byte("{\"iface\":\"likingwg0\",\"conf\":\"[Interface]\\nListenPort = 10433\\n\\n[Peer]\\nPublicKey = a\\n\"}")
 	if wgJSONListenPort(raw) != 10433 {

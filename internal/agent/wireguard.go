@@ -40,6 +40,7 @@ func (c *Cores) applyWireGuard(raw json.RawMessage) error {
 	}
 	if bytesEqual(raw, c.lastReq["wireguard"]) && wgIfaceUp(cfg.Iface) {
 		c.rememberWG(cfg)
+		c.armWGDelay(cfg.Conf)
 		return nil
 	}
 	path := filepath.Join(c.dir, cfg.Iface+".conf")
@@ -74,6 +75,7 @@ func (c *Cores) applyWireGuard(raw json.RawMessage) error {
 	}
 	c.lastReq["wireguard"] = append(json.RawMessage(nil), raw...)
 	c.rememberWG(cfg)
+	c.armWGDelay(cfg.Conf)
 	return nil
 }
 
@@ -98,6 +100,7 @@ func (c *Cores) downWireGuard(iface string) error {
 		}
 	}
 	c.clearWG(iface)
+	c.stopWGDelay()
 	return nil
 }
 
@@ -171,18 +174,42 @@ func (c *Cores) clearWGHandoff() {
 }
 
 func readWGDump(iface string) ([]wsproto.WGPeerStat, bool) {
+	peers, ran := readWGCounters(iface)
+	return peers, ran && len(peers) > 0
+}
+
+// readWGCounters reads kernel peer counters. ran is true when wg answered,
+// even if the tunnel has no peers yet. An empty parse is not a peer list:
+// the panel must not treat that as "peers reported" and drop email deltas.
+func readWGCounters(iface string) (peers []wsproto.WGPeerStat, ran bool) {
 	iface = strings.TrimSpace(iface)
 	bin := lookBin("wg")
 	if bin == "" || iface == "" {
 		return nil, false
 	}
+	if raw, ok := wgShow(bin, iface, "dump"); ok {
+		ran = true
+		if peers = parseWGPeerDump(raw); len(peers) > 0 {
+			return peers, true
+		}
+	}
+	if raw, ok := wgShow(bin, iface, "transfer"); ok {
+		ran = true
+		if peers = parseWGTransfer(raw); len(peers) > 0 {
+			return peers, true
+		}
+	}
+	return nil, ran
+}
+
+func wgShow(bin, iface, sub string) (string, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, bin, "show", iface, "dump").Output()
+	out, err := exec.CommandContext(ctx, bin, "show", iface, sub).Output()
 	if err != nil {
-		return nil, false
+		return "", false
 	}
-	return parseWGPeerDump(string(out)), true
+	return string(out), true
 }
 
 // peekWireGuardPeers reads kernel counters even when the in-memory email map
@@ -204,10 +231,10 @@ func (c *Cores) peekWireGuardPeers() ([]wsproto.WGPeerStat, bool) {
 			return nil, false
 		}
 	}
-	peers, ok := readWGDump(iface)
-	if !ok {
-		if configured != "" {
-			noteStatsFail("wireguard", fmt.Errorf("wg show %s dump", iface))
+	peers, ran := readWGCounters(iface)
+	if len(peers) == 0 {
+		if !ran && configured != "" {
+			noteStatsFail("wireguard", fmt.Errorf("wg show %s", iface))
 		}
 		return nil, false
 	}
@@ -308,6 +335,51 @@ func parseWGPeerDump(dump string) []wsproto.WGPeerStat {
 			allowed = ""
 		}
 		out = append(out, wsproto.WGPeerStat{PublicKey: pub, AllowedIPs: allowed, Rx: rx, Tx: tx})
+	}
+	return out
+}
+
+// parseWGTransfer reads `wg show <iface> transfer`: public key, rx, tx.
+// There is no interface line and no allowed-ips. The panel matches the key.
+func parseWGTransfer(out string) []wsproto.WGPeerStat {
+	var peers []wsproto.WGPeerStat
+	for _, line := range strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		cols := strings.Split(line, "\t")
+		if len(cols) < 3 {
+			continue
+		}
+		pub := strings.TrimSpace(cols[0])
+		if pub == "" || pub == "(none)" {
+			continue
+		}
+		rx, err1 := strconv.ParseInt(strings.TrimSpace(cols[1]), 10, 64)
+		tx, err2 := strconv.ParseInt(strings.TrimSpace(cols[2]), 10, 64)
+		if err1 != nil || err2 != nil || rx < 0 || tx < 0 {
+			continue
+		}
+		peers = append(peers, wsproto.WGPeerStat{PublicKey: pub, Rx: rx, Tx: tx})
+	}
+	return peers
+}
+
+func (c *Cores) annotateWGPeers(raw []wsproto.WGPeerStat) []wsproto.WGPeerStat {
+	out := append([]wsproto.WGPeerStat(nil), raw...)
+	if len(out) == 0 {
+		return out
+	}
+	c.mu.Lock()
+	peers := c.wgPeers
+	byIP := c.wgPeerIP
+	c.mu.Unlock()
+	if len(peers) == 0 && len(byIP) == 0 {
+		return out
+	}
+	for i := range out {
+		out[i].Email = emailForWGPeer(out[i].PublicKey, out[i].AllowedIPs, peers, byIP)
 	}
 	return out
 }
