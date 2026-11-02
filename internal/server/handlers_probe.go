@@ -82,6 +82,10 @@ func (s *Server) handleListenProbe(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "端口无效")
 		return
 	}
+	if in.Profile == corecfg.ProfileWireGuard {
+		s.probeWireGuardListen(w, in, host, port)
+		return
+	}
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	start := time.Now()
 	conn, err := listenDialTimeout("tcp", addr, 4*time.Second)
@@ -102,6 +106,76 @@ func (s *Server) handleListenProbe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = conn.Close()
+	ms := time.Since(start).Milliseconds()
+	if ms < 1 {
+		ms = 1
+	}
+	out["ok"] = true
+	out["latency_ms"] = ms
+	jsonOK(w, out)
+}
+
+// wgProbeExchange sends one datagram and returns the first reply.
+// UDP dial itself does not prove the port is open.
+var wgProbeExchange = func(addr string, payload []byte, timeout time.Duration) ([]byte, error) {
+	conn, err := net.Dial("udp", addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		return nil, err
+	}
+	if _, err := conn.Write(payload); err != nil {
+		return nil, err
+	}
+	buf := make([]byte, 256)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf[:n], nil
+}
+
+func (s *Server) probeWireGuardListen(w http.ResponseWriter, in *db.Inbound, host string, port int) {
+	out := map[string]any{
+		"ok":   false,
+		"host": host,
+		"port": port,
+	}
+	st := corecfg.ParseSettings(in.Settings)
+	priv := strings.TrimSpace(st.String("probe_private_key"))
+	pub := strings.TrimSpace(st.String("public_key"))
+	if priv == "" || pub == "" {
+		out["error"] = "探测密钥还没生成"
+		jsonOK(w, out)
+		return
+	}
+	payload, err := corecfg.WireGuardInitiation(priv, pub)
+	if err != nil {
+		out["error"] = "探测失败"
+		jsonOK(w, out)
+		return
+	}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	start := time.Now()
+	resp, err := wgProbeExchange(addr, payload, 4*time.Second)
+	if err != nil {
+		msg := "不通"
+		if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			msg = "超时"
+		} else if strings.TrimSpace(err.Error()) != "" {
+			msg = err.Error()
+		}
+		out["error"] = msg
+		jsonOK(w, out)
+		return
+	}
+	if !corecfg.WireGuardReplyOK(resp) {
+		out["error"] = "不通"
+		jsonOK(w, out)
+		return
+	}
 	ms := time.Since(start).Milliseconds()
 	if ms < 1 {
 		ms = 1

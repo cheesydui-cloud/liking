@@ -115,7 +115,9 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 				c.mitaLast = mitaNext
 			}
 			if wgOK {
+				c.mu.Lock()
 				c.wgLast = wgNext
+				c.mu.Unlock()
 			}
 			if flowOK {
 				c.flowLast = flowNext

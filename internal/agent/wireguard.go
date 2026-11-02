@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -103,14 +104,33 @@ func (c *Cores) rememberWG(cfg wsproto.WireGuardConfig) {
 	c.wgIface = cfg.Iface
 	next := map[string]string{}
 	for _, p := range cfg.Peers {
-		pub := strings.TrimSpace(p.PublicKey)
+		pub := canonicalWGKey(p.PublicKey)
 		email := strings.TrimSpace(p.Email)
 		if pub == "" || email == "" || strings.HasPrefix(email, "relay.") {
 			continue
 		}
 		next[pub] = email
 	}
+	byIP := map[string]string{}
+	for pub, ips := range parseWGConfPeers(cfg.Conf) {
+		email := next[canonicalWGKey(pub)]
+		if email == "" {
+			continue
+		}
+		for _, ip := range ips {
+			ip = strings.TrimSpace(ip)
+			if ip == "" || ip == "0.0.0.0/0" || ip == "::/0" {
+				continue
+			}
+			if prev, ok := byIP[ip]; ok && prev != email {
+				byIP[ip] = ""
+				continue
+			}
+			byIP[ip] = email
+		}
+	}
 	c.wgPeers = next
+	c.wgPeerIP = byIP
 }
 
 func (c *Cores) clearWG(iface string) {
@@ -119,12 +139,14 @@ func (c *Cores) clearWG(iface string) {
 	delete(c.lastReq, "wireguard")
 	c.wgIface = ""
 	c.wgPeers = nil
+	c.wgPeerIP = nil
 }
 
 func (c *Cores) peekWireGuard() ([]wsproto.Sample, map[string]bytePair, bool) {
 	c.mu.Lock()
 	iface := c.wgIface
 	peers := c.wgPeers
+	byIP := c.wgPeerIP
 	prev := c.wgLast
 	c.mu.Unlock()
 	if iface == "" || len(peers) == 0 {
@@ -141,12 +163,13 @@ func (c *Cores) peekWireGuard() ([]wsproto.Sample, map[string]bytePair, bool) {
 		noteStatsFail("wireguard", err)
 		return nil, nil, false
 	}
-	cum := parseWGDump(string(out), peers)
-	deltas, next := mitaDeltas(prev, cum)
+	cum := parseWGDump(string(out), peers, byIP)
+	// A wg-quick bounce resets counters. Bill only growth after the new baseline.
+	deltas, next := flowDeltas(prev, cum)
 	return deltas, next, true
 }
 
-func parseWGDump(dump string, peers map[string]string) []wsproto.Sample {
+func parseWGDump(dump string, peers, byIP map[string]string) []wsproto.Sample {
 	lines := strings.Split(strings.ReplaceAll(dump, "\r\n", "\n"), "\n")
 	var out []wsproto.Sample
 	seen := 0
@@ -163,8 +186,8 @@ func parseWGDump(dump string, peers map[string]string) []wsproto.Sample {
 		if len(cols) < 7 {
 			continue
 		}
-		email := peers[strings.TrimSpace(cols[0])]
-		if email == "" {
+		email := emailForWGPeer(cols[0], cols[3], peers, byIP)
+		if email == "" || strings.HasPrefix(email, "relay.") {
 			continue
 		}
 		rx, err1 := strconv.ParseInt(strings.TrimSpace(cols[5]), 10, 64)
@@ -175,6 +198,124 @@ func parseWGDump(dump string, peers map[string]string) []wsproto.Sample {
 		out = append(out, wsproto.Sample{Email: email, Up: rx, Down: tx})
 	}
 	return out
+}
+
+func emailForWGPeer(pub, allowed string, peers, byIP map[string]string) string {
+	if email := peers[canonicalWGKey(pub)]; email != "" {
+		return email
+	}
+	var found string
+	for _, ip := range strings.Split(allowed, ",") {
+		ip = strings.TrimSpace(ip)
+		email := byIP[ip]
+		if email == "" {
+			continue
+		}
+		if found != "" && found != email {
+			return ""
+		}
+		found = email
+	}
+	return found
+}
+
+func canonicalWGKey(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "(none)" {
+		return ""
+	}
+	if b, err := base64.StdEncoding.DecodeString(s); err == nil && len(b) == 32 {
+		return base64.StdEncoding.EncodeToString(b)
+	}
+	raw := strings.TrimRight(s, "=")
+	if b, err := base64.RawStdEncoding.DecodeString(raw); err == nil && len(b) == 32 {
+		return base64.StdEncoding.EncodeToString(b)
+	}
+	return s
+}
+
+func parseWGConfPeers(conf string) map[string][]string {
+	out := map[string][]string{}
+	var pub string
+	inPeer := false
+	for _, line := range strings.Split(strings.ReplaceAll(conf, "\r\n", "\n"), "\n") {
+		trim := strings.TrimSpace(line)
+		if trim == "" || strings.HasPrefix(trim, "#") {
+			continue
+		}
+		if strings.HasPrefix(trim, "[") {
+			inPeer = strings.EqualFold(trim, "[Peer]")
+			pub = ""
+			continue
+		}
+		if !inPeer {
+			continue
+		}
+		parts := strings.SplitN(trim, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(parts[0]))
+		val := strings.TrimSpace(parts[1])
+		switch key {
+		case "publickey":
+			pub = val
+			if _, ok := out[pub]; !ok {
+				out[pub] = nil
+			}
+		case "allowedips":
+			if pub == "" {
+				continue
+			}
+			for _, ip := range strings.Split(val, ",") {
+				ip = strings.TrimSpace(ip)
+				if ip != "" {
+					out[pub] = append(out[pub], ip)
+				}
+			}
+		}
+	}
+	return out
+}
+
+func wgJSONListenPort(raw json.RawMessage) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var cfg struct {
+		Conf string `json:"conf"`
+	}
+	if json.Unmarshal(raw, &cfg) != nil {
+		return 0
+	}
+	return wgConfListenPort(cfg.Conf)
+}
+
+func wgConfListenPort(conf string) int {
+	inIface := false
+	for _, line := range strings.Split(strings.ReplaceAll(conf, "\r\n", "\n"), "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "[") {
+			if inIface {
+				break
+			}
+			inIface = strings.EqualFold(trim, "[Interface]")
+			continue
+		}
+		if !inIface {
+			continue
+		}
+		parts := strings.SplitN(trim, "=", 2)
+		if len(parts) != 2 || !strings.EqualFold(strings.TrimSpace(parts[0]), "ListenPort") {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err != nil || n < 1 || n > 65535 {
+			return 0
+		}
+		return n
+	}
+	return 0
 }
 
 func stripWGQuick(conf string) string {

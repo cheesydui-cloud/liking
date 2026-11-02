@@ -42,6 +42,7 @@ type Cores struct {
 	acctMarks        []wsproto.AcctMark
 	wgIface          string
 	wgPeers          map[string]string
+	wgPeerIP         map[string]string
 	wgLast           map[string]bytePair
 	flowLast         map[string]bytePair
 	portLast         map[int]bytePair
@@ -60,6 +61,7 @@ func NewCores(dir string) *Cores {
 		clashLast: map[string]clashSnap{}, mitaLast: map[string]bytePair{}, xrayLast: map[string]bytePair{},
 		singboxStatsLast: map[string]bytePair{},
 		wgPeers:          map[string]string{},
+		wgPeerIP:         map[string]string{},
 		wgLast:           map[string]bytePair{},
 		crashes:          map[string][]time.Time{},
 		stopWatch:        make(chan struct{}),
@@ -702,6 +704,11 @@ func (c *Cores) ListenPorts() []int {
 	}
 	for _, raw := range c.last {
 		add(raw)
+	}
+	if p := wgJSONListenPort(c.lastReq["wireguard"]); p > 0 {
+		if _, ok := seen[p]; !ok {
+			out = append(out, p)
+		}
 	}
 	return out
 }

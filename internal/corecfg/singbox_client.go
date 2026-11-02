@@ -107,7 +107,7 @@ func SingboxOutbound(in *db.Inbound, c *db.Client) (map[string]any, error) {
 					"address":                       host,
 					"port":                          in.Port,
 					"public_key":                    st.String("public_key"),
-					"allowed_ips":                   []string{"0.0.0.0/0", "::/0"},
+					"allowed_ips":                   []string{"0.0.0.0/0"},
 					"persistent_keepalive_interval": st.Int("keepalive", WGDefaultKeepalive),
 				}},
 			},

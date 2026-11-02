@@ -73,6 +73,14 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 	if err != nil {
 		return nil, err
 	}
+	for _, in := range ins {
+		if in == nil || !in.Enabled || in.Profile != ProfileWireGuard {
+			continue
+		}
+		if err := persistWGProbe(d, in); err != nil {
+			return nil, err
+		}
+	}
 	wg, err := buildWireGuard(serverID, ins, all, clients)
 	if err != nil {
 		return nil, err

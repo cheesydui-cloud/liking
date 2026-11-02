@@ -577,6 +577,9 @@ func flowCumul(src flowSources, listen map[int]struct{}, emails map[uint32]strin
 func (c *Cores) peekFlows() ([]wsproto.Sample, map[string]bytePair, map[int]bytePair, bool) {
 	c.mu.Lock()
 	listen := listenPortsLocked(c.last)
+	if p := wgJSONListenPort(c.lastReq["wireguard"]); p > 0 {
+		listen = appendListenPort(listen, p)
+	}
 	marks := append([]wsproto.AcctMark(nil), c.acctMarks...)
 	c.mu.Unlock()
 	emails := map[uint32]string{}
@@ -618,6 +621,18 @@ func (c *Cores) peekFlows() ([]wsproto.Sample, map[string]bytePair, map[int]byte
 	}
 	deltas, next := flowDeltas(c.flowLast, cum)
 	return deltas, next, portNext, true
+}
+
+func appendListenPort(ports []int, port int) []int {
+	if port <= 0 {
+		return ports
+	}
+	for _, p := range ports {
+		if p == port {
+			return ports
+		}
+	}
+	return append(ports, port)
 }
 
 func listenPortsLocked(last map[string]json.RawMessage) []int {

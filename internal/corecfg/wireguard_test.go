@@ -38,15 +38,19 @@ func TestNormalizeWireGuardKeepsKeys(t *testing.T) {
 	}
 	st := ParseSettings(in.Settings)
 	priv, exit := st.String("private_key"), st.String("exit_private_key")
-	if priv == "" || exit == "" || priv == exit || st.String("public_key") == "" {
+	probe := st.String("probe_private_key")
+	if priv == "" || exit == "" || priv == exit || st.String("public_key") == "" || probe == "" || probe == priv || probe == exit {
 		t.Fatal("keys")
+	}
+	if st.String("probe_address") != WGProbeAddress || st.String("probe_public_key") == "" {
+		t.Fatal("probe")
 	}
 	in.Settings = mustSettings(st)
 	if err := Normalize(in, nil); err != nil {
 		t.Fatal(err)
 	}
 	st2 := ParseSettings(in.Settings)
-	if st2.String("private_key") != priv || st2.String("exit_private_key") != exit {
+	if st2.String("private_key") != priv || st2.String("exit_private_key") != exit || st2.String("probe_private_key") != probe {
 		t.Fatal("rotated")
 	}
 	if st2.String("network") != WGDefaultNetwork || st2.String("address") != WGDefaultAddress || st2.String("exit_address") != WGDefaultExit {
@@ -105,6 +109,15 @@ func TestWireGuardAddressesAndConf(t *testing.T) {
 	if !strings.Contains(hub, "AllowedIPs = 0.0.0.0/0") || !strings.Contains(hub, "AllowedIPs = 10.7.0.10/32") || !strings.Contains(hub, "AllowedIPs = 10.7.0.11/32") {
 		t.Fatalf("peers\n%s", hub)
 	}
+	if !strings.Contains(hub, "TCPMSS --set-mss 1240") || !strings.Contains(hub, "AllowedIPs = "+WGProbeAddress) {
+		t.Fatalf("mss or probe\n%s", hub)
+	}
+	probePub := ParseSettings(in.Settings).String("probe_public_key")
+	for _, p := range peers {
+		if p.PublicKey == probePub || p.AllowedIPs == WGProbeAddress {
+			t.Fatal("probe peer is billed")
+		}
+	}
 	if len(peers) != 3 || !peers[0].Exit {
 		t.Fatalf("peer order %+v", peers)
 	}
@@ -124,7 +137,7 @@ func TestWireGuardAddressesAndConf(t *testing.T) {
 	if !strings.Contains(home, "MASQUERADE") || !strings.Contains(home, "ip route replace 10.7.0.0/24 dev %i") || !strings.Contains(home, "PostDown") {
 		t.Fatalf("home nat\n%s", home)
 	}
-	if !strings.Contains(home, "iptables -I FORWARD 1 -i %i -j ACCEPT") {
+	if !strings.Contains(home, "iptables -I FORWARD 1 -i %i -j ACCEPT") || !strings.Contains(home, "TCPMSS --set-mss 1240") {
 		t.Fatalf("home forward\n%s", home)
 	}
 	if !strings.Contains(home, "Endpoint = cm.example:51820") {
@@ -142,7 +155,7 @@ func TestWireGuardAddressesAndConf(t *testing.T) {
 		t.Fatalf("uri %s", uri)
 	}
 	_, yaml, err := ClashProxyYAML(in, c1)
-	if err != nil || !strings.Contains(yaml, "type: wireguard") || !strings.Contains(yaml, "ip: \"10.7.0.10\"") || !strings.Contains(yaml, "0.0.0.0/0") {
+	if err != nil || !strings.Contains(yaml, "type: wireguard") || !strings.Contains(yaml, "ip: \"10.7.0.10\"") || !strings.Contains(yaml, "0.0.0.0/0") || strings.Contains(yaml, "::/0") || !strings.Contains(yaml, "remote-dns-resolve: true") {
 		t.Fatalf("clash %v\n%s", err, yaml)
 	}
 	ob, err := SingboxOutbound(in, c1)
@@ -154,8 +167,17 @@ func TestWireGuardAddressesAndConf(t *testing.T) {
 		t.Fatalf("endpoint %+v", ep)
 	}
 	conf, err := WireGuardClientConf(in, c1)
-	if err != nil || !strings.Contains(conf, "AllowedIPs = 0.0.0.0/0, ::/0") || strings.Contains(conf, "Table = off") {
+	if err != nil || !strings.Contains(conf, "AllowedIPs = 0.0.0.0/0\n") || strings.Contains(conf, "::/0") || strings.Contains(conf, "Table = off") {
 		t.Fatalf("client\n%s %v", conf, err)
+	}
+	epPeers, _ := ep["peers"].([]any)
+	if len(epPeers) != 1 {
+		t.Fatalf("endpoint peers %+v", ep["peers"])
+	}
+	one, _ := epPeers[0].(map[string]any)
+	ips, _ := one["allowed_ips"].([]string)
+	if len(ips) != 1 || ips[0] != "0.0.0.0/0" {
+		t.Fatalf("singbox allowed %v", one["allowed_ips"])
 	}
 }
 
@@ -270,6 +292,38 @@ func TestBuildWireGuardHomeExit(t *testing.T) {
 	hubConf := string(hub.Apply.WireGuard)
 	if !strings.Contains(hubConf, "ListenPort = 51820") || strings.Contains(hubConf, exitPriv) {
 		t.Fatalf("hub\n%s", hubConf)
+	}
+	if !strings.Contains(hubConf, "TCPMSS --set-mss 1240") || !strings.Contains(hubConf, WGProbeAddress) {
+		t.Fatalf("hub mss\n%s", hubConf)
+	}
+	pkg, err := db.CreatePackage(d, "ce", 0, 30, 2, "twoway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetPackageServers(d, pkg.ID, []int64{transit.ID}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := db.CreateUser(d, "ces-user", "h", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.BindUserPackage(d, u.ID, pkg.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	u, err = db.GetUser(d, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids, err := ProvisionUser(d, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenSrv := map[int64]bool{}
+	for _, id := range ids {
+		seenSrv[id] = true
+	}
+	if !seenSrv[transit.ID] || !seenSrv[home.ID] {
+		t.Fatalf("sync targets %v", ids)
 	}
 	homeB, err := Build(d, home.ID)
 	if err != nil {

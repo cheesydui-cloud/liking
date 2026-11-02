@@ -3,6 +3,7 @@ package corecfg
 import (
 	"crypto/ecdh"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"fmt"
 	"net"
@@ -25,6 +26,7 @@ const (
 	WGDefaultFwMark    = 51820
 	WGDefaultTable     = 100
 	WGClientDNS        = "1.1.1.1"
+	WGProbeAddress     = "192.0.2.1/32"
 	wgClientStart      = 10
 )
 
@@ -129,6 +131,12 @@ func normalizeWireGuard(st Settings) error {
 		return err
 	}
 	if err := fillWGKey(st, "exit_private_key", "exit_public_key"); err != nil {
+		return err
+	}
+	if strings.TrimSpace(st.String("probe_address")) == "" {
+		st["probe_address"] = WGProbeAddress
+	}
+	if err := fillWGKey(st, "probe_private_key", "probe_public_key"); err != nil {
 		return err
 	}
 	return nil
@@ -327,6 +335,28 @@ func CheckWireGuardExit(in *db.Inbound, all []*db.Inbound) error {
 	return nil
 }
 
+func persistWGProbe(d *sql.DB, in *db.Inbound) error {
+	if d == nil || in == nil || in.ID == 0 || in.Profile != ProfileWireGuard {
+		return nil
+	}
+	st := ParseSettings(in.Settings)
+	if st.String("probe_private_key") != "" && st.String("probe_public_key") != "" && st.String("probe_address") != "" {
+		return nil
+	}
+	if strings.TrimSpace(st.String("probe_address")) == "" {
+		st["probe_address"] = WGProbeAddress
+	}
+	if err := fillWGKey(st, "probe_private_key", "probe_public_key"); err != nil {
+		return err
+	}
+	raw, err := st.Marshal()
+	if err != nil {
+		return err
+	}
+	in.Settings = raw
+	return db.UpdateInbound(d, in)
+}
+
 func buildWireGuard(serverID int64, ins []*db.Inbound, all []*db.Inbound, clients map[int64][]*db.Client) (*wsproto.WireGuardConfig, error) {
 	var found []*db.Inbound
 	for _, in := range ins {
@@ -425,6 +455,9 @@ func HubConfig(in *db.Inbound, clients []*db.Client) (string, []wgPeer, error) {
 	for _, p := range peers {
 		fmt.Fprintf(&b, "\n[Peer]\nPublicKey = %s\nAllowedIPs = %s\n", p.PublicKey, p.AllowedIPs)
 	}
+	if pub, addr := strings.TrimSpace(st.String("probe_public_key")), strings.TrimSpace(st.String("probe_address")); pub != "" && addr != "" {
+		fmt.Fprintf(&b, "\n[Peer]\nPublicKey = %s\nAllowedIPs = %s\n", pub, addr)
+	}
 	return b.String(), peers, nil
 }
 
@@ -435,8 +468,8 @@ func hubPostUp(st Settings) string {
 	exit := wgHost(st.String("exit_address"))
 	network := strings.TrimSpace(st.String("network"))
 	return fmt.Sprintf(
-		"sysctl -w net.ipv4.ip_forward=1; sysctl -w net.ipv4.conf.%%i.rp_filter=2; iptables -C FORWARD -i %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %%i -j ACCEPT; iptables -C FORWARD -o %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %%i -j ACCEPT; ip rule del fwmark %d lookup main priority 40 2>/dev/null || true; ip rule add fwmark %d lookup main priority 40; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule add from %s lookup main priority 50; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule add from %s lookup main priority 50; ip rule del from %s lookup %d priority 100 2>/dev/null || true; ip rule add from %s lookup %d priority 100; ip route replace default dev %%i table %d",
-		mark, mark, hub, hub, exit, exit, network, table, network, table, table,
+		"sysctl -w net.ipv4.ip_forward=1; sysctl -w net.ipv4.conf.%%i.rp_filter=2; iptables -C FORWARD -i %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %%i -j ACCEPT; iptables -C FORWARD -o %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %%i -j ACCEPT; ip rule del fwmark %d lookup main priority 40 2>/dev/null || true; ip rule add fwmark %d lookup main priority 40; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule add from %s lookup main priority 50; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule add from %s lookup main priority 50; ip rule del from %s lookup %d priority 100 2>/dev/null || true; ip rule add from %s lookup %d priority 100; ip route replace default dev %%i table %d; %s",
+		mark, mark, hub, hub, exit, exit, network, table, network, table, table, wgMSSUp(st),
 	)
 }
 
@@ -447,8 +480,36 @@ func hubPostDown(st Settings) string {
 	exit := wgHost(st.String("exit_address"))
 	network := strings.TrimSpace(st.String("network"))
 	return fmt.Sprintf(
-		"ip rule del fwmark %d lookup main priority 40 2>/dev/null || true; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule del from %s lookup %d priority 100 2>/dev/null || true; ip route del default dev %%i table %d 2>/dev/null || true; iptables -D FORWARD -i %%i -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o %%i -j ACCEPT 2>/dev/null || true",
-		mark, hub, exit, network, table, table,
+		"ip rule del fwmark %d lookup main priority 40 2>/dev/null || true; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule del from %s lookup %d priority 100 2>/dev/null || true; ip route del default dev %%i table %d 2>/dev/null || true; iptables -D FORWARD -i %%i -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o %%i -j ACCEPT 2>/dev/null || true; %s",
+		mark, hub, exit, network, table, table, wgMSSDown(st),
+	)
+}
+
+func wgMSS(st Settings) int {
+	mtu := st.Int("mtu", WGDefaultMTU)
+	if mtu < 1280 || mtu > 1500 {
+		mtu = WGDefaultMTU
+	}
+	mss := mtu - 40
+	if mss < 536 {
+		mss = 536
+	}
+	return mss
+}
+
+func wgMSSUp(st Settings) string {
+	mss := wgMSS(st)
+	return fmt.Sprintf(
+		"iptables -t mangle -C FORWARD -i %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || iptables -t mangle -I FORWARD 1 -i %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || true; iptables -t mangle -C FORWARD -o %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || iptables -t mangle -I FORWARD 1 -o %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || true",
+		mss, mss, mss, mss,
+	)
+}
+
+func wgMSSDown(st Settings) string {
+	mss := wgMSS(st)
+	return fmt.Sprintf(
+		"iptables -t mangle -D FORWARD -i %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || true; iptables -t mangle -D FORWARD -o %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || true",
+		mss, mss,
 	)
 }
 
@@ -468,10 +529,10 @@ func HomeConfig(in *db.Inbound) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[Interface]\nPrivateKey = %s\nAddress = %s\nMTU = %d\nTable = off\n",
 		st.String("exit_private_key"), st.String("exit_address"), st.Int("mtu", WGDefaultMTU))
-	fmt.Fprintf(&b, "PostUp = sysctl -w net.ipv4.ip_forward=1; ip route replace %s dev %%i; iptables -C FORWARD -i %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %%i -j ACCEPT; iptables -C FORWARD -o %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %%i -j ACCEPT; iface=$(ip route show default | awk '{print $5; exit}'); iptables -t nat -C POSTROUTING -s %s -o \"$iface\" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s %s -o \"$iface\" -j MASQUERADE\n",
-		network, network, network)
-	fmt.Fprintf(&b, "PostDown = ip route del %s dev %%i 2>/dev/null || true; iptables -D FORWARD -i %%i -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o %%i -j ACCEPT 2>/dev/null || true; iface=$(ip route show default | awk '{print $5; exit}'); iptables -t nat -D POSTROUTING -s %s -o \"$iface\" -j MASQUERADE 2>/dev/null || true\n",
-		network, network)
+	fmt.Fprintf(&b, "PostUp = sysctl -w net.ipv4.ip_forward=1; ip route replace %s dev %%i; iptables -C FORWARD -i %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %%i -j ACCEPT; iptables -C FORWARD -o %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %%i -j ACCEPT; iface=$(ip route show default | awk '{print $5; exit}'); iptables -t nat -C POSTROUTING -s %s -o \"$iface\" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s %s -o \"$iface\" -j MASQUERADE; %s\n",
+		network, network, network, wgMSSUp(st))
+	fmt.Fprintf(&b, "PostDown = ip route del %s dev %%i 2>/dev/null || true; iptables -D FORWARD -i %%i -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o %%i -j ACCEPT 2>/dev/null || true; iface=$(ip route show default | awk '{print $5; exit}'); iptables -t nat -D POSTROUTING -s %s -o \"$iface\" -j MASQUERADE 2>/dev/null || true; %s\n",
+		network, network, wgMSSDown(st))
 	fmt.Fprintf(&b, "\n[Peer]\nPublicKey = %s\nEndpoint = %s\nAllowedIPs = %s\nPersistentKeepalive = %d\n",
 		st.String("public_key"), hostPort(host, in.Port), network, st.Int("keepalive", WGDefaultKeepalive))
 	return b.String(), nil
@@ -492,7 +553,7 @@ func WireGuardClientConf(in *db.Inbound, c *db.Client) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[Interface]\nPrivateKey = %s\nAddress = %s\nDNS = %s\nMTU = %d\n",
 		strings.TrimSpace(c.Password), strings.TrimSpace(c.UUID), WGClientDNS, st.Int("mtu", WGDefaultMTU))
-	fmt.Fprintf(&b, "\n[Peer]\nPublicKey = %s\nEndpoint = %s\nAllowedIPs = 0.0.0.0/0, ::/0\nPersistentKeepalive = %d\n",
+	fmt.Fprintf(&b, "\n[Peer]\nPublicKey = %s\nEndpoint = %s\nAllowedIPs = 0.0.0.0/0\nPersistentKeepalive = %d\n",
 		st.String("public_key"), hostPort(host, in.Port), st.Int("keepalive", WGDefaultKeepalive))
 	return b.String(), nil
 }

@@ -86,6 +86,9 @@ func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
 		// Always mark the server. Speed limit and site filter live on the
 		// user row; skipping here meant saving 访问限制 never pushed xray.
 		touched[in.ServerID] = struct{}{}
+		if exitID := WGExitServerID(in); exitID != 0 && exitID != in.ServerID {
+			touched[exitID] = struct{}{}
+		}
 		if !created && c.Enabled == wantEnabled && c.Email == wantEmail && c.Username == wantUser {
 			continue
 		}

@@ -86,7 +86,9 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 		b.WriteString("    udp: true\n")
 		fmt.Fprintf(&b, "    mtu: %d\n", st.Int("mtu", WGDefaultMTU))
 		fmt.Fprintf(&b, "    persistent-keepalive: %d\n", st.Int("keepalive", WGDefaultKeepalive))
-		b.WriteString("    allowed-ips:\n      - 0.0.0.0/0\n      - ::/0\n")
+		b.WriteString("    allowed-ips:\n      - 0.0.0.0/0\n")
+		fmt.Fprintf(&b, "    dns:\n      - %s\n", yq(WGClientDNS))
+		b.WriteString("    remote-dns-resolve: true\n")
 	case ProfileMieru:
 		b.WriteString("    type: mieru\n")
 		user := c.Username
