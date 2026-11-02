@@ -143,7 +143,7 @@ const emptyLine = {
   line_kind: 'direct', cert_id: 0, enabled: true, reject_cn: false,
   dest: 'www.cloudflare.com:443', sni: '', path: '', host: '', mode: 'auto',
   method: '2022-blake3-aes-256-gcm', transport: 'BOTH',
-  wg_network: '10.7.0.0/24', wg_address: '10.7.0.1/24', wg_exit: '10.7.0.2/32',
+  wg_network: '10.7.0.0/24', wg_address: '10.7.0.1/24', wg_exit: '10.7.0.2/32', wg_exit_server: 0,
   fingerprint: 'chrome', short_ids: '', xver: 0, spider_x: '',
   min_version: '1.3', alpn: 'h2,http/1.1', reject_unknown_sni: true,
   rotate_keys: false, settings: {},
@@ -169,6 +169,11 @@ function usedPortsText(server, list, excludeId = 0) {
     .map(x => x.port)
   const used = ports.length ? `已用 ${[...new Set(ports)].sort((a, b) => a - b).join('、')}` : '这台实例还没有节点'
   return `不填则在 ${min}–${max} 随机，避开已用端口。${used}`
+}
+
+function wgExitServerID(inb) {
+  const n = Number(inboundSettings(inb).exit_server_id)
+  return Number.isFinite(n) && n > 0 ? n : 0
 }
 
 function inboundSettings(inb) {
@@ -310,6 +315,7 @@ function formFromInbound(inb) {
     wg_network: st.network || '10.7.0.0/24',
     wg_address: st.address || '10.7.0.1/24',
     wg_exit: st.exit_address || '10.7.0.2/32',
+    wg_exit_server: Number(st.exit_server_id) || 0,
     settings: st,
   }
 }
@@ -447,6 +453,11 @@ export default function Nodes() {
       if (network) settings.network = network
       if (address) settings.address = address
       if (exit) settings.exit_address = exit
+      const exitServer = Number(f.wg_exit_server) || 0
+      if (exitServer) settings.exit_server_id = exitServer
+      else delete settings.exit_server_id
+    } else {
+      delete settings.exit_server_id
     }
     const body = {
       server_id: Number(f.server_id),
@@ -468,6 +479,16 @@ export default function Nodes() {
     if (!Number(f.server_id)) {
       toast('请选择实例', 'error')
       return
+    }
+    if (f.profile === 'wireguard') {
+      if (!Number(f.wg_exit_server)) {
+        toast('请选择家宽实例', 'error')
+        return
+      }
+      if (Number(f.wg_exit_server) === Number(f.server_id)) {
+        toast('家宽要选另一台实例', 'error')
+        return
+      }
     }
     const raw = String(f.port ?? '').trim()
     if (raw !== '') {
@@ -702,6 +723,7 @@ export default function Nodes() {
                   {nodes.map(inb => {
                     const st = nodeStatus(inb, s)
                     const used = (inb.used_up || 0) + (inb.used_down || 0)
+                    const exitSrv = inb.profile === 'wireguard' ? servers.find(x => Number(x.id) === wgExitServerID(inb)) : null
                     return (
                       <div key={inb.id} className={`machine ${nodeTone(st)}`}>
                         <div className="machine-head">
@@ -713,6 +735,11 @@ export default function Nodes() {
                             {inb.reject_cn ? (
                               <div className="machine-host">
                                 <span className="text-[12px] text-ink-mut">拒绝中国 IP</span>
+                              </div>
+                            ) : null}
+                            {inb.profile === 'wireguard' ? (
+                              <div className="machine-host">
+                                <span className="text-[12px] text-ink-mut">{exitSrv ? `家宽 ${exitSrv.name}` : '还没选家宽'}</span>
                               </div>
                             ) : null}
                           </div>
@@ -884,16 +911,24 @@ export default function Nodes() {
           )}
           {f.profile === 'wireguard' && (
             <>
+              <Field label="家宽实例" hint="选已经装了 Agent 和 WireGuard 的家宽。保存后面板把出口推过去。">
+                <select className="input-field" value={f.wg_exit_server || ''} onChange={e => setF({ ...f, wg_exit_server: Number(e.target.value) || 0 })} required>
+                  <option value="">选择家宽</option>
+                  {servers.filter(s => Number(s.id) !== Number(f.server_id)).map(s => (
+                    <option key={s.id} value={s.id}>{s.name}{s.online ? '' : ' · 离线'}</option>
+                  ))}
+                </select>
+              </Field>
               <Field label="隧道网段" hint="客户从 .10 起分配。已经分出去的地址不会改。">
                 <input className="input-field font-mono" value={f.wg_network} onChange={e => setF({ ...f, wg_network: e.target.value })} placeholder="10.7.0.0/24" />
               </Field>
               <Field label="中转机地址" hint="掩码要和网段一致，例如 10.7.0.1/24。">
                 <input className="input-field font-mono" value={f.wg_address} onChange={e => setF({ ...f, wg_address: e.target.value })} placeholder="10.7.0.1/24" />
               </Field>
-              <Field label="家宽地址" hint="家宽自己的隧道地址。它的默认路由仍走宽带，不要写成 0.0.0.0/0。">
+              <Field label="家宽地址" hint="家宽在隧道里的地址。它的默认路由仍走宽带，不要写成 0.0.0.0/0。">
                 <input className="input-field font-mono" value={f.wg_exit} onChange={e => setF({ ...f, wg_exit: e.target.value })} placeholder="10.7.0.2/32" />
               </Field>
-              <div className="notice sm:col-span-2">客户连这条入口。家宽是隧道里的出口，不要另建节点，也不要放进套餐。保存后到「参数」里复制家宽配置，贴到家宽上执行。中转机缺 WireGuard 时，到实例菜单点「安装 WireGuard」。套餐里勾选这一条，订阅才会带上。</div>
+              <div className="notice sm:col-span-2">客户连这条入口。保存后，家宽实例会收到出口配置，不用登录那台机器。家宽上不要再另建 WireGuard，也不要放进套餐。两台都要在线，并在实例菜单里装过 WireGuard。套餐只勾选这一条。</div>
             </>
           )}
           {destIsSelf && (
@@ -1021,7 +1056,7 @@ export default function Nodes() {
             <div className="kicker mb-1">家宽配置</div>
             {paramInb.exit_conf ? (
               <>
-                <p className="text-[12px] text-ink-mut mb-2">贴到美国家宽上保存成 wg0.conf，再执行 wg-quick up。家宽不要装 Agent，也不要放进套餐。AllowedIPs 只有隧道网段，默认路由仍走家宽。</p>
+                <p className="text-[12px] text-ink-mut mb-2">{wgExitServerID(paramInb) ? '这是已经推到家宽实例的同一份配置，留在这里查看。家宽上不要再另建节点。' : '编辑节点并选择家宽实例后，面板会把这份配置推过去。'}</p>
                 <pre className="text-[12px] font-mono p-3 overflow-x-auto whitespace-pre-wrap" style={{ background: 'var(--color-fill)' }}>{paramInb.exit_conf}</pre>
                 <button type="button" className="btn-primary mt-2" onClick={async () => {
                   try { await copyText(paramInb.exit_conf); toast('已复制家宽配置') }

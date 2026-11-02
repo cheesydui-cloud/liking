@@ -120,6 +120,11 @@ func normalizeWireGuard(st Settings) error {
 	st["keepalive"] = clampInt(st.Int("keepalive", WGDefaultKeepalive), 0, 65535, WGDefaultKeepalive)
 	st["fwmark"] = clampInt(st.Int("fwmark", WGDefaultFwMark), 1, 0xffffffff, WGDefaultFwMark)
 	st["route_table"] = clampInt(st.Int("route_table", WGDefaultTable), 1, 0xffffffff, WGDefaultTable)
+	if exitServer := st.Int("exit_server_id", 0); exitServer > 0 {
+		st["exit_server_id"] = exitServer
+	} else {
+		delete(st, "exit_server_id")
+	}
 	if err := fillWGKey(st, "private_key", "public_key"); err != nil {
 		return err
 	}
@@ -276,15 +281,58 @@ type wgPeer struct {
 	Exit       bool
 }
 
-func buildWireGuard(ins []*db.Inbound, clients map[int64][]*db.Client) (*wsproto.WireGuardConfig, error) {
+func WGExitServerID(in *db.Inbound) int64 {
+	if in == nil || in.Profile != ProfileWireGuard {
+		return 0
+	}
+	id := ParseSettings(in.Settings).Int("exit_server_id", 0)
+	if id <= 0 {
+		return 0
+	}
+	return int64(id)
+}
+
+func CheckWireGuardExit(in *db.Inbound, all []*db.Inbound) error {
+	if in == nil || in.Profile != ProfileWireGuard {
+		return nil
+	}
+	if in.Enabled && in.ServerID != 0 {
+		for _, other := range all {
+			if other == nil || other.ID == in.ID || !other.Enabled || other.Profile != ProfileWireGuard {
+				continue
+			}
+			if WGExitServerID(other) == in.ServerID {
+				return fmt.Errorf("这台机器已是家宽出口，不能再在上面建 WireGuard 节点")
+			}
+		}
+	}
+	id := WGExitServerID(in)
+	if id == 0 {
+		return nil
+	}
+	if id == in.ServerID {
+		return fmt.Errorf("家宽要选另一台实例")
+	}
+	for _, other := range all {
+		if other == nil || other.ID == in.ID || !other.Enabled || other.Profile != ProfileWireGuard {
+			continue
+		}
+		if other.ServerID == id {
+			return fmt.Errorf("家宽实例上还有一条 WireGuard。先删掉那条，出口由这条入口推过去")
+		}
+		if WGExitServerID(other) == id {
+			return fmt.Errorf("这台家宽已经是另一条 WireGuard 的出口")
+		}
+	}
+	return nil
+}
+
+func buildWireGuard(serverID int64, ins []*db.Inbound, all []*db.Inbound, clients map[int64][]*db.Client) (*wsproto.WireGuardConfig, error) {
 	var found []*db.Inbound
 	for _, in := range ins {
 		if in != nil && in.Profile == ProfileWireGuard {
 			found = append(found, in)
 		}
-	}
-	if len(found) == 0 {
-		return nil, nil
 	}
 	var enabled []*db.Inbound
 	for _, in := range found {
@@ -295,22 +343,47 @@ func buildWireGuard(ins []*db.Inbound, clients map[int64][]*db.Client) (*wsproto
 	if len(enabled) > 1 {
 		return nil, fmt.Errorf("一台机器只能有一条 WireGuard。家宽出口写在这条节点里")
 	}
-	if len(enabled) == 0 {
+	var exitOf *db.Inbound
+	if serverID != 0 {
+		for _, in := range all {
+			if in == nil || !in.Enabled || in.Profile != ProfileWireGuard || WGExitServerID(in) != serverID {
+				continue
+			}
+			if exitOf != nil {
+				return nil, fmt.Errorf("这台家宽被多条 WireGuard 选为出口")
+			}
+			exitOf = in
+		}
+	}
+	if len(enabled) == 1 {
+		if exitOf != nil {
+			return nil, fmt.Errorf("这台机器已是家宽出口，不能再在上面建 WireGuard 节点")
+		}
+		in := enabled[0]
+		conf, peers, err := HubConfig(in, clients[in.ID])
+		if err != nil {
+			return nil, err
+		}
+		out := &wsproto.WireGuardConfig{Iface: WGIface, Conf: conf}
+		for _, p := range peers {
+			if p.Email == "" || p.Exit {
+				continue
+			}
+			out.Peers = append(out.Peers, wsproto.WireGuardPeer{PublicKey: p.PublicKey, Email: p.Email})
+		}
+		return out, nil
+	}
+	if exitOf != nil {
+		conf, err := HomeConfig(exitOf)
+		if err != nil {
+			return nil, err
+		}
+		return &wsproto.WireGuardConfig{Iface: WGIface, Conf: conf}, nil
+	}
+	if len(found) > 0 {
 		return &wsproto.WireGuardConfig{Iface: WGIface}, nil
 	}
-	in := enabled[0]
-	conf, peers, err := HubConfig(in, clients[in.ID])
-	if err != nil {
-		return nil, err
-	}
-	out := &wsproto.WireGuardConfig{Iface: WGIface, Conf: conf}
-	for _, p := range peers {
-		if p.Email == "" || p.Exit {
-			continue
-		}
-		out.Peers = append(out.Peers, wsproto.WireGuardPeer{PublicKey: p.PublicKey, Email: p.Email})
-	}
-	return out, nil
+	return nil, nil
 }
 
 func HubConfig(in *db.Inbound, clients []*db.Client) (string, []wgPeer, error) {

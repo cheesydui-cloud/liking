@@ -165,6 +165,7 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "入站不存在")
 		return
 	}
+	oldExit := corecfg.WGExitServerID(in)
 	var req inboundReq
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -213,7 +214,15 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fresh, _ := db.GetInbound(s.DB, in.ID)
-	s.respondAfterApply(w, map[string]any{"inbound": inboundJSON(fresh)}, applyTargets(s, in)...)
+	target := fresh
+	if target == nil {
+		target = in
+	}
+	ids := applyTargets(s, target)
+	if oldExit != 0 {
+		ids = append(ids, oldExit)
+	}
+	s.respondAfterApply(w, map[string]any{"inbound": inboundJSON(fresh)}, ids...)
 }
 
 func (s *Server) handleInboundShare(w http.ResponseWriter, r *http.Request) {
@@ -288,6 +297,9 @@ func (s *Server) handleDeleteInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	sid := in.ServerID
 	peers := chainPeerServerIDs(s, in)
+	if exitID := corecfg.WGExitServerID(in); exitID != 0 {
+		peers = append(peers, exitID)
+	}
 	if err := db.DeleteInbound(s.DB, id); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -362,6 +374,9 @@ func (s *Server) prepareInbound(in *db.Inbound) error {
 	if err := corecfg.Normalize(in, exit); err != nil {
 		return err
 	}
+	if err := s.checkWireGuardExit(in); err != nil {
+		return err
+	}
 	if in.LineKind == "chain" {
 		in.RejectCN = false
 	}
@@ -421,11 +436,31 @@ func chainPeerServerIDs(s *Server, in *db.Inbound) []int64 {
 	return ids
 }
 
+func (s *Server) checkWireGuardExit(in *db.Inbound) error {
+	if in == nil || in.Profile != corecfg.ProfileWireGuard {
+		return nil
+	}
+	if id := corecfg.WGExitServerID(in); id != 0 {
+		if _, err := db.GetServer(s.DB, id); err != nil {
+			return fmt.Errorf("家宽实例不存在")
+		}
+	}
+	all, err := db.ListInbounds(s.DB)
+	if err != nil {
+		return err
+	}
+	return corecfg.CheckWireGuardExit(in, all)
+}
+
 func applyTargets(s *Server, in *db.Inbound) []int64 {
 	if in == nil {
 		return nil
 	}
-	return append([]int64{in.ServerID}, chainPeerServerIDs(s, in)...)
+	ids := append([]int64{in.ServerID}, chainPeerServerIDs(s, in)...)
+	if id := corecfg.WGExitServerID(in); id != 0 {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 func (s *Server) respondAfterApply(w http.ResponseWriter, payload map[string]any, ids ...int64) {

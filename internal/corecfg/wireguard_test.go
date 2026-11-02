@@ -3,6 +3,7 @@ package corecfg
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -221,6 +222,94 @@ func TestBuildWireGuardRev(t *testing.T) {
 	}
 	if _, err := Build(d, srv.ID); err == nil {
 		t.Fatal("two wireguard inbounds")
+	}
+}
+
+func TestBuildWireGuardHomeExit(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	transit, err := db.CreateServer(d, "cm", "203.0.113.8", "tok1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := db.CreateServer(d, "home", "198.51.100.9", "tok2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := db.CreateServer(d, "other", "192.0.2.8", "tok3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &db.Inbound{
+		ServerID: transit.ID, Name: "wg", Profile: ProfileWireGuard, Port: 51820,
+		Enabled: true, LineKind: "direct",
+		Settings: fmt.Sprintf(`{"exit_server_id":%d}`, home.ID),
+	}
+	if err := Normalize(in, nil); err != nil {
+		t.Fatal(err)
+	}
+	if WGExitServerID(in) != home.ID {
+		t.Fatalf("exit server %d", WGExitServerID(in))
+	}
+	st := ParseSettings(in.Settings)
+	exitPriv := st.String("exit_private_key")
+	if exitPriv == "" {
+		t.Fatal("missing exit key")
+	}
+	created, err := db.CreateInbound(d, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub, err := Build(d, transit.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hubConf := string(hub.Apply.WireGuard)
+	if !strings.Contains(hubConf, "ListenPort = 51820") || strings.Contains(hubConf, exitPriv) {
+		t.Fatalf("hub\n%s", hubConf)
+	}
+	homeB, err := Build(d, home.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	homeConf := string(homeB.Apply.WireGuard)
+	if !strings.Contains(homeConf, exitPriv) || !strings.Contains(homeConf, "Endpoint = 203.0.113.8:51820") || !strings.Contains(homeConf, "AllowedIPs = 10.7.0.0/24") || strings.Contains(homeConf, "0.0.0.0/0") || strings.Contains(homeConf, `"email"`) {
+		t.Fatalf("home\n%s", homeConf)
+	}
+	idle, err := Build(d, other.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idle.Apply.WireGuard) != 0 {
+		t.Fatalf("unrelated %s", idle.Apply.WireGuard)
+	}
+	local := &db.Inbound{
+		ServerID: home.ID, Name: "bad", Profile: ProfileWireGuard, Port: 51821,
+		Enabled: true, LineKind: "direct", Settings: "{}",
+	}
+	if err := Normalize(local, nil); err != nil {
+		t.Fatal(err)
+	}
+	all, err := db.ListInbounds(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckWireGuardExit(local, append(all, local)); err == nil {
+		t.Fatal("home machine accepted its own wireguard node")
+	}
+	created.Enabled = false
+	if err := db.UpdateInbound(d, created); err != nil {
+		t.Fatal(err)
+	}
+	down, err := Build(d, home.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(down.Apply.WireGuard) != 0 {
+		t.Fatalf("disabled exit should leave home empty %s", down.Apply.WireGuard)
 	}
 }
 

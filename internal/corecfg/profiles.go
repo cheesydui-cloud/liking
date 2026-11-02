@@ -49,7 +49,7 @@ func Catalog() []Meta {
 		{ID: ProfileAnyTLS, Title: "AnyTLS + TCP + TLS", Core: CoreSingbox, NeedTLS: true, Direct: true, Desc: "sing-box 实现，需要证书。不能当链式落地。"},
 		{ID: ProfileMieru, Title: "Mieru", Core: CoreMita, Direct: true, Desc: "只当入口，不能当链式落地。可同时开 TCP / UDP。"},
 		{ID: ProfileSOCKS5, Title: "SOCKS5", Core: CoreSingbox, Landing: true, Direct: true, Desc: "用户名密码认证，可 UDP。浏览器和 Clash 可直连。走 sing-box。可当链式落地。"},
-		{ID: ProfileWireGuard, Title: "WireGuard", Core: CoreWireGuard, Direct: true, Desc: "客户、中转机和家宽出口在同一条隧道里，流量从家宽网卡出去。套餐只勾选这条入口。中转机要有 wireguard-tools。"},
+		{ID: ProfileWireGuard, Title: "WireGuard", Core: CoreWireGuard, Direct: true, Desc: "客户连中转机，家宽在节点里选另一台实例。保存后面板把出口推过去。套餐只勾选这条入口。两台都要装好 WireGuard。"},
 	}
 }
 
