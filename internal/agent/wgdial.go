@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"liking/internal/wsproto"
 )
 
 // wgDialState remembers a listen port and peer endpoints that the pushed
@@ -30,29 +32,14 @@ type wgPolicyRule struct {
 
 func (c *Cores) keepWireGuard() {
 	c.mu.Lock()
-	iface, conf, dir := c.wgKeepArgs()
+	dir := c.dir
+	var cfg wsproto.WireGuardConfig
+	_ = json.Unmarshal(c.lastReq["wireguard"], &cfg)
+	tunnels := activeWGTunnels(cfg)
 	c.mu.Unlock()
-	keepWGPath(dir, iface, conf)
-}
-
-func (c *Cores) wgKeepArgs() (iface, conf, dir string) {
-	dir = c.dir
-	iface = strings.TrimSpace(c.wgIface)
-	raw := c.lastReq["wireguard"]
-	if len(raw) == 0 {
-		return iface, "", dir
+	for _, t := range tunnels {
+		keepWGPath(dir, t.Iface, t.Conf)
 	}
-	var cfg struct {
-		Iface string `json:"iface"`
-		Conf  string `json:"conf"`
-	}
-	if json.Unmarshal(raw, &cfg) != nil {
-		return iface, "", dir
-	}
-	if iface == "" {
-		iface = strings.TrimSpace(cfg.Iface)
-	}
-	return iface, cfg.Conf, dir
 }
 
 func keepWGPath(dir, iface, conf string) {
@@ -62,8 +49,8 @@ func keepWGPath(dir, iface, conf string) {
 		return
 	}
 	kernel := readWGDumpDial(iface)
-	st := mergeWGDial(loadWGDial(dir), kernel)
-	saveWGDial(dir, st)
+	st := mergeWGDial(loadWGDial(dir, iface), kernel)
+	saveWGDial(dir, iface, st)
 	restoreWGDial(iface, conf, st, kernel)
 	ensureWGPolicy(iface, conf)
 }
@@ -77,18 +64,30 @@ func noteWGDial(dir, iface string) {
 	if kernel.ListenPort == 0 && len(kernel.Peers) == 0 {
 		return
 	}
-	saveWGDial(dir, mergeWGDial(loadWGDial(dir), kernel))
+	saveWGDial(dir, iface, mergeWGDial(loadWGDial(dir, iface), kernel))
 }
 
-func wgDialPath(dir string) string {
-	return filepath.Join(dir, "wg-dial.json")
+func wgDialPath(dir, iface string) string {
+	iface = strings.TrimSpace(iface)
+	if iface == "" {
+		iface = "likingwg0"
+	}
+	return filepath.Join(dir, "wg-dial-"+iface+".json")
 }
 
-func loadWGDial(dir string) wgDialState {
+func loadWGDial(dir, iface string) wgDialState {
 	if strings.TrimSpace(dir) == "" {
 		return wgDialState{}
 	}
-	body, err := os.ReadFile(wgDialPath(dir))
+	st := readWGDialFile(wgDialPath(dir, iface))
+	if st.ListenPort == 0 && len(st.Peers) == 0 && (strings.TrimSpace(iface) == "" || strings.TrimSpace(iface) == "likingwg0") {
+		st = readWGDialFile(filepath.Join(dir, "wg-dial.json"))
+	}
+	return st
+}
+
+func readWGDialFile(path string) wgDialState {
+	body, err := os.ReadFile(path)
 	if err != nil {
 		return wgDialState{}
 	}
@@ -99,7 +98,7 @@ func loadWGDial(dir string) wgDialState {
 	return st
 }
 
-func saveWGDial(dir string, st wgDialState) {
+func saveWGDial(dir, iface string, st wgDialState) {
 	if strings.TrimSpace(dir) == "" {
 		return
 	}
@@ -110,7 +109,7 @@ func saveWGDial(dir string, st wgDialState) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(wgDialPath(dir), body, 0o600)
+	_ = os.WriteFile(wgDialPath(dir, iface), body, 0o600)
 }
 
 func mergeWGDial(st wgDialState, kernel wgDumpDial) wgDialState {

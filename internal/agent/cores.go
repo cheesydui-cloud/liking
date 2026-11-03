@@ -26,45 +26,50 @@ type proc struct {
 }
 
 type Cores struct {
-	dir                 string
-	mu                  sync.Mutex
-	collectMu           sync.Mutex
-	procs               map[string]*proc
-	last                map[string]json.RawMessage
-	lastReq             map[string]json.RawMessage
-	xrayAPI             string
-	xrayBin             string
-	singboxAPI          string
-	clashLast           map[string]clashSnap
-	mitaLast            map[string]bytePair
-	xrayLast            map[string]bytePair
-	singboxStatsLast    map[string]bytePair
-	acctMarks           []wsproto.AcctMark
-	wgIface             string
-	wgPeers             map[string]string
-	wgPeerIP            map[string]string
-	wgLast              map[string]bytePair
-	flowLast            map[string]bytePair
-	portLast            map[int]bytePair
-	flowAt              time.Time
-	wgListenCur         wgListenCursor
-	pendingWGListen     wgListenCursor
-	pendingWGListenOK   bool
-	pendingPorts        []wsproto.PortRate
-	pendingHasPorts     bool
-	pendingWG           []wsproto.WGPeerStat
-	pendingHasWG        bool
-	pendingClearHandoff bool
-	wgHandoffMu         sync.Mutex
-	wgHandoff           []wsproto.WGPeerStat
-	wgDelayMu           sync.Mutex
-	wgDelayLn           net.Listener
-	wgDelayPort         int
-	wgDelayGen          uint64
-	applyGen            uint64
-	crashes             map[string][]time.Time
-	stopWatch           chan struct{}
-	stopOnce            sync.Once
+	dir                   string
+	mu                    sync.Mutex
+	collectMu             sync.Mutex
+	procs                 map[string]*proc
+	last                  map[string]json.RawMessage
+	lastReq               map[string]json.RawMessage
+	xrayAPI               string
+	xrayBin               string
+	singboxAPI            string
+	clashLast             map[string]clashSnap
+	mitaLast              map[string]bytePair
+	xrayLast              map[string]bytePair
+	singboxStatsLast      map[string]bytePair
+	acctMarks             []wsproto.AcctMark
+	wgIface               string
+	wgIfaces              []string
+	wgPeers               map[string]string
+	wgPeerIP              map[string]string
+	wgLast                map[string]bytePair
+	flowLast              map[string]bytePair
+	portLast              map[int]bytePair
+	flowAt                time.Time
+	wgListenCur           wgListenCursor
+	wgListenCurByPort     map[int]wgListenCursor
+	pendingWGListen       wgListenCursor
+	pendingWGListenByPort map[int]wgListenCursor
+	pendingWGListenOK     bool
+	pendingWGByPort       map[int][]wsproto.WGPeerStat
+	pendingPorts          []wsproto.PortRate
+	pendingHasPorts       bool
+	pendingWG             []wsproto.WGPeerStat
+	pendingHasWG          bool
+	pendingClearHandoff   bool
+	wgHandoffMu           sync.Mutex
+	wgHandoff             []wsproto.WGPeerStat
+	wgDelayMu             sync.Mutex
+	wgDelayLn             net.Listener
+	wgDelayLns            map[int]net.Listener
+	wgDelayPort           int
+	wgDelayGen            uint64
+	applyGen              uint64
+	crashes               map[string][]time.Time
+	stopWatch             chan struct{}
+	stopOnce              sync.Once
 }
 
 func NewCores(dir string) *Cores {
@@ -719,7 +724,7 @@ func (c *Cores) ListenPorts() []int {
 	for _, raw := range c.last {
 		add(raw)
 	}
-	if p := wgJSONListenPort(c.lastReq["wireguard"]); p > 0 {
+	for _, p := range wgJSONListenPorts(c.lastReq["wireguard"]) {
 		if _, ok := seen[p]; !ok {
 			out = append(out, p)
 		}

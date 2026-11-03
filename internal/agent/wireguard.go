@@ -17,45 +17,76 @@ import (
 
 func (c *Cores) applyWireGuard(raw json.RawMessage) error {
 	if !hasCfg(raw) {
-		if c.wgIface == "" && !hasCfg(c.lastReq["wireguard"]) {
+		if c.wgIface == "" && len(c.wgIfaces) == 0 && !hasCfg(c.lastReq["wireguard"]) {
 			return nil
 		}
-		iface := c.wgIface
-		if iface == "" {
-			iface = "likingwg0"
-		}
-		return c.downWireGuard(iface)
+		return c.downAllWireGuard()
 	}
 	var cfg wsproto.WireGuardConfig
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return fmt.Errorf("wireguard 配置无效")
 	}
-	if strings.TrimSpace(cfg.Iface) == "" {
-		cfg.Iface = "likingwg0"
-	}
-	if strings.TrimSpace(cfg.Conf) == "" {
-		return c.downWireGuard(cfg.Iface)
+	tunnels := activeWGTunnels(cfg)
+	if len(tunnels) == 0 {
+		return c.downAllWireGuard()
 	}
 	if lookBin("wg") == "" || lookBin("wg-quick") == "" {
 		return fmt.Errorf("wireguard-tools 未安装")
 	}
-	if bytesEqual(raw, c.lastReq["wireguard"]) && wgIfaceUp(cfg.Iface) {
+	if bytesEqual(raw, c.lastReq["wireguard"]) && wgTunnelsUp(tunnels) {
 		c.rememberWG(cfg)
-		c.armWGDelay(cfg.Conf)
-		keepWGPath(c.dir, cfg.Iface, cfg.Conf)
-		return nil
+		c.armWGDelays(tunnelConfs(tunnels))
+		for _, t := range tunnels {
+			keepWGPath(c.dir, t.Iface, t.Conf)
+		}
+		return c.downLeftoverWG(tunnelIfaceSet(tunnels))
 	}
-	noteWGDial(c.dir, cfg.Iface)
-	path := filepath.Join(c.dir, cfg.Iface+".conf")
+	var prev wsproto.WireGuardConfig
+	_ = json.Unmarshal(c.lastReq["wireguard"], &prev)
+	prevBy := map[string]string{}
+	for _, t := range activeWGTunnels(prev) {
+		prevBy[t.Iface] = t.Conf
+	}
+	if strings.TrimSpace(prev.Conf) != "" {
+		iface := strings.TrimSpace(prev.Iface)
+		if iface == "" {
+			iface = "likingwg0"
+		}
+		if prevBy[iface] == "" {
+			prevBy[iface] = prev.Conf
+		}
+	}
+	var errs []string
+	for _, t := range tunnels {
+		if err := c.applyOneWG(t, prevBy[t.Iface]); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	if err := c.downLeftoverWG(tunnelIfaceSet(tunnels)); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	c.lastReq["wireguard"] = append(json.RawMessage(nil), raw...)
+	c.rememberWG(cfg)
+	c.armWGDelays(tunnelConfs(tunnels))
+	for _, t := range tunnels {
+		keepWGPath(c.dir, t.Iface, t.Conf)
+	}
+	return nil
+}
+
+func (c *Cores) applyOneWG(t wsproto.WireGuardTunnel, prevConf string) error {
+	noteWGDial(c.dir, t.Iface)
+	path := filepath.Join(c.dir, t.Iface+".conf")
 	// Read the running file before replacing it. After an agent restart
 	// lastReq is empty; comparing only that would bounce a healthy tunnel
 	// and zero the kernel counters the panel still needs to catch up.
 	disk, _ := os.ReadFile(path)
-	var prev wsproto.WireGuardConfig
-	_ = json.Unmarshal(c.lastReq["wireguard"], &prev)
-	up := wgIfaceUp(cfg.Iface)
-	bounce := !up || wgNeedsBounce(cfg.Conf, prev.Conf, string(disk))
-	if err := os.WriteFile(path, []byte(cfg.Conf), 0o600); err != nil {
+	up := wgIfaceUp(t.Iface)
+	bounce := !up || wgNeedsBounce(t.Conf, prevConf, string(disk))
+	if err := os.WriteFile(path, []byte(t.Conf), 0o600); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
@@ -63,7 +94,7 @@ func (c *Cores) applyWireGuard(raw json.RawMessage) error {
 	quick := lookBin("wg-quick")
 	if bounce {
 		if up {
-			c.captureWGHandoff(cfg.Iface)
+			c.captureWGHandoff(t.Iface)
 			if msg, err := runLimited(ctx, quick, "down", path); err != nil {
 				return fmt.Errorf("wireguard 关闭失败: %s", cmdErr(msg, err))
 			}
@@ -71,25 +102,54 @@ func (c *Cores) applyWireGuard(raw json.RawMessage) error {
 		if msg, err := runLimited(ctx, quick, "up", path); err != nil {
 			return fmt.Errorf("wireguard 启动失败: %s", cmdErr(msg, err))
 		}
-	} else {
-		stripPath := filepath.Join(c.dir, cfg.Iface+".sync")
-		if err := os.WriteFile(stripPath, []byte(stripWGQuick(cfg.Conf)), 0o600); err != nil {
-			return err
-		}
-		if msg, err := runLimited(ctx, lookBin("wg"), "syncconf", cfg.Iface, stripPath); err != nil {
-			return fmt.Errorf("wireguard 更新对端失败: %s", cmdErr(msg, err))
-		}
+		return nil
 	}
-	c.lastReq["wireguard"] = append(json.RawMessage(nil), raw...)
-	c.rememberWG(cfg)
-	c.armWGDelay(cfg.Conf)
-	keepWGPath(c.dir, cfg.Iface, cfg.Conf)
+	stripPath := filepath.Join(c.dir, t.Iface+".sync")
+	if err := os.WriteFile(stripPath, []byte(stripWGQuick(t.Conf)), 0o600); err != nil {
+		return err
+	}
+	if msg, err := runLimited(ctx, lookBin("wg"), "syncconf", t.Iface, stripPath); err != nil {
+		return fmt.Errorf("wireguard 更新对端失败: %s", cmdErr(msg, err))
+	}
 	return nil
 }
 
-func (c *Cores) downWireGuard(iface string) error {
-	if strings.TrimSpace(iface) == "" {
-		iface = "likingwg0"
+func (c *Cores) downAllWireGuard() error {
+	ifaces := c.knownWGIfaces()
+	if len(ifaces) == 0 {
+		ifaces = []string{"likingwg0"}
+	}
+	var first error
+	for _, iface := range ifaces {
+		if err := c.downOneWG(iface); err != nil && first == nil {
+			first = err
+		}
+	}
+	if first != nil {
+		return first
+	}
+	c.clearWGState()
+	c.stopWGDelay()
+	return nil
+}
+
+func (c *Cores) downLeftoverWG(keep map[string]struct{}) error {
+	var first error
+	for _, iface := range c.knownWGIfaces() {
+		if _, ok := keep[iface]; ok {
+			continue
+		}
+		if err := c.downOneWG(iface); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+func (c *Cores) downOneWG(iface string) error {
+	iface = strings.TrimSpace(iface)
+	if !likingWGIface(iface) {
+		return nil
 	}
 	path := filepath.Join(c.dir, iface+".conf")
 	if wgIfaceUp(iface) {
@@ -107,53 +167,181 @@ func (c *Cores) downWireGuard(iface string) error {
 			return fmt.Errorf("wireguard 关闭失败: %s", cmdErr(msg, err))
 		}
 	}
-	c.clearWG(iface)
-	c.stopWGDelay()
+	_ = os.Remove(path)
+	_ = os.Remove(filepath.Join(c.dir, iface+".sync"))
 	return nil
 }
 
 func (c *Cores) rememberWG(cfg wsproto.WireGuardConfig) {
-	c.wgIface = cfg.Iface
-	next := map[string]string{}
-	for _, p := range cfg.Peers {
-		pub := canonicalWGKey(p.PublicKey)
-		email := strings.TrimSpace(p.Email)
-		if pub == "" || email == "" || strings.HasPrefix(email, "relay.") {
-			continue
+	tunnels := activeWGTunnels(cfg)
+	if len(tunnels) == 0 && strings.TrimSpace(cfg.Conf) != "" {
+		iface := strings.TrimSpace(cfg.Iface)
+		if iface == "" {
+			iface = "likingwg0"
 		}
-		next[pub] = email
+		tunnels = []wsproto.WireGuardTunnel{{Iface: iface, Conf: cfg.Conf, Peers: cfg.Peers}}
 	}
+	next := map[string]string{}
 	byIP := map[string]string{}
-	for pub, ips := range parseWGConfPeers(cfg.Conf) {
-		email := next[canonicalWGKey(pub)]
-		if email == "" {
-			continue
-		}
-		for _, ip := range ips {
-			ip = strings.TrimSpace(ip)
-			if ip == "" || ip == "0.0.0.0/0" || ip == "::/0" {
+	var ifaces []string
+	for _, t := range tunnels {
+		ifaces = append(ifaces, t.Iface)
+		for _, p := range t.Peers {
+			pub := canonicalWGKey(p.PublicKey)
+			email := strings.TrimSpace(p.Email)
+			if pub == "" || email == "" || strings.HasPrefix(email, "relay.") {
 				continue
 			}
-			if prev, ok := byIP[ip]; ok && prev != email {
-				byIP[ip] = ""
+			next[pub] = email
+		}
+		for pub, ips := range parseWGConfPeers(t.Conf) {
+			email := next[canonicalWGKey(pub)]
+			if email == "" {
 				continue
 			}
-			byIP[ip] = email
+			for _, ip := range ips {
+				ip = strings.TrimSpace(ip)
+				if ip == "" || ip == "0.0.0.0/0" || ip == "::/0" {
+					continue
+				}
+				if prev, ok := byIP[ip]; ok && prev != email {
+					byIP[ip] = ""
+					continue
+				}
+				byIP[ip] = email
+			}
 		}
+	}
+	c.wgIfaces = ifaces
+	if len(ifaces) > 0 {
+		c.wgIface = ifaces[0]
 	}
 	c.wgPeers = next
 	c.wgPeerIP = byIP
 	saveWGLedger(c.dir, next, byIP)
 }
 
-func (c *Cores) clearWG(iface string) {
-	_ = os.Remove(filepath.Join(c.dir, iface+".conf"))
-	_ = os.Remove(filepath.Join(c.dir, iface+".sync"))
+func (c *Cores) clearWGState() {
 	delete(c.lastReq, "wireguard")
 	c.wgIface = ""
+	c.wgIfaces = nil
 	c.wgPeers = nil
 	c.wgPeerIP = nil
 	saveWGLedger(c.dir, nil, nil)
+}
+
+func activeWGTunnels(cfg wsproto.WireGuardConfig) []wsproto.WireGuardTunnel {
+	var src []wsproto.WireGuardTunnel
+	if len(cfg.Tunnels) > 0 {
+		src = cfg.Tunnels
+	} else if strings.TrimSpace(cfg.Iface) != "" || strings.TrimSpace(cfg.Conf) != "" || len(cfg.Peers) > 0 {
+		iface := strings.TrimSpace(cfg.Iface)
+		if iface == "" {
+			iface = "likingwg0"
+		}
+		src = []wsproto.WireGuardTunnel{{Iface: iface, Conf: cfg.Conf, Peers: cfg.Peers}}
+	}
+	var out []wsproto.WireGuardTunnel
+	for _, t := range src {
+		iface := strings.TrimSpace(t.Iface)
+		if iface == "" {
+			iface = "likingwg0"
+		}
+		if !likingWGIface(iface) || strings.TrimSpace(t.Conf) == "" {
+			continue
+		}
+		t.Iface = iface
+		out = append(out, t)
+	}
+	return out
+}
+
+func tunnelConfs(tunnels []wsproto.WireGuardTunnel) []string {
+	out := make([]string, 0, len(tunnels))
+	for _, t := range tunnels {
+		out = append(out, t.Conf)
+	}
+	return out
+}
+
+func tunnelIfaceSet(tunnels []wsproto.WireGuardTunnel) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, t := range tunnels {
+		out[t.Iface] = struct{}{}
+	}
+	return out
+}
+
+func wgTunnelsUp(tunnels []wsproto.WireGuardTunnel) bool {
+	for _, t := range tunnels {
+		if !wgIfaceUp(t.Iface) {
+			return false
+		}
+	}
+	return len(tunnels) > 0
+}
+
+func likingWGIface(s string) bool {
+	s = strings.TrimSpace(s)
+	rest, ok := strings.CutPrefix(s, "likingwg")
+	if !ok || rest == "" || (len(rest) > 1 && rest[0] == '0') {
+		return false
+	}
+	for _, r := range rest {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Cores) knownWGIfaces() []string {
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if !likingWGIface(s) {
+			return
+		}
+		if _, ok := seen[s]; ok {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	add(c.wgIface)
+	for _, iface := range c.wgIfaces {
+		add(iface)
+	}
+	var cfg wsproto.WireGuardConfig
+	_ = json.Unmarshal(c.lastReq["wireguard"], &cfg)
+	add(cfg.Iface)
+	for _, t := range cfg.Tunnels {
+		add(t.Iface)
+	}
+	for _, iface := range likingWGConfs(c.dir) {
+		add(iface)
+	}
+	return out
+}
+
+func likingWGConfs(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "likingwg") || !strings.HasSuffix(name, ".conf") {
+			continue
+		}
+		iface := strings.TrimSuffix(name, ".conf")
+		if likingWGIface(iface) {
+			out = append(out, iface)
+		}
+	}
+	return out
 }
 
 // captureWGHandoff saves peer counters before wg-quick down resets them.
@@ -228,27 +416,78 @@ func wgShow(bin, iface, sub string) (string, bool) {
 func (c *Cores) peekWireGuardPeers() ([]wsproto.WGPeerStat, bool) {
 	if peers, ok := c.viewWGHandoff(); ok {
 		c.pendingClearHandoff = true
+		c.pendingWGByPort = nil
 		return peers, true
 	}
 	c.pendingClearHandoff = false
+	c.pendingWGByPort = nil
 	c.mu.Lock()
-	configured := strings.TrimSpace(c.wgIface)
+	ifaces := append([]string(nil), c.wgIfaces...)
+	if len(ifaces) == 0 && strings.TrimSpace(c.wgIface) != "" {
+		ifaces = []string{strings.TrimSpace(c.wgIface)}
+	}
+	ports := wgIfacePortsLocked(c)
+	dir := c.dir
 	c.mu.Unlock()
-	iface := configured
-	if iface == "" {
-		iface = "likingwg0"
-		if _, err := os.Stat("/sys/class/net/" + iface); err != nil {
+	if len(ifaces) == 0 {
+		ifaces = likingWGConfs(dir)
+	}
+	if len(ifaces) == 0 {
+		if _, err := os.Stat("/sys/class/net/likingwg0"); err != nil {
 			return nil, false
 		}
+		ifaces = []string{"likingwg0"}
 	}
-	peers, ran := readWGCounters(iface)
-	if len(peers) == 0 {
-		if !ran && configured != "" {
-			noteStatsFail("wireguard", fmt.Errorf("wg show %s", iface))
+	var all []wsproto.WGPeerStat
+	byPort := map[int][]wsproto.WGPeerStat{}
+	ranAny := false
+	for _, iface := range ifaces {
+		peers, ran := readWGCounters(iface)
+		if ran {
+			ranAny = true
+		}
+		if len(peers) == 0 {
+			if !ran {
+				noteStatsFail("wireguard", fmt.Errorf("wg show %s", iface))
+			}
+			continue
+		}
+		all = append(all, peers...)
+		if port := ports[iface]; port > 0 {
+			byPort[port] = append(byPort[port], peers...)
+		}
+	}
+	if len(byPort) > 0 {
+		c.pendingWGByPort = byPort
+	}
+	if len(all) == 0 {
+		if !ranAny && len(ifaces) > 0 {
+			noteStatsFail("wireguard", fmt.Errorf("wg show %s", ifaces[0]))
 		}
 		return nil, false
 	}
-	return peers, true
+	return all, true
+}
+
+func wgIfacePortsLocked(c *Cores) map[string]int {
+	out := map[string]int{}
+	var cfg wsproto.WireGuardConfig
+	_ = json.Unmarshal(c.lastReq["wireguard"], &cfg)
+	for _, t := range activeWGTunnels(cfg) {
+		if p := wgConfListenPort(t.Conf); p > 0 {
+			out[t.Iface] = p
+		}
+	}
+	if len(out) == 0 {
+		iface := strings.TrimSpace(cfg.Iface)
+		if iface == "" {
+			iface = "likingwg0"
+		}
+		if p := wgConfListenPort(cfg.Conf); p > 0 {
+			out[iface] = p
+		}
+	}
+	return out
 }
 
 func (c *Cores) wgEmailDeltas(raw []wsproto.WGPeerStat) ([]wsproto.Sample, map[string]bytePair, bool) {
@@ -504,7 +743,10 @@ func loadWGLedger(dir string) (map[string]string, map[string]string) {
 func (c *Cores) wgIdentityMaps() (map[string]string, map[string]string) {
 	c.mu.Lock()
 	peers, byIP := c.wgPeers, c.wgPeerIP
-	iface := c.wgIface
+	ifaces := append([]string(nil), c.wgIfaces...)
+	if len(ifaces) == 0 && strings.TrimSpace(c.wgIface) != "" {
+		ifaces = []string{strings.TrimSpace(c.wgIface)}
+	}
 	dir := c.dir
 	c.mu.Unlock()
 	if len(peers) > 0 || len(byIP) > 0 {
@@ -513,14 +755,35 @@ func (c *Cores) wgIdentityMaps() (map[string]string, map[string]string) {
 	if p, ip := loadWGLedger(dir); len(p) > 0 || len(ip) > 0 {
 		return p, ip
 	}
-	if strings.TrimSpace(iface) == "" {
-		iface = "likingwg0"
+	if len(ifaces) == 0 {
+		ifaces = likingWGConfs(dir)
 	}
-	body, err := os.ReadFile(filepath.Join(dir, iface+".conf"))
-	if err != nil {
+	if len(ifaces) == 0 {
+		ifaces = []string{"likingwg0"}
+	}
+	mergedP := map[string]string{}
+	mergedIP := map[string]string{}
+	for _, iface := range ifaces {
+		body, err := os.ReadFile(filepath.Join(dir, iface+".conf"))
+		if err != nil {
+			continue
+		}
+		p, ip := identityFromWGConf(string(body))
+		for k, v := range p {
+			mergedP[k] = v
+		}
+		for k, v := range ip {
+			if prev, ok := mergedIP[k]; ok && prev != v {
+				mergedIP[k] = ""
+				continue
+			}
+			mergedIP[k] = v
+		}
+	}
+	if len(mergedP) == 0 && len(mergedIP) == 0 {
 		return nil, nil
 	}
-	return identityFromWGConf(string(body))
+	return mergedP, mergedIP
 }
 
 func identityFromWGConf(conf string) (map[string]string, map[string]string) {
@@ -634,16 +897,42 @@ func parseWGConfPeers(conf string) map[string][]string {
 }
 
 func wgJSONListenPort(raw json.RawMessage) int {
+	ports := wgJSONListenPorts(raw)
+	if len(ports) == 0 {
+		return 0
+	}
+	return ports[0]
+}
+
+func wgJSONListenPorts(raw json.RawMessage) []int {
 	if len(raw) == 0 {
-		return 0
+		return nil
 	}
-	var cfg struct {
-		Conf string `json:"conf"`
-	}
+	var cfg wsproto.WireGuardConfig
 	if json.Unmarshal(raw, &cfg) != nil {
-		return 0
+		return nil
 	}
-	return wgConfListenPort(cfg.Conf)
+	seen := map[int]struct{}{}
+	var out []int
+	add := func(conf string) {
+		p := wgConfListenPort(conf)
+		if p < 1 {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	if tunnels := activeWGTunnels(cfg); len(tunnels) > 0 {
+		for _, t := range tunnels {
+			add(t.Conf)
+		}
+		return out
+	}
+	add(cfg.Conf)
+	return out
 }
 
 func wgConfListenPort(conf string) int {

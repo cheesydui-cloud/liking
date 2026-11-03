@@ -66,6 +66,44 @@ func TestNormalizeWireGuardKeepsKeys(t *testing.T) {
 	}
 }
 
+func TestNextWireGuardNetSkipsUsed(t *testing.T) {
+	network, address, exit, err := NextWireGuardNet(nil)
+	if err != nil || network != "10.7.0.0/24" || address != "10.7.0.1/24" || exit != "10.7.0.2/32" {
+		t.Fatalf("empty %s %s %s %v", network, address, exit, err)
+	}
+	network, address, exit, err = NextWireGuardNet([]string{"10.7.0.0/24", "10.9.0.0/24"})
+	if err != nil || network != "10.8.0.0/24" || address != "10.8.0.1/24" || exit != "10.8.0.2/32" {
+		t.Fatalf("gap %s %s %s %v", network, address, exit, err)
+	}
+	network, _, _, err = NextWireGuardNet([]string{"10.7.0.0/16"})
+	if err != nil || network != "10.8.0.0/24" {
+		t.Fatalf("overlap %s %v", network, err)
+	}
+	fresh := &db.Inbound{Profile: ProfileWireGuard, Settings: `{"network":"10.7.0.0/24","address":"10.7.0.1/24","exit_address":"10.7.0.2/32"}`}
+	used := []*db.Inbound{{ID: 4, Profile: ProfileWireGuard, Settings: `{"network":"10.7.0.0/24"}`}}
+	if err := AssignFreshWireGuardNet(fresh, used); err != nil {
+		t.Fatal(err)
+	}
+	st := ParseSettings(fresh.Settings)
+	if st.String("network") != "10.8.0.0/24" || st.String("address") != "10.8.0.1/24" || st.String("exit_address") != "10.8.0.2/32" {
+		t.Fatalf("assign %+v", st)
+	}
+	custom := &db.Inbound{Profile: ProfileWireGuard, Settings: `{"network":"172.16.8.0/24","address":"172.16.8.1/24","exit_address":"172.16.8.2/32"}`}
+	if err := AssignFreshWireGuardNet(custom, used); err != nil {
+		t.Fatal(err)
+	}
+	if ParseSettings(custom.Settings).String("network") != "172.16.8.0/24" {
+		t.Fatal("custom network rewritten")
+	}
+	edit := &db.Inbound{ID: 9, Profile: ProfileWireGuard, Settings: `{"network":"10.7.0.0/24"}`}
+	if err := AssignFreshWireGuardNet(edit, used); err != nil {
+		t.Fatal(err)
+	}
+	if ParseSettings(edit.Settings).String("network") != "10.7.0.0/24" {
+		t.Fatal("edit rewritten")
+	}
+}
+
 func TestWireGuardAddressesAndConf(t *testing.T) {
 	in := &db.Inbound{
 		Name: "home", Profile: ProfileWireGuard, Port: 51820, LineKind: "direct",
@@ -115,7 +153,7 @@ func TestWireGuardAddressesAndConf(t *testing.T) {
 	if !strings.Contains(hub, "TCPMSS --set-mss 1240") || !strings.Contains(hub, "AllowedIPs = "+WGProbeAddress) {
 		t.Fatalf("mss or probe\n%s", hub)
 	}
-	if !strings.Contains(hub, "modprobe xt_TCPMSS") || !strings.Contains(hub, `nft add rule ip liking_mss forward iifname "%i"`) || strings.Contains(hub, "%!") {
+	if !strings.Contains(hub, "modprobe xt_TCPMSS") || !strings.Contains(hub, `nft add rule ip liking_mss_%i forward iifname "%i"`) || strings.Contains(hub, "nft delete table ip liking_mss ") || strings.Contains(hub, "%!") {
 		t.Fatalf("mss module\n%s", hub)
 	}
 	probePub := ParseSettings(in.Settings).String("probe_public_key")
@@ -257,9 +295,20 @@ func TestBuildWireGuardRev(t *testing.T) {
 	if len(b2.Apply.Xray) > 0 {
 		t.Fatalf("xray should stay empty %s", b2.Apply.Xray)
 	}
+	overlap := &db.Inbound{
+		ServerID: srv.ID, Name: "overlap", Profile: ProfileWireGuard, Port: 51822,
+		Enabled: true, LineKind: "direct", Settings: `{"network":"10.7.0.0/24","address":"10.7.0.1/24","exit_address":"10.7.0.3/32"}`,
+	}
+	if err := Normalize(overlap, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckWireGuardExit(overlap, []*db.Inbound{created, overlap}); err == nil {
+		t.Fatal("overlapping networks")
+	}
 	second := &db.Inbound{
 		ServerID: srv.ID, Name: "wg2", Profile: ProfileWireGuard, Port: 51821,
-		Enabled: true, LineKind: "direct", Settings: "{}",
+		Enabled: true, LineKind: "direct",
+		Settings: `{"network":"10.8.0.0/24","address":"10.8.0.1/24","exit_address":"10.8.0.2/32"}`,
 	}
 	if err := Normalize(second, nil); err != nil {
 		t.Fatal(err)
@@ -267,8 +316,42 @@ func TestBuildWireGuardRev(t *testing.T) {
 	if _, err := db.CreateInbound(d, second); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Build(d, srv.ID); err == nil {
-		t.Fatal("two wireguard inbounds")
+	b3, err := Build(d, srv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Iface   string `json:"iface"`
+		Conf    string `json:"conf"`
+		Tunnels []struct {
+			Iface string `json:"iface"`
+			Conf  string `json:"conf"`
+		} `json:"tunnels"`
+	}
+	if err := json.Unmarshal(b3.Apply.WireGuard, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Tunnels) != 2 || cfg.Iface != "likingwg0" || cfg.Tunnels[0].Iface != "likingwg0" || cfg.Tunnels[1].Iface != "likingwg1" {
+		t.Fatalf("ifaces %+v", cfg.Tunnels)
+	}
+	if cfg.Conf != cfg.Tunnels[0].Conf {
+		t.Fatal("legacy conf drifted from the first tunnel")
+	}
+	if !strings.Contains(cfg.Tunnels[0].Conf, "FwMark = 51820") || !strings.Contains(cfg.Tunnels[0].Conf, "table 100") {
+		t.Fatalf("first slot\n%s", cfg.Tunnels[0].Conf)
+	}
+	if !strings.Contains(cfg.Tunnels[1].Conf, "FwMark = 51821") || !strings.Contains(cfg.Tunnels[1].Conf, "lookup 101") || !strings.Contains(cfg.Tunnels[1].Conf, "table 101") {
+		t.Fatalf("second slot\n%s", cfg.Tunnels[1].Conf)
+	}
+	if strings.Count(cfg.Tunnels[0].Conf, "AllowedIPs = 0.0.0.0/0") != 1 || strings.Count(cfg.Tunnels[1].Conf, "AllowedIPs = 0.0.0.0/0") != 1 {
+		t.Fatal("one exit peer per interface")
+	}
+	again, err := Build(d, srv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(again.Apply.WireGuard) != string(b3.Apply.WireGuard) {
+		t.Fatal("slots moved on the second build")
 	}
 }
 
@@ -410,6 +493,116 @@ func TestBuildWireGuardHomeExit(t *testing.T) {
 	}
 	if _, err := Build(d, transit.ID); err == nil {
 		t.Fatal("empty exit host should fail the hub build")
+	}
+}
+
+func TestBuildTwoHomesOnOneEntry(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	entry, err := db.CreateServer(d, "cm", "203.0.113.8", "tok1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	homeA, err := db.CreateServer(d, "home-a", "198.51.100.9", "tok2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	homeB, err := db.CreateServer(d, "home-b", "198.51.100.10", "tok3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := &db.Inbound{
+		ServerID: entry.ID, Name: "a", Profile: ProfileWireGuard, Port: 10433,
+		Enabled: true, LineKind: "direct",
+		Settings: fmt.Sprintf(`{"exit_server_id":%d}`, homeA.ID),
+	}
+	if err := Normalize(first, nil); err != nil {
+		t.Fatal(err)
+	}
+	created, err := db.CreateInbound(d, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first = created
+	second := &db.Inbound{
+		ServerID: entry.ID, Name: "b", Profile: ProfileWireGuard, Port: 10434,
+		Enabled: true, LineKind: "direct",
+		Settings: fmt.Sprintf(`{"network":"10.8.0.0/24","address":"10.8.0.1/24","exit_address":"10.8.0.2/32","exit_server_id":%d}`, homeB.ID),
+	}
+	if err := Normalize(second, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckWireGuardExit(second, []*db.Inbound{first, second}); err != nil {
+		t.Fatal(err)
+	}
+	sameHome := &db.Inbound{
+		ServerID: entry.ID, Name: "dup", Profile: ProfileWireGuard, Port: 10435,
+		Enabled: true, LineKind: "direct",
+		Settings: fmt.Sprintf(`{"network":"10.9.0.0/24","address":"10.9.0.1/24","exit_address":"10.9.0.2/32","exit_server_id":%d}`, homeA.ID),
+	}
+	if err := Normalize(sameHome, nil); err != nil {
+		t.Fatal(err)
+	}
+	sameHome.ID = first.ID + 1
+	if err := CheckWireGuardExit(sameHome, []*db.Inbound{first, sameHome}); err == nil {
+		t.Fatal("one home accepted two exits")
+	}
+	if _, err := db.CreateInbound(d, second); err != nil {
+		t.Fatal(err)
+	}
+	hub, err := Build(d, entry.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Iface   string `json:"iface"`
+		Conf    string `json:"conf"`
+		Tunnels []struct {
+			Iface string `json:"iface"`
+			Conf  string `json:"conf"`
+		} `json:"tunnels"`
+	}
+	if err := json.Unmarshal(hub.Apply.WireGuard, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Iface != "likingwg0" || cfg.Conf != cfg.Tunnels[0].Conf || len(cfg.Tunnels) != 2 {
+		t.Fatalf("pack %+v", cfg.Iface)
+	}
+	if !strings.Contains(cfg.Tunnels[0].Conf, "Endpoint = 198.51.100.9:51820") || strings.Contains(cfg.Tunnels[0].Conf, "198.51.100.10") {
+		t.Fatalf("tunnel 0 home\n%s", cfg.Tunnels[0].Conf)
+	}
+	if !strings.Contains(cfg.Tunnels[1].Conf, "Endpoint = 198.51.100.10:51820") || !strings.Contains(cfg.Tunnels[1].Conf, "liking_mss_%i") {
+		t.Fatalf("tunnel 1 home\n%s", cfg.Tunnels[1].Conf)
+	}
+	if strings.Count(cfg.Tunnels[0].Conf, "0.0.0.0/0") != 1 || strings.Count(cfg.Tunnels[1].Conf, "0.0.0.0/0") != 1 {
+		t.Fatal("exit peer leaked across interfaces")
+	}
+	a, err := Build(d, homeA.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := Build(d, homeB.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var homeCfg struct {
+		Iface   string `json:"iface"`
+		Conf    string `json:"conf"`
+		Tunnels []struct {
+			Conf string `json:"conf"`
+		} `json:"tunnels"`
+	}
+	if err := json.Unmarshal(a.Apply.WireGuard, &homeCfg); err != nil {
+		t.Fatal(err)
+	}
+	if homeCfg.Iface != "likingwg0" || len(homeCfg.Tunnels) != 1 || !strings.Contains(homeCfg.Conf, "AllowedIPs = 10.7.0.0/24") || strings.Contains(homeCfg.Conf, "10.8.0.0/24") || strings.Contains(homeCfg.Conf, "liking_mss_%i") {
+		t.Fatalf("home A\n%s", homeCfg.Conf)
+	}
+	if !strings.Contains(string(b.Apply.WireGuard), "AllowedIPs = 10.8.0.0/24") || strings.Contains(string(b.Apply.WireGuard), "10.7.0.0/24") {
+		t.Fatalf("home B\n%s", b.Apply.WireGuard)
 	}
 }
 

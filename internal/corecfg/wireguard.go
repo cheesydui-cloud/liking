@@ -188,6 +188,93 @@ func samePrefix(network, addr *net.IPNet) bool {
 	return a == b
 }
 
+// AssignFreshWireGuardNet gives a new node the next free /24 when the
+// submitted network is empty or already used. An edit keeps its network.
+// A free network the operator typed is left alone, including its addresses.
+func AssignFreshWireGuardNet(in *db.Inbound, all []*db.Inbound) error {
+	if in == nil || in.ID != 0 || in.Profile != ProfileWireGuard {
+		return nil
+	}
+	st := ParseSettings(in.Settings)
+	var used []string
+	for _, other := range all {
+		if other == nil || other.Profile != ProfileWireGuard || other.ID == in.ID {
+			continue
+		}
+		n := strings.TrimSpace(ParseSettings(other.Settings).String("network"))
+		if n == "" {
+			n = WGDefaultNetwork
+		}
+		used = append(used, n)
+	}
+	current := strings.TrimSpace(st.String("network"))
+	if current == "" {
+		current = WGDefaultNetwork
+	}
+	cur, err := parseWGCIDR(current, "隧道网段")
+	if err != nil {
+		return err
+	}
+	if !wgOverlapsAny(cur, usedNets(used)) {
+		return nil
+	}
+	network, address, exit, err := NextWireGuardNet(used)
+	if err != nil {
+		return err
+	}
+	st["network"] = network
+	st["address"] = address
+	st["exit_address"] = exit
+	raw, err := st.Marshal()
+	if err != nil {
+		return err
+	}
+	in.Settings = raw
+	return nil
+}
+
+// NextWireGuardNet returns the first free 10.7.0.0/24, 10.8.0.0/24, …
+// The hub is .1 with the same prefix. The home address is .2/32.
+func NextWireGuardNet(used []string) (network, address, exit string, err error) {
+	taken := usedNets(used)
+	for oct := 7; oct <= 255; oct++ {
+		base := net.IPv4(10, byte(oct), 0, 0).To4()
+		cand := &net.IPNet{IP: base, Mask: net.CIDRMask(24, 32)}
+		if wgOverlapsAny(cand, taken) {
+			continue
+		}
+		return base.String() + "/24", addWGIP(base, 1).String() + "/24", addWGIP(base, 2).String() + "/32", nil
+	}
+	return "", "", "", fmt.Errorf("没有空的隧道网段")
+}
+
+func usedNets(used []string) []*net.IPNet {
+	var nets []*net.IPNet
+	for _, s := range used {
+		n, err := parseWGCIDR(s, "隧道网段")
+		if err != nil {
+			continue
+		}
+		nets = append(nets, n)
+	}
+	return nets
+}
+
+func wgOverlapsAny(n *net.IPNet, used []*net.IPNet) bool {
+	if n == nil {
+		return false
+	}
+	for _, other := range used {
+		if other == nil {
+			continue
+		}
+		if n.Contains(other.IP) || other.Contains(n.IP) {
+			return true
+		}
+	}
+	return false
+}
+
 func NewWireGuardClient(u *db.User, in *db.Inbound, existing []*db.Client) (*db.Client, error) {
 	if u == nil || in == nil || in.Profile != ProfileWireGuard {
 		return nil, fmt.Errorf("不是 WireGuard 节点")
@@ -318,6 +405,9 @@ func CheckWireGuardExit(in *db.Inbound, all []*db.Inbound) error {
 			}
 		}
 	}
+	if err := checkWGNetworks(sameServerWG(in, all)); err != nil {
+		return err
+	}
 	id := WGExitServerID(in)
 	if id == 0 {
 		return nil
@@ -337,6 +427,20 @@ func CheckWireGuardExit(in *db.Inbound, all []*db.Inbound) error {
 		}
 	}
 	return nil
+}
+
+func sameServerWG(in *db.Inbound, all []*db.Inbound) []*db.Inbound {
+	if in == nil {
+		return nil
+	}
+	out := []*db.Inbound{in}
+	for _, other := range all {
+		if other == nil || other.ID == in.ID || other.ServerID != in.ServerID {
+			continue
+		}
+		out = append(out, other)
+	}
+	return out
 }
 
 func persistWGProbe(d *sql.DB, in *db.Inbound) error {
@@ -361,28 +465,14 @@ func persistWGProbe(d *sql.DB, in *db.Inbound) error {
 	return db.UpdateInbound(d, in)
 }
 
-func wireGuardExitHost(d *sql.DB, ins []*db.Inbound) (string, error) {
-	var id int64
-	for _, in := range ins {
-		if in == nil || !in.Enabled || in.Profile != ProfileWireGuard {
-			continue
-		}
-		next := WGExitServerID(in)
-		if next == 0 {
-			continue
-		}
-		if id != 0 && id != next {
-			return "", fmt.Errorf("一条入口不能同时指向两台家宽")
-		}
-		id = next
-	}
-	if id == 0 {
+func exitHostFor(d *sql.DB, in *db.Inbound) (string, error) {
+	if WGExitServerID(in) == 0 {
 		return "", nil
 	}
 	if d == nil {
 		return "", fmt.Errorf("家宽没有公开地址，入口无法连过去")
 	}
-	srv, err := db.GetServer(d, id)
+	srv, err := db.GetServer(d, WGExitServerID(in))
 	if err != nil {
 		return "", fmt.Errorf("家宽实例: %w", err)
 	}
@@ -396,21 +486,17 @@ func wireGuardExitHost(d *sql.DB, ins []*db.Inbound) (string, error) {
 	return host, nil
 }
 
-func buildWireGuard(serverID int64, ins []*db.Inbound, all []*db.Inbound, clients map[int64][]*db.Client, exitHost string) (*wsproto.WireGuardConfig, error) {
+func buildWireGuard(d *sql.DB, serverID int64, ins []*db.Inbound, all []*db.Inbound, clients map[int64][]*db.Client) (*wsproto.WireGuardConfig, error) {
 	var found []*db.Inbound
-	for _, in := range ins {
-		if in != nil && in.Profile == ProfileWireGuard {
-			found = append(found, in)
-		}
-	}
 	var enabled []*db.Inbound
-	for _, in := range found {
+	for _, in := range ins {
+		if in == nil || in.Profile != ProfileWireGuard {
+			continue
+		}
+		found = append(found, in)
 		if in.Enabled {
 			enabled = append(enabled, in)
 		}
-	}
-	if len(enabled) > 1 {
-		return nil, fmt.Errorf("一台机器只能有一条 WireGuard。家宽出口写在这条节点里")
 	}
 	var exitOf *db.Inbound
 	if serverID != 0 {
@@ -424,35 +510,208 @@ func buildWireGuard(serverID int64, ins []*db.Inbound, all []*db.Inbound, client
 			exitOf = in
 		}
 	}
-	if len(enabled) == 1 {
+	if len(enabled) > 0 {
 		if exitOf != nil {
 			return nil, fmt.Errorf("这台机器已是家宽出口，不能再在上面建 WireGuard 节点")
 		}
-		in := enabled[0]
-		conf, peers, err := HubConfig(in, clients[in.ID], exitHost)
-		if err != nil {
+		if err := checkWGNetworks(enabled); err != nil {
 			return nil, err
 		}
-		out := &wsproto.WireGuardConfig{Iface: WGIface, Conf: conf}
-		for _, p := range peers {
-			if p.Email == "" || p.Exit {
-				continue
-			}
-			out.Peers = append(out.Peers, wsproto.WireGuardPeer{PublicKey: p.PublicKey, Email: p.Email})
+		if err := assignWGSlots(d, enabled); err != nil {
+			return nil, err
 		}
-		return out, nil
+		sort.Slice(enabled, func(i, j int) bool {
+			if enabled[i].ID != enabled[j].ID {
+				return enabled[i].ID < enabled[j].ID
+			}
+			return enabled[i].Port < enabled[j].Port
+		})
+		seenPort := map[int]bool{}
+		var tunnels []wsproto.WireGuardTunnel
+		for _, in := range enabled {
+			if seenPort[in.Port] {
+				return nil, fmt.Errorf("这台机器上的 WireGuard 端口不能相同")
+			}
+			seenPort[in.Port] = true
+			host, err := exitHostFor(d, in)
+			if err != nil {
+				return nil, err
+			}
+			conf, peers, err := HubConfig(in, clients[in.ID], host)
+			if err != nil {
+				return nil, err
+			}
+			iface := strings.TrimSpace(ParseSettings(in.Settings).String("iface"))
+			if !validWGIfaceName(iface) {
+				iface = WGIface
+			}
+			tunnels = append(tunnels, wsproto.WireGuardTunnel{
+				Iface: iface,
+				Conf:  conf,
+				Peers: wgClientPeers(peers),
+			})
+		}
+		return packWG(tunnels), nil
 	}
 	if exitOf != nil {
 		conf, err := HomeConfig(exitOf)
 		if err != nil {
 			return nil, err
 		}
-		return &wsproto.WireGuardConfig{Iface: WGIface, Conf: conf}, nil
+		return packWG([]wsproto.WireGuardTunnel{{Iface: WGIface, Conf: conf}}), nil
 	}
 	if len(found) > 0 {
 		return &wsproto.WireGuardConfig{Iface: WGIface}, nil
 	}
 	return nil, nil
+}
+
+// assignWGSlots gives each enabled node a stable interface, fwmark, and route
+// table. A node that already has iface keeps it, so the first tunnel stays
+// likingwg0 / 51820 / 100 and its policy rules do not move. Tables 253–255
+// are reserved by Linux.
+func assignWGSlots(d *sql.DB, enabled []*db.Inbound) error {
+	if len(enabled) > 20 {
+		return fmt.Errorf("一台入口最多 20 条 WireGuard")
+	}
+	sorted := append([]*db.Inbound(nil), enabled...)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].ID != sorted[j].ID {
+			return sorted[i].ID < sorted[j].ID
+		}
+		return sorted[i].Port < sorted[j].Port
+	})
+	usedIface := map[string]bool{}
+	usedMark := map[int]bool{}
+	usedTable := map[int]bool{}
+	type slotRow struct {
+		in      *db.Inbound
+		st      Settings
+		slotted bool
+	}
+	rows := make([]slotRow, 0, len(sorted))
+	for _, in := range sorted {
+		st := ParseSettings(in.Settings)
+		iface := strings.TrimSpace(st.String("iface"))
+		mark := st.Int("fwmark", WGDefaultFwMark)
+		table := st.Int("route_table", WGDefaultTable)
+		// iface is the claim. Normalize writes the same default mark and table
+		// onto every new node, so those numbers are not a claim by themselves.
+		if validWGIfaceName(iface) && !usedIface[iface] && mark >= 1 && !usedMark[mark] && table >= 1 && table <= 252 && !usedTable[table] {
+			usedIface[iface] = true
+			usedMark[mark] = true
+			usedTable[table] = true
+			rows = append(rows, slotRow{in: in, st: st, slotted: true})
+			continue
+		}
+		rows = append(rows, slotRow{in: in, st: st})
+	}
+	next := 0
+	alloc := func() (string, int, int, error) {
+		for next < 64 {
+			iface := fmt.Sprintf("likingwg%d", next)
+			mark := WGDefaultFwMark + next
+			table := WGDefaultTable + next
+			next++
+			if usedIface[iface] || usedMark[mark] || usedTable[table] || table > 252 {
+				continue
+			}
+			usedIface[iface] = true
+			usedMark[mark] = true
+			usedTable[table] = true
+			return iface, mark, table, nil
+		}
+		return "", 0, 0, fmt.Errorf("这台入口没有空的 WireGuard 接口")
+	}
+	for i := range rows {
+		if rows[i].slotted {
+			continue
+		}
+		iface, mark, table, err := alloc()
+		if err != nil {
+			return err
+		}
+		rows[i].st["iface"] = iface
+		rows[i].st["fwmark"] = mark
+		rows[i].st["route_table"] = table
+		raw, err := rows[i].st.Marshal()
+		if err != nil {
+			return err
+		}
+		if raw == rows[i].in.Settings {
+			continue
+		}
+		rows[i].in.Settings = raw
+		if d != nil && rows[i].in.ID != 0 {
+			if err := db.UpdateInbound(d, rows[i].in); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validWGIfaceName(s string) bool {
+	s = strings.TrimSpace(s)
+	rest, ok := strings.CutPrefix(s, "likingwg")
+	if !ok || rest == "" || (len(rest) > 1 && rest[0] == '0') {
+		return false
+	}
+	n, err := strconv.Atoi(rest)
+	return err == nil && n >= 0 && n < 64 && fmt.Sprintf("likingwg%d", n) == s
+}
+
+func checkWGNetworks(ins []*db.Inbound) error {
+	var nets []*net.IPNet
+	for _, in := range ins {
+		if in == nil || !in.Enabled || in.Profile != ProfileWireGuard {
+			continue
+		}
+		n, err := wgNetOf(in)
+		if err != nil {
+			return err
+		}
+		if wgOverlapsAny(n, nets) {
+			return fmt.Errorf("这台机器上的隧道网段不能重叠")
+		}
+		nets = append(nets, n)
+	}
+	return nil
+}
+
+func wgNetOf(in *db.Inbound) (*net.IPNet, error) {
+	raw := strings.TrimSpace(ParseSettings(in.Settings).String("network"))
+	if raw == "" {
+		raw = WGDefaultNetwork
+	}
+	return parseWGCIDR(raw, "隧道网段")
+}
+
+func packWG(tunnels []wsproto.WireGuardTunnel) *wsproto.WireGuardConfig {
+	if len(tunnels) == 0 {
+		return &wsproto.WireGuardConfig{Iface: WGIface}
+	}
+	iface := strings.TrimSpace(tunnels[0].Iface)
+	if iface == "" {
+		iface = WGIface
+	}
+	return &wsproto.WireGuardConfig{
+		Iface:   iface,
+		Conf:    tunnels[0].Conf,
+		Peers:   append([]wsproto.WireGuardPeer(nil), tunnels[0].Peers...),
+		Tunnels: tunnels,
+	}
+}
+
+func wgClientPeers(peers []wgPeer) []wsproto.WireGuardPeer {
+	var out []wsproto.WireGuardPeer
+	for _, p := range peers {
+		if p.Email == "" || p.Exit {
+			continue
+		}
+		out = append(out, wsproto.WireGuardPeer{PublicKey: p.PublicKey, Email: p.Email})
+	}
+	return out
 }
 
 func HubConfig(in *db.Inbound, clients []*db.Client, exitHost string) (string, []wgPeer, error) {
@@ -528,7 +787,7 @@ func hubPostUp(st Settings, port int) string {
 	network := strings.TrimSpace(st.String("network"))
 	return fmt.Sprintf(
 		"sysctl -w net.ipv4.ip_forward=1; sysctl -w net.ipv4.conf.%%i.rp_filter=2; iptables -C FORWARD -i %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %%i -j ACCEPT; iptables -C FORWARD -o %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %%i -j ACCEPT; ip rule del fwmark %d lookup main priority 40 2>/dev/null || true; ip rule add fwmark %d lookup main priority 40; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule add from %s lookup main priority 50; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule add from %s lookup main priority 50; ip rule del from %s lookup %d priority 100 2>/dev/null || true; ip rule add from %s lookup %d priority 100; ip route replace default dev %%i table %d; %s%s",
-		mark, mark, hub, hub, exit, exit, network, table, network, table, table, wgMSSUp(st), wgTCPAllowUp(port),
+		mark, mark, hub, hub, exit, exit, network, table, network, table, table, hubMSSUp(st), wgTCPAllowUp(port),
 	)
 }
 
@@ -540,7 +799,7 @@ func hubPostDown(st Settings, port int) string {
 	network := strings.TrimSpace(st.String("network"))
 	return fmt.Sprintf(
 		"ip rule del fwmark %d lookup main priority 40 2>/dev/null || true; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule del from %s lookup %d priority 100 2>/dev/null || true; ip route del default dev %%i table %d 2>/dev/null || true; iptables -D FORWARD -i %%i -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o %%i -j ACCEPT 2>/dev/null || true; %s%s",
-		mark, hub, exit, network, table, table, wgMSSDown(st), wgTCPAllowDown(port),
+		mark, hub, exit, network, table, table, hubMSSDown(st), wgTCPAllowDown(port),
 	)
 }
 
@@ -588,26 +847,44 @@ func wgMSS(st Settings) int {
 }
 
 func wgMSSUp(st Settings) string {
+	return wgMSSUpTable(st, "liking_mss")
+}
+
+// hubMSSUp uses one nft table per interface. A shared table would be deleted
+// when a second tunnel's PostDown runs.
+func hubMSSUp(st Settings) string {
+	return wgMSSUpTable(st, "liking_mss_%i")
+}
+
+func hubMSSDown(st Settings) string {
+	return wgMSSDownTable(st, "liking_mss_%i")
+}
+
+func wgMSSUpTable(st Settings, table string) string {
 	mss := wgMSS(st)
 	return "modprobe xt_TCPMSS 2>/dev/null || true; modprobe iptable_mangle 2>/dev/null || true; " +
-		wgMSSClamp("i", "iifname", mss) + "; " + wgMSSClamp("o", "oifname", mss)
+		wgMSSClamp("i", "iifname", mss, table) + "; " + wgMSSClamp("o", "oifname", mss, table)
 }
 
 // wgMSSClamp loads the TCPMSS target when it can. A missing module used to be
 // hidden by `|| true`, so the tunnel stayed up and large TCP stalled after a
 // few KB. nft is the fallback, and a failure still must not take the tunnel down.
-func wgMSSClamp(iptFlag, nftDir string, mss int) string {
+func wgMSSClamp(iptFlag, nftDir string, mss int, table string) string {
 	return fmt.Sprintf(
-		"iptables -t mangle -C FORWARD -%s %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || iptables -t mangle -I FORWARD 1 -%s %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || { nft list table ip liking_mss >/dev/null 2>&1 || nft add table ip liking_mss; nft list chain ip liking_mss forward >/dev/null 2>&1 || nft add chain ip liking_mss forward '{ type filter hook forward priority mangle; policy accept; }'; nft list chain ip liking_mss forward 2>/dev/null | grep -q '%s \"%%i\"' || nft add rule ip liking_mss forward %s \"%%i\" tcp flags syn tcp option maxseg size set %d; } || true",
-		iptFlag, mss, iptFlag, mss, nftDir, nftDir, mss,
+		"iptables -t mangle -C FORWARD -%s %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || iptables -t mangle -I FORWARD 1 -%s %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || { nft list table ip %s >/dev/null 2>&1 || nft add table ip %s; nft list chain ip %s forward >/dev/null 2>&1 || nft add chain ip %s forward '{ type filter hook forward priority mangle; policy accept; }'; nft list chain ip %s forward 2>/dev/null | grep -q '%s \"%%i\"' || nft add rule ip %s forward %s \"%%i\" tcp flags syn tcp option maxseg size set %d; } || true",
+		iptFlag, mss, iptFlag, mss, table, table, table, table, table, nftDir, table, nftDir, mss,
 	)
 }
 
 func wgMSSDown(st Settings) string {
+	return wgMSSDownTable(st, "liking_mss")
+}
+
+func wgMSSDownTable(st Settings, table string) string {
 	mss := wgMSS(st)
 	return fmt.Sprintf(
-		"iptables -t mangle -D FORWARD -i %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || true; iptables -t mangle -D FORWARD -o %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || true; nft delete table ip liking_mss 2>/dev/null || true",
-		mss, mss,
+		"iptables -t mangle -D FORWARD -i %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || true; iptables -t mangle -D FORWARD -o %%i -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %d 2>/dev/null || true; nft delete table ip %s 2>/dev/null || true",
+		mss, mss, table,
 	)
 }
 

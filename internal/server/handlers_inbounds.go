@@ -394,6 +394,15 @@ func (s *Server) prepareInbound(in *db.Inbound) error {
 		}
 		in.Settings = raw
 	}
+	if in.ID == 0 && in.Profile == corecfg.ProfileWireGuard {
+		all, err := db.ListInbounds(s.DB)
+		if err != nil {
+			return err
+		}
+		if err := corecfg.AssignFreshWireGuardNet(in, all); err != nil {
+			return err
+		}
+	}
 	if err := corecfg.Normalize(in, exit); err != nil {
 		return err
 	}

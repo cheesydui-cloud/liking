@@ -137,11 +137,19 @@ func (c *Cores) BeginCollect() ([]wsproto.Sample, func(commit bool)) {
 			}
 			if c.pendingWGListenOK {
 				c.wgListenCur = c.pendingWGListen
+				if c.wgListenCurByPort == nil {
+					c.wgListenCurByPort = map[int]wgListenCursor{}
+				}
+				for port, cur := range c.pendingWGListenByPort {
+					c.wgListenCurByPort[port] = cur
+				}
 			}
 		}
 		c.pendingPorts = nil
 		c.pendingHasPorts = false
 		c.pendingWGListenOK = false
+		c.pendingWGListenByPort = nil
+		c.pendingWGByPort = nil
 		if commit && c.pendingClearHandoff {
 			c.clearWGHandoff()
 		}

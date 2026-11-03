@@ -195,4 +195,35 @@ func TestWGJSONListenPort(t *testing.T) {
 	if wgJSONListenPort(home) != 0 {
 		t.Fatal("home listens")
 	}
+	multi := []byte(`{"iface":"likingwg0","conf":"[Interface]\nListenPort = 10433\n","tunnels":[{"iface":"likingwg0","conf":"[Interface]\nListenPort = 10433\n"},{"iface":"likingwg1","conf":"[Interface]\nListenPort = 10434\n"}]}`)
+	ports := wgJSONListenPorts(multi)
+	if len(ports) != 2 || ports[0] != 10433 || ports[1] != 10434 {
+		t.Fatalf("ports %v", ports)
+	}
+	if !likingWGIface("likingwg0") || !likingWGIface("likingwg12") || likingWGIface("eth0") || likingWGIface("likingwg01") {
+		t.Fatal("iface filter")
+	}
+}
+
+func TestRememberWGMergesTunnels(t *testing.T) {
+	c := &Cores{dir: t.TempDir(), wgPeers: map[string]string{}, wgPeerIP: map[string]string{}}
+	cfg := wsproto.WireGuardConfig{
+		Iface: "likingwg0",
+		Conf:  "[Interface]\nListenPort = 10433\n\n[Peer]\nPublicKey = aaa\nAllowedIPs = 10.7.0.10/32\n",
+		Peers: []wsproto.WireGuardPeer{{PublicKey: "aaa", Email: "u1.i1"}},
+		Tunnels: []wsproto.WireGuardTunnel{
+			{Iface: "likingwg0", Conf: "[Interface]\nListenPort = 10433\n\n[Peer]\nPublicKey = aaa\nAllowedIPs = 10.7.0.10/32\n", Peers: []wsproto.WireGuardPeer{{PublicKey: "aaa", Email: "u1.i1"}}},
+			{Iface: "likingwg1", Conf: "[Interface]\nListenPort = 10434\n\n[Peer]\nPublicKey = bbb\nAllowedIPs = 10.8.0.10/32\n", Peers: []wsproto.WireGuardPeer{{PublicKey: "bbb", Email: "u2.i2"}}},
+		},
+	}
+	c.rememberWG(cfg)
+	if c.wgPeers["aaa"] != "u1.i1" || c.wgPeers["bbb"] != "u2.i2" {
+		t.Fatalf("peers %+v", c.wgPeers)
+	}
+	if c.wgPeerIP["10.7.0.10/32"] != "u1.i1" || c.wgPeerIP["10.8.0.10/32"] != "u2.i2" {
+		t.Fatalf("ips %+v", c.wgPeerIP)
+	}
+	if len(c.wgIfaces) != 2 || c.wgIface != "likingwg0" {
+		t.Fatalf("ifaces %s %+v", c.wgIface, c.wgIfaces)
+	}
 }

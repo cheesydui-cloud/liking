@@ -98,10 +98,20 @@ type WireGuardPeer struct {
 	Email     string `json:"email,omitempty"`
 }
 
-type WireGuardConfig struct {
+// WireGuardTunnel is one interface on the entry. Each home gets its own
+// interface, fwmark, and route table. An old agent ignores this field and
+// still applies Iface/Conf/Peers, which must stay equal to Tunnels[0].
+type WireGuardTunnel struct {
 	Iface string          `json:"iface"`
 	Conf  string          `json:"conf,omitempty"`
 	Peers []WireGuardPeer `json:"peers,omitempty"`
+}
+
+type WireGuardConfig struct {
+	Iface   string            `json:"iface"`
+	Conf    string            `json:"conf,omitempty"`
+	Peers   []WireGuardPeer   `json:"peers,omitempty"`
+	Tunnels []WireGuardTunnel `json:"tunnels,omitempty"`
 }
 
 type ApplyAck struct {

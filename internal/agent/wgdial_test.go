@@ -2,6 +2,8 @@ package agent
 
 import (
 	"encoding/base64"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -40,6 +42,26 @@ func TestWGPeersWithoutEndpoint(t *testing.T) {
 	}
 	if _, ok := got["home"]; ok {
 		t.Fatal("peer with endpoint should stay")
+	}
+}
+
+func TestLoadWGDialFallsBackToLegacyFile(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`{"listen_port":51820,"peers":{"abc":"198.51.100.9:51820"}}`)
+	if err := os.WriteFile(filepath.Join(dir, "wg-dial.json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := loadWGDial(dir, "likingwg0")
+	if st.ListenPort != 51820 || st.Peers["abc"] != "198.51.100.9:51820" {
+		t.Fatalf("legacy %+v", st)
+	}
+	saveWGDial(dir, "likingwg1", wgDialState{ListenPort: 10434})
+	other := loadWGDial(dir, "likingwg1")
+	if other.ListenPort != 10434 || len(other.Peers) != 0 {
+		t.Fatalf("split %+v", other)
+	}
+	if loadWGDial(dir, "likingwg1").ListenPort == loadWGDial(dir, "likingwg0").ListenPort && loadWGDial(dir, "likingwg1").Peers["abc"] != "" {
+		t.Fatal("second tunnel read the first tunnel dial state")
 	}
 }
 

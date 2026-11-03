@@ -176,6 +176,41 @@ function wgExitServerID(inb) {
   return Number.isFinite(n) && n > 0 ? n : 0
 }
 
+function parseWGNet(s) {
+  const [ip, bits] = String(s || '').trim().split('/')
+  const parts = ip.split('.').map(Number)
+  const prefix = Number(bits)
+  if (parts.length !== 4 || parts.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return null
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null
+  const num = parts[0] * 16777216 + parts[1] * 65536 + parts[2] * 256 + parts[3]
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0
+  return { num: (num & mask) >>> 0, mask }
+}
+
+function wgNetsOverlap(a, b) {
+  if (!a || !b) return false
+  return (b.num & a.mask) === a.num || (a.num & b.mask) === b.num
+}
+
+function nextWireGuardNet(list) {
+  const used = (list || [])
+    .filter(x => x?.profile === 'wireguard')
+    .map(x => parseWGNet(inboundSettings(x).network || '10.7.0.0/24'))
+    .filter(Boolean)
+  for (let oct = 7; oct <= 255; oct++) {
+    const base = 10 * 16777216 + oct * 65536
+    const cand = { num: base >>> 0, mask: 0xffffff00 }
+    if (used.some(n => wgNetsOverlap(cand, n))) continue
+    const ip = (n) => [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.')
+    return {
+      wg_network: `${ip(base)}/24`,
+      wg_address: `${ip(base + 1)}/24`,
+      wg_exit: `${ip(base + 2)}/32`,
+    }
+  }
+  return { wg_network: '10.7.0.0/24', wg_address: '10.7.0.1/24', wg_exit: '10.7.0.2/32' }
+}
+
 function inboundSettings(inb) {
   const st = inb?.settings
   if (!st) return {}
@@ -823,7 +858,7 @@ export default function Nodes() {
                     className={`node-pick ${on ? 'is-on' : ''}`}
                     disabled={!!editId}
                     aria-pressed={on}
-                    onClick={() => setF({ ...f, profile: p.id })}
+                    onClick={() => setF(p.id === 'wireguard' && !editId ? { ...f, profile: p.id, ...nextWireGuardNet(list) } : { ...f, profile: p.id })}
                   >
                     <span className="min-w-0 flex-1 text-left">
                       <span className="flex items-center gap-1.5 flex-wrap">
@@ -919,7 +954,7 @@ export default function Nodes() {
                   ))}
                 </select>
               </Field>
-              <Field label="隧道网段" hint="客户从 .10 起分配。已经分出去的地址不会改。">
+              <Field label="隧道网段" hint="新建时自动用下一段，例如已有 10.7.0.0/24 时这里是 10.8.0.0/24。手改也可以。已经分出去的地址不会改。">
                 <input className="input-field font-mono" value={f.wg_network} onChange={e => setF({ ...f, wg_network: e.target.value })} placeholder="10.7.0.0/24" />
               </Field>
               <Field label="中转机地址" hint="掩码要和网段一致，例如 10.7.0.1/24。">
@@ -928,7 +963,7 @@ export default function Nodes() {
               <Field label="家宽地址" hint="家宽在隧道里的地址。它的默认路由仍走宽带，不要写成 0.0.0.0/0。">
                 <input className="input-field font-mono" value={f.wg_exit} onChange={e => setF({ ...f, wg_exit: e.target.value })} placeholder="10.7.0.2/32" />
               </Field>
-              <div className="notice sm:col-span-2">客户连这条入口。保存后，家宽实例会收到出口配置，不用登录那台机器。家宽上不要再另建 WireGuard，也不要放进套餐。两台都要在线，并在实例菜单里装过 WireGuard。套餐只勾选这一条。</div>
+              <div className="notice sm:col-span-2">一台入口可以建多条 WireGuard，每条选一台家宽、一个端口和一段自己的网段。客户按所选节点出去，一条配置不会在两条家宽之间分流。套餐可以同时勾选这几条入口。家宽上不要另建节点，也不要放进套餐。入口机的 Agent 要升到这个版本，第二条隧道才会起来。</div>
             </>
           )}
           {destIsSelf && (

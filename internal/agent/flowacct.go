@@ -577,10 +577,9 @@ func flowCumul(src flowSources, listen map[int]struct{}, emails map[uint32]strin
 func (c *Cores) peekFlows() ([]wsproto.Sample, map[string]bytePair, map[int]bytePair, bool) {
 	c.mu.Lock()
 	listen := listenPortsLocked(c.last)
-	wgPort := 0
-	if p := wgJSONListenPort(c.lastReq["wireguard"]); p > 0 {
+	wgPorts := wgJSONListenPorts(c.lastReq["wireguard"])
+	for _, p := range wgPorts {
 		listen = appendListenPort(listen, p)
-		wgPort = p
 	}
 	marks := append([]wsproto.AcctMark(nil), c.acctMarks...)
 	c.mu.Unlock()
@@ -615,12 +614,28 @@ func (c *Cores) peekFlows() ([]wsproto.Sample, map[string]bytePair, map[int]byte
 		}
 	}
 	ports, portNext := portRatesFrom(c.portLast, portCumul, listen, dt)
-	if wgPort > 0 {
+	if len(c.pendingWGByPort) > 0 {
+		if c.pendingWGListenByPort == nil {
+			c.pendingWGListenByPort = map[int]wgListenCursor{}
+		}
+		if c.wgListenCurByPort == nil {
+			c.wgListenCurByPort = map[int]wgListenCursor{}
+		}
+		for _, port := range wgPorts {
+			upBps, downBps, next, overlayOK := wgListenDelta(c.wgListenCurByPort[port], c.pendingWGByPort[port], dt)
+			if !overlayOK {
+				continue
+			}
+			c.pendingWGListenByPort[port] = next
+			c.pendingWGListenOK = true
+			ports = applyWGListenRate(ports, port, upBps, downBps)
+		}
+	} else if len(wgPorts) > 0 {
 		upBps, downBps, next, overlayOK := wgListenDelta(c.wgListenCur, c.pendingWG, dt)
 		if overlayOK {
 			c.pendingWGListen = next
 			c.pendingWGListenOK = true
-			ports = applyWGListenRate(ports, wgPort, upBps, downBps)
+			ports = applyWGListenRate(ports, wgPorts[0], upBps, downBps)
 		}
 	}
 	c.pendingPorts = ports
