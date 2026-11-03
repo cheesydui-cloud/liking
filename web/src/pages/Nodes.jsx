@@ -963,7 +963,7 @@ export default function Nodes() {
               <Field label="家宽地址" hint="家宽在隧道里的地址。它的默认路由仍走宽带，不要写成 0.0.0.0/0。">
                 <input className="input-field font-mono" value={f.wg_exit} onChange={e => setF({ ...f, wg_exit: e.target.value })} placeholder="10.7.0.2/32" />
               </Field>
-              <div className="notice sm:col-span-2">一台入口可以同时拉多条家宽。每条一个节点、一个端口、一段网段，各用各的路由，一条在用不会把另一条拆掉。客户按所选节点出去，一台设备连一个节点。套餐可以同时勾选这几条。家宽上不要另建节点，也不要放进套餐。入口机的 Agent 要升到这个版本。</div>
+              <div className="notice sm:col-span-2">一台入口可以同时拉多条家宽。每条一个节点、一个端口、一段网段。两台设备各连一个节点，可以同时从两条宽带出去。一台设备只连一个节点。套餐可以同时勾选这几条。家宽上不要另建节点，也不要放进套餐。入口机的 Agent 要升到这个版本。</div>
             </>
           )}
           {destIsSelf && (

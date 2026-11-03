@@ -753,7 +753,7 @@ func HubConfig(in *db.Inbound, clients []*db.Client, exitHost string) (string, [
 	var b strings.Builder
 	fmt.Fprintf(&b, "[Interface]\nPrivateKey = %s\nAddress = %s\nListenPort = %d\nMTU = %d\nTable = off\nFwMark = %d\n",
 		st.String("private_key"), st.String("address"), in.Port, st.Int("mtu", WGDefaultMTU), st.Int("fwmark", WGDefaultFwMark))
-	fmt.Fprintf(&b, "PostUp = %s\nPostDown = %s\n", hubPostUp(st, in.Port), hubPostDown(st, in.Port))
+	fmt.Fprintf(&b, "PostUp = %s\nPostDown = %s\n", hubPostUp(st, in.Port, exitHost), hubPostDown(st, in.Port))
 	for _, p := range peers {
 		// The comment is not a WireGuard key. A restarted agent reads it from
 		// the on-disk conf and can still name the peer after its memory map is gone.
@@ -779,19 +779,31 @@ func HubConfig(in *db.Inbound, clients []*db.Client, exitHost string) (string, [
 	return b.String(), peers, nil
 }
 
-// wgPolicyPriorities gives one tunnel four rule priorities that no other
-// slot uses. v0.3.17 put every tunnel on 40/50/100. On some iproute2 builds,
-// ip rule del at a shared priority removes the other tunnel's rule, so
-// bringing one line up drops the other.
-func wgPolicyPriorities(mark, table int) (fw, hub, exit, net int) {
+// wgPolicyPriorities gives one tunnel rule priorities no other slot uses.
+// fw and toHome are before 40. A leftover rule at 40/50/100 is examined
+// first if the exemption sits at 18100, and the other home's handshake is
+// then sent into the line that is already up.
+func wgPolicyPriorities(mark, table int) (fw, toHome, hub, exit, net, iif int) {
+	idx := wgSlotIndex(mark, table)
+	return 5 + idx, 30 + idx, 400 + idx, 500 + idx, 600 + idx, 700 + idx
+}
+
+func wgSlotIndex(mark, table int) int {
 	idx := mark - WGDefaultFwMark
 	if idx < 0 || idx > 63 {
 		idx = table - WGDefaultTable
 	}
 	if idx < 0 || idx > 63 {
-		idx = 0
+		return 0
 	}
-	return 18100 + idx, 18200 + idx, 18300 + idx, 18400 + idx
+	return idx
+}
+
+// wgLegacyPriorities are the v0.3.18 numbers for this slot. PostDown still
+// removes them so an upgraded tunnel does not leave the old exemption behind.
+func wgLegacyPriorities(mark, table int) []int {
+	idx := wgSlotIndex(mark, table)
+	return []int{18100 + idx, 18200 + idx, 18300 + idx, 18400 + idx}
 }
 
 // wgRuleFlush deletes every rule at one priority. The priority belongs to
@@ -804,34 +816,76 @@ func writeWGRule(b *strings.Builder, pri int, selector string) {
 	fmt.Fprintf(b, "%s; ip rule add %s priority %d; ", wgRuleFlush(pri), selector, pri)
 }
 
-func hubPostUp(st Settings, port int) string {
+func hubPostUp(st Settings, port int, exitHost string) string {
 	mark := st.Int("fwmark", WGDefaultFwMark)
 	table := st.Int("route_table", WGDefaultTable)
 	hub := wgHost(st.String("address"))
 	exit := wgHost(st.String("exit_address"))
 	network := strings.TrimSpace(st.String("network"))
-	fwPri, hubPri, exitPri, netPri := wgPolicyPriorities(mark, table)
+	fwPri, homePri, hubPri, exitPri, netPri, iifPri := wgPolicyPriorities(mark, table)
 	var b strings.Builder
-	// Loose rp_filter on all, not only this interface. The kernel uses the
-	// max of all and the device, so a strict all.rp_filter drops the other
-	// home's UDP while this line is forwarding.
-	b.WriteString("sysctl -w net.ipv4.ip_forward=1; sysctl -w net.ipv4.conf.all.rp_filter=2; sysctl -w net.ipv4.conf.default.rp_filter=2; sysctl -w net.ipv4.conf.%i.rp_filter=2; ")
+	b.WriteString("sysctl -w net.ipv4.ip_forward=1; sysctl -w net.ipv4.conf.all.src_valid_mark=1; ")
+	// The kernel uses max(all, iface). Leaving the WAN at strict mode drops
+	// the other home's UDP while this line is forwarding.
+	b.WriteString("for f in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 0 > \"$f\" 2>/dev/null || true; done; ")
 	b.WriteString("iptables -C FORWARD -i %i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %i -j ACCEPT; ")
 	b.WriteString("iptables -C FORWARD -o %i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %i -j ACCEPT; ")
-	// Remove this tunnel's old shared-priority rules before installing the
-	// unique ones. A loose delete then cannot match the rule just added.
+	b.WriteString(wgMainCaptureFlush())
+	fmt.Fprintf(&b, "ip rule del not fwmark %d lookup %d 2>/dev/null || true; ", mark, mark)
+	fmt.Fprintf(&b, "ip rule del not fwmark %d lookup %d 2>/dev/null || true; ", mark, table)
 	fmt.Fprintf(&b, "ip rule del fwmark %d lookup main priority 40 2>/dev/null || true; ", mark)
 	fmt.Fprintf(&b, "ip rule del from %s lookup main priority 50 2>/dev/null || true; ", hub)
 	fmt.Fprintf(&b, "ip rule del from %s lookup main priority 50 2>/dev/null || true; ", exit)
 	fmt.Fprintf(&b, "ip rule del from %s lookup %d priority 100 2>/dev/null || true; ", network, table)
+	for _, pri := range wgLegacyPriorities(mark, table) {
+		fmt.Fprintf(&b, "%s; ", wgRuleFlush(pri))
+	}
 	writeWGRule(&b, fwPri, fmt.Sprintf("fwmark %d lookup main", mark))
+	b.WriteString(wgExitRule(exitHost, homePri))
 	writeWGRule(&b, hubPri, fmt.Sprintf("from %s lookup main", hub))
 	writeWGRule(&b, exitPri, fmt.Sprintf("from %s lookup main", exit))
 	writeWGRule(&b, netPri, fmt.Sprintf("from %s lookup %d", network, table))
+	writeWGRule(&b, iifPri, fmt.Sprintf("iif %%i lookup %d", table))
+	fmt.Fprintf(&b, "ip route replace %s dev %%i table %d; ", network, table)
 	fmt.Fprintf(&b, "ip route replace default dev %%i table %d; ", table)
 	b.WriteString(hubMSSUp(st))
 	b.WriteString(wgTCPAllowUp(port))
+	b.WriteString(wgUDPAllowUp(port))
 	return b.String()
+}
+
+// wgMainCaptureFlush removes prefixes that would send every other home's
+// handshake into a WireGuard interface. Routes in a policy table are kept.
+func wgMainCaptureFlush() string {
+	return "i=0; while [ $i -lt 20 ]; do dev=likingwg$i; ip route del default dev $dev table main 2>/dev/null || true; ip route del 0.0.0.0/1 dev $dev table main 2>/dev/null || true; ip route del 128.0.0.0/1 dev $dev table main 2>/dev/null || true; i=$((i+1)); done; "
+}
+
+func wgExitRule(host string, pri int) string {
+	host = wgSafeHost(host)
+	if host == "" {
+		return ""
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.To4() != nil {
+		var b strings.Builder
+		writeWGRule(&b, pri, "to "+ip.To4().String()+" lookup main")
+		return b.String()
+	}
+	return fmt.Sprintf("hip=$(getent ahostsv4 %s 2>/dev/null | awk 'NR==1{print $1}' || true); if [ -n \"$hip\" ]; then %s; ip rule add to \"$hip\" lookup main priority %d || true; fi; ", host, wgRuleFlush(pri), pri)
+}
+
+func wgSafeHost(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 253 {
+		return ""
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '-':
+		default:
+			return ""
+		}
+	}
+	return s
 }
 
 func hubPostDown(st Settings, port int) string {
@@ -840,17 +894,25 @@ func hubPostDown(st Settings, port int) string {
 	hub := wgHost(st.String("address"))
 	exit := wgHost(st.String("exit_address"))
 	network := strings.TrimSpace(st.String("network"))
-	fwPri, hubPri, exitPri, netPri := wgPolicyPriorities(mark, table)
+	fwPri, homePri, hubPri, exitPri, netPri, iifPri := wgPolicyPriorities(mark, table)
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s; %s; %s; %s; ", wgRuleFlush(fwPri), wgRuleFlush(hubPri), wgRuleFlush(exitPri), wgRuleFlush(netPri))
+	fmt.Fprintf(&b, "%s; %s; %s; %s; %s; %s; ", wgRuleFlush(fwPri), wgRuleFlush(homePri), wgRuleFlush(hubPri), wgRuleFlush(exitPri), wgRuleFlush(netPri), wgRuleFlush(iifPri))
+	for _, pri := range wgLegacyPriorities(mark, table) {
+		fmt.Fprintf(&b, "%s; ", wgRuleFlush(pri))
+	}
 	fmt.Fprintf(&b, "ip rule del fwmark %d lookup main priority 40 2>/dev/null || true; ", mark)
 	fmt.Fprintf(&b, "ip rule del from %s lookup main priority 50 2>/dev/null || true; ", hub)
 	fmt.Fprintf(&b, "ip rule del from %s lookup main priority 50 2>/dev/null || true; ", exit)
 	fmt.Fprintf(&b, "ip rule del from %s lookup %d priority 100 2>/dev/null || true; ", network, table)
+	fmt.Fprintf(&b, "ip rule del not fwmark %d lookup %d 2>/dev/null || true; ", mark, mark)
+	fmt.Fprintf(&b, "ip rule del not fwmark %d lookup %d 2>/dev/null || true; ", mark, table)
+	fmt.Fprintf(&b, "ip route del %s dev %%i table %d 2>/dev/null || true; ", network, table)
 	fmt.Fprintf(&b, "ip route del default dev %%i table %d 2>/dev/null || true; ", table)
+	b.WriteString("ip route del default dev %i table main 2>/dev/null || true; ip route del 0.0.0.0/1 dev %i table main 2>/dev/null || true; ip route del 128.0.0.0/1 dev %i table main 2>/dev/null || true; ")
 	b.WriteString("iptables -D FORWARD -i %i -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o %i -j ACCEPT 2>/dev/null || true; ")
 	b.WriteString(hubMSSDown(st))
 	b.WriteString(wgTCPAllowDown(port))
+	b.WriteString(wgUDPAllowDown(port))
 	return b.String()
 }
 

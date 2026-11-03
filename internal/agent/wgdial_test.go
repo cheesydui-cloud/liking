@@ -8,6 +8,41 @@ import (
 	"testing"
 )
 
+func TestWGIsolateDeletes(t *testing.T) {
+	routes, rules := wgIsolateDeletes(
+		"default via 1.2.3.4 dev eth0\n"+
+			"default dev likingwg0 scope link\n"+
+			"0.0.0.0/1 dev likingwg0 scope link\n"+
+			"128.0.0.0/1 dev likingwg1\n"+
+			"10.7.0.0/24 dev likingwg0 proto kernel scope link\n",
+		"0:\tfrom all lookup local\n"+
+			"32765:\tfrom all not fwmark 0xca6c lookup 51820\n"+
+			"32766:\tfrom all lookup main\n"+
+			"100:\tfrom 10.7.0.0/24 lookup 100\n",
+	)
+	if len(routes) != 3 {
+		t.Fatalf("routes %+v", routes)
+	}
+	if strings.Join(routes[0], " ") != "route del default dev likingwg0 table main" {
+		t.Fatalf("default %+v", routes[0])
+	}
+	if strings.Join(routes[1], " ") != "route del 0.0.0.0/1 dev likingwg0 table main" {
+		t.Fatalf("half %+v", routes[1])
+	}
+	if strings.Join(routes[2], " ") != "route del 128.0.0.0/1 dev likingwg1 table main" {
+		t.Fatalf("upper %+v", routes[2])
+	}
+	if len(rules) != 1 || strings.Join(rules[0], " ") != "rule del not fwmark 51820 lookup 51820" {
+		t.Fatalf("rules %+v", rules)
+	}
+	if _, _, ok := wgCapturingMainRoute("10.8.0.0/24 dev likingwg1 proto kernel scope link"); ok {
+		t.Fatal("connected route is not a capture")
+	}
+	if _, _, ok := parseNotFwmarkRule("5:\tfrom all fwmark 0xca6d lookup main"); ok {
+		t.Fatal("exemption was treated as a capture")
+	}
+}
+
 func TestWGRouteWouldSteal(t *testing.T) {
 	if !wgRouteWouldSteal("likingwg0", "likingwg1") {
 		t.Fatal("second tunnel must not take the first tunnel's table")

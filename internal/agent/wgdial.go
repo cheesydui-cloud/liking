@@ -53,6 +53,7 @@ func keepWGPath(dir, iface, conf string) {
 	saveWGDial(dir, iface, st)
 	restoreWGDial(iface, conf, st, kernel)
 	ensureWGPolicy(iface, conf)
+	isolateWGCapture()
 }
 
 func noteWGDial(dir, iface string) {
@@ -366,6 +367,11 @@ func splitWGCmds(conf string) []string {
 }
 
 func parseIPRuleAdd(cmd string) (wgPolicyRule, bool) {
+	// %i and $hip are filled in by wg-quick or the shell. Replaying them from
+	// the conf file would install a rule that does not match the live one.
+	if strings.Contains(cmd, "$") || strings.Contains(cmd, `"`) || strings.Contains(cmd, "%") {
+		return wgPolicyRule{}, false
+	}
 	fields := strings.Fields(cmd)
 	if len(fields) < 4 || fields[0] != "ip" || fields[1] != "rule" || fields[2] != "add" {
 		return wgPolicyRule{}, false
@@ -453,6 +459,115 @@ func ipRuleShow() string {
 		return ""
 	}
 	return string(out)
+}
+
+// isolateWGCapture drops main-table prefixes and "not fwmark" rules that send
+// the other home's handshake into the line currently in use. Policy-table
+// routes are not in this show and stay in place.
+func isolateWGCapture() {
+	routes, rules := wgIsolateDeletes(ipRouteShowMain(), ipRuleShow())
+	for _, args := range routes {
+		if ipRun(args...) {
+			log.Printf("agent: wireguard removed main-table capture")
+		}
+	}
+	for _, args := range rules {
+		if ipRun(args...) {
+			log.Printf("agent: wireguard removed not-fwmark capture")
+		}
+	}
+}
+
+func ipRouteShowMain() string {
+	bin := lookBin("ip")
+	if bin == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "-4", "route", "show", "table", "main").Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
+}
+
+func wgIsolateDeletes(routeShow, ruleShow string) (routes, rules [][]string) {
+	seenRoute := map[string]bool{}
+	for _, line := range strings.Split(routeShow, "\n") {
+		prefix, dev, ok := wgCapturingMainRoute(line)
+		if !ok {
+			continue
+		}
+		key := prefix + " " + dev
+		if seenRoute[key] {
+			continue
+		}
+		seenRoute[key] = true
+		routes = append(routes, []string{"route", "del", prefix, "dev", dev, "table", "main"})
+	}
+	seenRule := map[string]bool{}
+	for _, line := range strings.Split(ruleShow, "\n") {
+		mark, table, ok := parseNotFwmarkRule(line)
+		if !ok || !wgTunnelLookup(table) {
+			continue
+		}
+		key := strconv.FormatUint(mark, 10) + " " + table
+		if seenRule[key] {
+			continue
+		}
+		seenRule[key] = true
+		rules = append(rules, []string{"rule", "del", "not", "fwmark", strconv.FormatUint(mark, 10), "lookup", table})
+	}
+	return routes, rules
+}
+
+func wgCapturingMainRoute(line string) (prefix, dev string, ok bool) {
+	fields := strings.Fields(line)
+	if len(fields) < 3 {
+		return "", "", false
+	}
+	switch fields[0] {
+	case "default", "0.0.0.0/1", "128.0.0.0/1":
+	default:
+		return "", "", false
+	}
+	for i, f := range fields {
+		if f == "dev" && i+1 < len(fields) && strings.HasPrefix(fields[i+1], "likingwg") {
+			return fields[0], fields[i+1], true
+		}
+	}
+	return "", "", false
+}
+
+func parseNotFwmarkRule(line string) (mark uint64, table string, ok bool) {
+	if !strings.Contains(line, "not fwmark") {
+		return 0, "", false
+	}
+	fields := strings.Fields(line)
+	for i, f := range fields {
+		if f == "fwmark" && i > 0 && fields[i-1] == "not" && i+1 < len(fields) {
+			mark = parseFwMark(fields[i+1])
+		}
+		if f == "lookup" && i+1 < len(fields) {
+			table = fields[i+1]
+		}
+	}
+	if mark == 0 || table == "" {
+		return 0, "", false
+	}
+	return mark, table, true
+}
+
+func wgTunnelLookup(table string) bool {
+	n, err := strconv.Atoi(table)
+	if err != nil {
+		return false
+	}
+	if n >= 100 && n <= 252 {
+		return true
+	}
+	return n >= 51820 && n <= 51820+63
 }
 
 func ipRun(args ...string) bool {
