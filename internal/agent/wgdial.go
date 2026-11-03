@@ -270,8 +270,57 @@ func ensureWGPolicy(iface, conf string) {
 		}
 	}
 	if table := wgPolicyTable(conf); table > 0 && iface != "" {
+		dev := wgTableDefaultDev(table)
+		if wgRouteWouldSteal(dev, iface) {
+			log.Printf("agent: wireguard %s left table %d on %s", iface, table, dev)
+			return
+		}
 		ipRun("route", "replace", "default", "dev", iface, "table", strconv.Itoa(table))
 	}
+}
+
+// wgRouteWouldSteal is true when another likingwg interface already owns
+// this table. Replacing the default would send that line's clients out the
+// wrong home.
+func wgRouteWouldSteal(currentDev, iface string) bool {
+	currentDev = strings.TrimSpace(currentDev)
+	iface = strings.TrimSpace(iface)
+	if currentDev == "" || iface == "" || currentDev == iface {
+		return false
+	}
+	return strings.HasPrefix(currentDev, "likingwg") && strings.HasPrefix(iface, "likingwg")
+}
+
+func parseWGDefaultDev(show string) string {
+	for _, line := range strings.Split(show, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[0] != "default" {
+			continue
+		}
+		for i, f := range fields {
+			if f == "dev" && i+1 < len(fields) {
+				return fields[i+1]
+			}
+		}
+	}
+	return ""
+}
+
+func wgTableDefaultDev(table int) string {
+	if table <= 0 {
+		return ""
+	}
+	bin := lookBin("ip")
+	if bin == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "-4", "route", "show", "table", strconv.Itoa(table)).Output()
+	if err != nil {
+		return ""
+	}
+	return parseWGDefaultDev(string(out))
 }
 
 func wgPolicyRules(conf string) []wgPolicyRule {

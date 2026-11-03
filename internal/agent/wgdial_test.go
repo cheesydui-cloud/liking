@@ -8,6 +8,18 @@ import (
 	"testing"
 )
 
+func TestWGRouteWouldSteal(t *testing.T) {
+	if !wgRouteWouldSteal("likingwg0", "likingwg1") {
+		t.Fatal("second tunnel must not take the first tunnel's table")
+	}
+	if wgRouteWouldSteal("likingwg0", "likingwg0") || wgRouteWouldSteal("", "likingwg1") || wgRouteWouldSteal("eth0", "likingwg1") {
+		t.Fatal("own device, empty table, and WAN default are not a steal")
+	}
+	if parseWGDefaultDev("default dev likingwg0 scope link\n10.8.0.0/24 dev likingwg1") != "likingwg0" {
+		t.Fatal("default dev")
+	}
+}
+
 func TestWGPolicyRuleParse(t *testing.T) {
 	conf := "PostUp = ip rule del fwmark 51820 lookup main priority 40 2>/dev/null || true; ip rule add fwmark 51820 lookup main priority 40; ip rule add from 10.7.0.1 lookup main priority 50; ip rule add from 10.7.0.0/24 lookup 100 priority 100; ip route replace default dev %i table 100\n"
 	rules := wgPolicyRules(conf)

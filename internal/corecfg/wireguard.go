@@ -779,16 +779,59 @@ func HubConfig(in *db.Inbound, clients []*db.Client, exitHost string) (string, [
 	return b.String(), peers, nil
 }
 
+// wgPolicyPriorities gives one tunnel four rule priorities that no other
+// slot uses. v0.3.17 put every tunnel on 40/50/100. On some iproute2 builds,
+// ip rule del at a shared priority removes the other tunnel's rule, so
+// bringing one line up drops the other.
+func wgPolicyPriorities(mark, table int) (fw, hub, exit, net int) {
+	idx := mark - WGDefaultFwMark
+	if idx < 0 || idx > 63 {
+		idx = table - WGDefaultTable
+	}
+	if idx < 0 || idx > 63 {
+		idx = 0
+	}
+	return 18100 + idx, 18200 + idx, 18300 + idx, 18400 + idx
+}
+
+// wgRuleFlush deletes every rule at one priority. The priority belongs to
+// this tunnel only, so the loop cannot remove another line.
+func wgRuleFlush(pri int) string {
+	return fmt.Sprintf("i=0; while [ $i -lt 8 ] && ip rule del priority %d 2>/dev/null; do i=$((i+1)); done", pri)
+}
+
+func writeWGRule(b *strings.Builder, pri int, selector string) {
+	fmt.Fprintf(b, "%s; ip rule add %s priority %d; ", wgRuleFlush(pri), selector, pri)
+}
+
 func hubPostUp(st Settings, port int) string {
 	mark := st.Int("fwmark", WGDefaultFwMark)
 	table := st.Int("route_table", WGDefaultTable)
 	hub := wgHost(st.String("address"))
 	exit := wgHost(st.String("exit_address"))
 	network := strings.TrimSpace(st.String("network"))
-	return fmt.Sprintf(
-		"sysctl -w net.ipv4.ip_forward=1; sysctl -w net.ipv4.conf.%%i.rp_filter=2; iptables -C FORWARD -i %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %%i -j ACCEPT; iptables -C FORWARD -o %%i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %%i -j ACCEPT; ip rule del fwmark %d lookup main priority 40 2>/dev/null || true; ip rule add fwmark %d lookup main priority 40; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule add from %s lookup main priority 50; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule add from %s lookup main priority 50; ip rule del from %s lookup %d priority 100 2>/dev/null || true; ip rule add from %s lookup %d priority 100; ip route replace default dev %%i table %d; %s%s",
-		mark, mark, hub, hub, exit, exit, network, table, network, table, table, hubMSSUp(st), wgTCPAllowUp(port),
-	)
+	fwPri, hubPri, exitPri, netPri := wgPolicyPriorities(mark, table)
+	var b strings.Builder
+	// Loose rp_filter on all, not only this interface. The kernel uses the
+	// max of all and the device, so a strict all.rp_filter drops the other
+	// home's UDP while this line is forwarding.
+	b.WriteString("sysctl -w net.ipv4.ip_forward=1; sysctl -w net.ipv4.conf.all.rp_filter=2; sysctl -w net.ipv4.conf.default.rp_filter=2; sysctl -w net.ipv4.conf.%i.rp_filter=2; ")
+	b.WriteString("iptables -C FORWARD -i %i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %i -j ACCEPT; ")
+	b.WriteString("iptables -C FORWARD -o %i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %i -j ACCEPT; ")
+	// Remove this tunnel's old shared-priority rules before installing the
+	// unique ones. A loose delete then cannot match the rule just added.
+	fmt.Fprintf(&b, "ip rule del fwmark %d lookup main priority 40 2>/dev/null || true; ", mark)
+	fmt.Fprintf(&b, "ip rule del from %s lookup main priority 50 2>/dev/null || true; ", hub)
+	fmt.Fprintf(&b, "ip rule del from %s lookup main priority 50 2>/dev/null || true; ", exit)
+	fmt.Fprintf(&b, "ip rule del from %s lookup %d priority 100 2>/dev/null || true; ", network, table)
+	writeWGRule(&b, fwPri, fmt.Sprintf("fwmark %d lookup main", mark))
+	writeWGRule(&b, hubPri, fmt.Sprintf("from %s lookup main", hub))
+	writeWGRule(&b, exitPri, fmt.Sprintf("from %s lookup main", exit))
+	writeWGRule(&b, netPri, fmt.Sprintf("from %s lookup %d", network, table))
+	fmt.Fprintf(&b, "ip route replace default dev %%i table %d; ", table)
+	b.WriteString(hubMSSUp(st))
+	b.WriteString(wgTCPAllowUp(port))
+	return b.String()
 }
 
 func hubPostDown(st Settings, port int) string {
@@ -797,10 +840,18 @@ func hubPostDown(st Settings, port int) string {
 	hub := wgHost(st.String("address"))
 	exit := wgHost(st.String("exit_address"))
 	network := strings.TrimSpace(st.String("network"))
-	return fmt.Sprintf(
-		"ip rule del fwmark %d lookup main priority 40 2>/dev/null || true; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule del from %s lookup main priority 50 2>/dev/null || true; ip rule del from %s lookup %d priority 100 2>/dev/null || true; ip route del default dev %%i table %d 2>/dev/null || true; iptables -D FORWARD -i %%i -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o %%i -j ACCEPT 2>/dev/null || true; %s%s",
-		mark, hub, exit, network, table, table, hubMSSDown(st), wgTCPAllowDown(port),
-	)
+	fwPri, hubPri, exitPri, netPri := wgPolicyPriorities(mark, table)
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s; %s; %s; %s; ", wgRuleFlush(fwPri), wgRuleFlush(hubPri), wgRuleFlush(exitPri), wgRuleFlush(netPri))
+	fmt.Fprintf(&b, "ip rule del fwmark %d lookup main priority 40 2>/dev/null || true; ", mark)
+	fmt.Fprintf(&b, "ip rule del from %s lookup main priority 50 2>/dev/null || true; ", hub)
+	fmt.Fprintf(&b, "ip rule del from %s lookup main priority 50 2>/dev/null || true; ", exit)
+	fmt.Fprintf(&b, "ip rule del from %s lookup %d priority 100 2>/dev/null || true; ", network, table)
+	fmt.Fprintf(&b, "ip route del default dev %%i table %d 2>/dev/null || true; ", table)
+	b.WriteString("iptables -D FORWARD -i %i -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o %i -j ACCEPT 2>/dev/null || true; ")
+	b.WriteString(hubMSSDown(st))
+	b.WriteString(wgTCPAllowDown(port))
+	return b.String()
 }
 
 // wgTCPAllowUp lets a delay-test SYN reach the accept-and-close listener.

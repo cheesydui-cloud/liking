@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -135,13 +136,20 @@ func TestWireGuardAddressesAndConf(t *testing.T) {
 	if !strings.Contains(hub, "Table = off") || !strings.Contains(hub, "FwMark = 51820") {
 		t.Fatalf("hub flags\n%s", hub)
 	}
-	if !strings.Contains(hub, "from 10.7.0.1 lookup main priority 50") || !strings.Contains(hub, "from 10.7.0.2 lookup main priority 50") {
+	fw, hubPri, exitPri, netPri := wgPolicyPriorities(51820, 100)
+	if !strings.Contains(hub, fmt.Sprintf("from 10.7.0.1 lookup main priority %d", hubPri)) || !strings.Contains(hub, fmt.Sprintf("from 10.7.0.2 lookup main priority %d", exitPri)) {
 		t.Fatalf("exempt\n%s", hub)
 	}
-	if !strings.Contains(hub, "from 10.7.0.0/24 lookup 100 priority 100") || !strings.Contains(hub, "ip route replace default dev %i table 100") {
+	if !strings.Contains(hub, fmt.Sprintf("from 10.7.0.0/24 lookup 100 priority %d", netPri)) || !strings.Contains(hub, "ip route replace default dev %i table 100") {
 		t.Fatalf("policy\n%s", hub)
 	}
-	if !strings.Contains(hub, "net.ipv4.conf.%i.rp_filter=2") {
+	if !strings.Contains(hub, fmt.Sprintf("fwmark 51820 lookup main priority %d", fw)) {
+		t.Fatalf("fwmark rule\n%s", hub)
+	}
+	if strings.Contains(hub, "ip rule add fwmark 51820 lookup main priority 40") || strings.Contains(hub, "ip rule add from 10.7.0.0/24 lookup 100 priority 100") {
+		t.Fatalf("shared priority still installed\n%s", hub)
+	}
+	if !strings.Contains(hub, "net.ipv4.conf.all.rp_filter=2") || !strings.Contains(hub, "net.ipv4.conf.default.rp_filter=2") || !strings.Contains(hub, "net.ipv4.conf.%i.rp_filter=2") {
 		t.Fatalf("rp_filter\n%s", hub)
 	}
 	if !strings.Contains(hub, "AllowedIPs = 0.0.0.0/0") || !strings.Contains(hub, "AllowedIPs = 10.7.0.10/32") || !strings.Contains(hub, "AllowedIPs = 10.7.0.11/32") {
@@ -604,6 +612,77 @@ func TestBuildTwoHomesOnOneEntry(t *testing.T) {
 	if !strings.Contains(string(b.Apply.WireGuard), "AllowedIPs = 10.8.0.0/24") || strings.Contains(string(b.Apply.WireGuard), "10.7.0.0/24") {
 		t.Fatalf("home B\n%s", b.Apply.WireGuard)
 	}
+}
+
+func TestHubRulesStayApart(t *testing.T) {
+	a := &db.Inbound{Name: "a", Profile: ProfileWireGuard, Port: 10433, LineKind: "direct", ServerHost: "203.0.113.8", Settings: `{"network":"10.7.0.0/24","address":"10.7.0.1/24","exit_address":"10.7.0.2/32","fwmark":51820,"route_table":100}`}
+	b := &db.Inbound{Name: "b", Profile: ProfileWireGuard, Port: 10434, LineKind: "direct", Settings: `{"network":"10.8.0.0/24","address":"10.8.0.1/24","exit_address":"10.8.0.2/32","fwmark":51821,"route_table":101}`}
+	if err := Normalize(a, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := Normalize(b, nil); err != nil {
+		t.Fatal(err)
+	}
+	hubA, _, err := HubConfig(a, nil, "198.51.100.9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hubB, _, err := HubConfig(b, nil, "198.51.100.10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	priA := wgAddedPriorities(hubA)
+	priB := wgAddedPriorities(hubB)
+	if len(priA) != 4 || len(priB) != 4 {
+		t.Fatalf("priorities %v %v", priA, priB)
+	}
+	for p := range priA {
+		if priB[p] {
+			t.Fatalf("shared add priority %d\nA %s\nB %s", p, hubA, hubB)
+		}
+		if strings.Contains(hubB, fmt.Sprintf("ip rule del priority %d", p)) {
+			t.Fatalf("B deletes A's priority %d", p)
+		}
+	}
+	for p := range priB {
+		if strings.Contains(hubA, fmt.Sprintf("ip rule del priority %d", p)) {
+			t.Fatalf("A deletes B's priority %d", p)
+		}
+	}
+	if strings.Contains(hubA, "FwMark = 51821") || strings.Contains(hubA, "table 101") || strings.Contains(hubB, "FwMark = 51820") || strings.Contains(hubB, "lookup 100") {
+		t.Fatal("slot leaked across hubs")
+	}
+	downA := hubPostDown(ParseSettings(a.Settings), a.Port)
+	if strings.Contains(downA, "priority 18101") || strings.Contains(downA, "fwmark 51821") || strings.Contains(downA, "table 101") {
+		t.Fatalf("A postdown hits B\n%s", downA)
+	}
+	home, err := HomeConfig(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(home, "priority 18100") || strings.Contains(home, "net.ipv4.conf.all.rp_filter") {
+		t.Fatalf("home conf changed\n%s", home)
+	}
+}
+
+func wgAddedPriorities(conf string) map[int]bool {
+	out := map[int]bool{}
+	for _, part := range strings.Split(conf, ";") {
+		part = strings.TrimSpace(part)
+		if !strings.Contains(part, "ip rule add ") {
+			continue
+		}
+		fields := strings.Fields(part)
+		for i, f := range fields {
+			if f == "priority" && i+1 < len(fields) {
+				n, err := strconv.Atoi(fields[i+1])
+				if err == nil {
+					out[n] = true
+				}
+			}
+		}
+	}
+	return out
 }
 
 func mustSettings(st Settings) string {
