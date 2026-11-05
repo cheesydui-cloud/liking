@@ -41,14 +41,20 @@ function parseDenyLines(text) {
   return String(text || '').split(/[\s,;]+/).map(s => s.trim()).filter(Boolean)
 }
 
-function policyLine(p) {
-  const bits = []
-  if (p.reset_mode === 'anniversary') bits.push('按开通日清零')
-  if (p.speed_limit > 0) bits.push(`默认 ${formatSpeedLimit(p.speed_limit)}`)
-  if (p.site_filter_mode === 'allow') bits.push('开户只允许指定站')
-  else if (p.site_filter_mode === 'deny') bits.push('开户禁止指定站')
-  if (p.sub_rule_preset) bits.push('独立分流')
-  return bits.join(' · ')
+function ruleLine(preset) {
+  const hit = userRulePresets.find(([id]) => id === (preset || ''))
+  return hit ? hit[1] : (preset || '跟随全局')
+}
+
+function accessLine(p) {
+  const n = (p.site_deny_categories?.length || 0) + (p.site_deny_domains?.length || 0)
+  if (p.site_filter_mode === 'allow') return n ? `只允许 ${n} 项` : '只允许'
+  if (p.site_filter_mode === 'deny') return n ? `禁止 ${n} 项` : '禁止'
+  return '不限制'
+}
+
+function speedLine(p) {
+  return p.speed_limit > 0 ? formatSpeedLimit(p.speed_limit) : '不限'
 }
 
 function protoShort(profile) {
@@ -81,7 +87,7 @@ function packageNodes(p, ins, servers) {
   let nodes = []
   if (iids.length) nodes = iids.map(id => ins.find(x => Number(x.id) === id)).filter(Boolean)
   else if (sids.length) nodes = ins.filter(x => sids.includes(Number(x.server_id)))
-  else return { all: true, count: 0, servers: [], names: [] }
+  else return { all: true, count: 0, servers: [], names: [], lines: [] }
   nodes = nodes.filter(n => n && n.profile !== 'port-forward' && n.user_facing !== false)
 
   const seen = new Set()
@@ -94,11 +100,24 @@ function packageNodes(p, ins, servers) {
     const label = s?.name || n.server_name || ''
     if (label) serverNames.push(label)
   }
+  const multById = {}
+  if (iids.length && Array.isArray(p.multipliers)) {
+    iids.forEach((id, i) => { multById[id] = Number(p.multipliers[i]) })
+  }
   return {
     all: false,
     count: nodes.length || iids.length || sids.length,
     servers: serverNames,
     names: nodes.map(n => n.name).filter(Boolean),
+    lines: nodes.map(n => {
+      const mult = multById[n.id]
+      return {
+        id: n.id,
+        name: n.name || '',
+        proto: protoShort(n.profile),
+        mult: mult > 0 && mult !== 1 ? mult : 0,
+      }
+    }),
   }
 }
 
@@ -109,11 +128,11 @@ function trafficLabel(bytes) {
   return `${n} G`
 }
 
-function Metric({ label, value }) {
+function Metric({ label, value, plain }) {
   return (
     <div className="metric">
       <span className="metric-k">{label}</span>
-      <span className="metric-v">{value}</span>
+      <span className={`metric-v${plain ? ' is-plain' : ''}`}>{value}</span>
     </div>
   )
 }
@@ -358,7 +377,6 @@ export default function Packages() {
           {list.map(p => {
             const n = users.filter(u => u.role !== 'admin' && u.package_id === p.id).length
             const meta = packageNodes(p, ins, servers)
-            const nodeLine = meta.all ? '未选节点' : `${meta.count} 个节点`
             const nodeTip = meta.names.length ? meta.names.join('、') : (meta.servers.join(' · ') || undefined)
             return (
               <div key={p.id} className="machine is-pkg">
@@ -370,11 +388,6 @@ export default function Packages() {
                     {meta.servers.length ? (
                       <div className="machine-host">
                         <span className="machine-host-addr" title={nodeTip}>{meta.servers.join(' · ')}</span>
-                      </div>
-                    ) : null}
-                    {policyLine(p) ? (
-                      <div className="machine-host">
-                        <span className="text-[12px] text-ink-mut truncate" title={policyLine(p)}>{policyLine(p)}</span>
                       </div>
                     ) : null}
                   </div>
@@ -394,9 +407,26 @@ export default function Packages() {
                   <Metric label="计费" value={p.direction === 'twoway' ? '双向' : '单向'} />
                   <Metric label="节点" value={meta.all ? '0' : String(meta.count)} />
                   <Metric label="用户" value={String(n)} />
+                  <Metric label="清零" value={p.reset_mode === 'anniversary' ? '按开通日' : '不清零'} plain />
+                  <Metric label="限速" value={speedLine(p)} plain />
+                  <Metric label="分流" value={ruleLine(p.sub_rule_preset)} plain />
+                  <Metric label="访问" value={accessLine(p)} plain />
+                </div>
+                <div className="pkg-card-nodes" title={nodeTip}>
+                  {meta.all ? (
+                    <div className="pkg-card-more">还没选节点，订阅里不会有线路</div>
+                  ) : meta.lines.slice(0, 4).map(line => (
+                    <div key={line.id} className="pkg-card-node">
+                      <span className="pkg-card-node-proto">{line.proto}</span>
+                      <span className="pkg-card-node-name">{line.name}{line.mult ? ` ×${line.mult}` : ''}</span>
+                    </div>
+                  ))}
+                  {!meta.all && meta.lines.length > 4 ? (
+                    <div className="pkg-card-more">还有 {meta.lines.length - 4} 个</div>
+                  ) : null}
                 </div>
                 <div className="machine-foot">
-                  <span className="text-[11px] font-mono text-ink-mut truncate" title={nodeTip}>{nodeLine}</span>
+                  <button type="button" className="machine-ports" onClick={() => openPreview(p)}>预览</button>
                   <button type="button" className="row-act" onClick={() => startEdit(p)}>编辑</button>
                 </div>
               </div>

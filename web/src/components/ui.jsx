@@ -1,5 +1,6 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { placeMoreMenu } from '../lib/menuPlace'
 
 export function Icon({ name, size = 18, className = '' }) {
   const s = size
@@ -528,28 +529,24 @@ export function SkeletonRows({ rows = 4 }) {
 
 export function MoreMenu({ label = '更多', items = [], disabled, iconOnly }) {
   const [open, setOpen] = useState(false)
-  const [pos, setPos] = useState({ top: 0, left: 0 })
+  const [pos, setPos] = useState(null)
   const btnRef = useRef(null)
   const popRef = useRef(null)
 
-  const place = () => {
+  useLayoutEffect(() => {
+    if (!open) return
     const r = btnRef.current?.getBoundingClientRect()
+    const pop = popRef.current
     if (!r) return
-    const width = 200
-    const margin = 8
-    let left = r.right - width
-    if (left < margin) left = margin
-    if (left + width > window.innerWidth - margin) left = Math.max(margin, window.innerWidth - width - margin)
-    const spaceBelow = window.innerHeight - r.bottom
-    const openUp = spaceBelow < 240 && r.top > spaceBelow
-    setPos(openUp
-      ? { top: undefined, bottom: window.innerHeight - r.top + 4, left }
-      : { top: r.bottom + 4, bottom: undefined, left })
-  }
+    setPos(placeMoreMenu(
+      r,
+      { width: pop?.offsetWidth || 200, height: pop?.scrollHeight || 0 },
+      { width: window.innerWidth, height: window.innerHeight },
+    ))
+  }, [open, items])
 
   useEffect(() => {
     if (!open) return
-    place()
     const onDoc = (e) => {
       if (btnRef.current?.contains(e.target) || popRef.current?.contains(e.target)) return
       setOpen(false)
@@ -589,7 +586,13 @@ export function MoreMenu({ label = '更多', items = [], disabled, iconOnly }) {
           ref={popRef}
           className="more-menu-pop"
           role="menu"
-          style={{ top: pos.top, bottom: pos.bottom, left: pos.left }}
+          style={{
+            top: pos?.top,
+            bottom: pos?.bottom,
+            left: pos?.left ?? 0,
+            maxHeight: pos?.maxHeight,
+            visibility: pos ? 'visible' : 'hidden',
+          }}
         >
           {vis.map((it, i) => (
             it.sep ? (
