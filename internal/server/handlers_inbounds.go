@@ -310,6 +310,9 @@ func (s *Server) handleDeleteInbound(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "入站不存在")
 		return
 	}
+	if refuseIfInUse(w, db.InboundInUse(s.DB, id)) {
+		return
+	}
 	n, _ := db.CountExitsTo(s.DB, id)
 	if list, err := db.ListInbounds(s.DB); err == nil {
 		n += corecfg.CountHopsTo(list, id)

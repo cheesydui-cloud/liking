@@ -246,6 +246,9 @@ func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "无效 ID")
 		return
 	}
+	if refuseIfInUse(w, db.ServerInUse(s.DB, id)) {
+		return
+	}
 	s.Hub.Drop(id)
 	if err := db.DeleteServer(s.DB, id); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())

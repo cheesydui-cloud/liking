@@ -274,7 +274,7 @@ export default function Packages() {
   }
 
   const del = async (id) => {
-    if (!(await dialog.confirm({ title: '删除套餐', message: '绑定用户将失去线路。', danger: true }))) return
+    if (!(await dialog.confirm({ title: '删除套餐', message: '还有客户绑定时不能删除。', danger: true }))) return
     try {
       await api.del(`/packages/${id}`)
       if (editId === id) closeForm()

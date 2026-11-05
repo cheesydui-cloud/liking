@@ -298,10 +298,25 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{"package": p})
 }
 
+func refuseIfInUse(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	if db.IsInUse(err) {
+		jsonErr(w, http.StatusConflict, err.Error())
+		return true
+	}
+	jsonErr(w, http.StatusInternalServerError, err.Error())
+	return true
+}
+
 func (s *Server) handleDeletePackage(w http.ResponseWriter, r *http.Request) {
 	id, err := chiID(r, "id")
 	if err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	if refuseIfInUse(w, db.PackageInUse(s.DB, id)) {
 		return
 	}
 	if err := db.DeletePackage(s.DB, id); err != nil {
