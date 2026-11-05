@@ -4,12 +4,19 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  DEST_PRESETS,
   destHostOf,
   destLabel,
   formatDest,
   serverIsOnline,
   sortDests,
 } from './dest.js'
+
+test('dest presets skip apple and icloud', () => {
+  for (const dest of DEST_PRESETS) {
+    assert.equal(/apple\.com|icloud\.com/i.test(dest), false, dest)
+  }
+})
 
 test('formatDest keeps port and defaults 443', () => {
   assert.equal(formatDest('azure.microsoft.com'), 'azure.microsoft.com:443')

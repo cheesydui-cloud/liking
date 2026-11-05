@@ -820,12 +820,12 @@ function ForwardsPanel() {
             </Field>
           )}
           {f.kind !== 'port' && showNewEntry && isReality(f.profile) && (
-            <Field label="REALITY dest" hint="伪装目标。可留空用默认。">
+            <Field label="REALITY dest" hint="伪装目标。不要填苹果的网站。监听端口尽量用 443。可留空用默认。">
               <input className="input-field" value={f.dest} onChange={e => setF({ ...f, dest: e.target.value })} />
             </Field>
           )}
           {f.kind !== 'port' && showNewEntry && f.profile === 'ss2022' && (
-            <Field label="加密">
+            <Field label="加密" hint="256 更稳妥。改方法或密钥长度不对时会换成新密钥，旧订阅失效。">
               <select className="input-field" value={f.method} onChange={e => setF({ ...f, method: e.target.value })}>
                 <option value="2022-blake3-aes-256-gcm">2022-blake3-aes-256-gcm</option>
                 <option value="2022-blake3-aes-128-gcm">2022-blake3-aes-128-gcm</option>
@@ -833,7 +833,7 @@ function ForwardsPanel() {
             </Field>
           )}
           {f.kind !== 'port' && showNewEntry && f.profile === 'mieru' && (
-            <Field label="传输">
+            <Field label="传输" hint="一台实例只能开一条。BOTH 同时开 TCP 和 UDP。">
               <select className="input-field" value={f.transport} onChange={e => setF({ ...f, transport: e.target.value })}>
                 <option value="BOTH">BOTH（TCP + UDP）</option>
                 <option value="TCP">仅 TCP</option>

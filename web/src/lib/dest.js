@@ -13,7 +13,6 @@ export const DEST_PRESETS = [
   'www.microsoft.com:443',
   'dl.google.com:443',
   'www.samsung.com:443',
-  'www.apple.com:443',
 ]
 
 export function formatDest(s) {

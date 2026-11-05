@@ -89,7 +89,16 @@ func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
 		if exitID := WGExitServerID(in); exitID != 0 && exitID != in.ServerID {
 			touched[exitID] = struct{}{}
 		}
-		if !created && c.Enabled == wantEnabled && c.Email == wantEmail && c.Username == wantUser {
+		rekeyed := false
+		if in.Profile == ProfileSS2022 && !ssPasswordOK(c.Password, SSKeyLen(ParseSettings(in.Settings).String("method"))) {
+			pw, err := RandomBase64(SSKeyLen(ParseSettings(in.Settings).String("method")))
+			if err != nil {
+				return nil, err
+			}
+			c.Password = pw
+			rekeyed = true
+		}
+		if !created && !rekeyed && c.Enabled == wantEnabled && c.Email == wantEmail && c.Username == wantUser {
 			continue
 		}
 		c.Enabled = wantEnabled

@@ -17,6 +17,9 @@ type Bundle struct {
 }
 
 func Build(d *sql.DB, serverID int64) (*Bundle, error) {
+	if err := RepairSS2022(d); err != nil {
+		return nil, err
+	}
 	srv, err := db.GetServer(d, serverID)
 	if err != nil {
 		return nil, err

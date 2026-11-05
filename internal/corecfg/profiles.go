@@ -41,13 +41,13 @@ type Meta struct {
 
 func Catalog() []Meta {
 	return []Meta{
-		{ID: ProfileVLESSRealityVision, Title: "VLESS + REALITY + Vision", Core: CoreXray, Landing: true, Direct: true, Desc: "伪装成访问真实网站，不需要证书。Vision 再包一层流量，抗主动探测更好。"},
-		{ID: ProfileVLESSReality, Title: "VLESS + REALITY", Core: CoreXray, Landing: true, Direct: true, Desc: "伪装成访问真实网站，不需要证书。适合没有域名的机器。"},
+		{ID: ProfileVLESSRealityVision, Title: "VLESS + REALITY + Vision", Core: CoreXray, Landing: true, Direct: true, Desc: "伪装成访问真实网站，不需要证书。监听用 443，不要伪装成苹果的网站。Vision 再包一层流量，抗主动探测更好。"},
+		{ID: ProfileVLESSReality, Title: "VLESS + REALITY", Core: CoreXray, Landing: true, Direct: true, Desc: "伪装成访问真实网站，不需要证书。监听用 443，不要伪装成苹果的网站。适合没有域名的机器。"},
 		{ID: ProfileVLESSXHTTP, Title: "VLESS + XHTTP + TLS", Core: CoreXray, NeedTLS: true, Landing: true, Direct: true, Desc: "走 HTTPS 外观，需要证书。路径和 SNI 可自定义。"},
 		{ID: ProfileTrojanTLS, Title: "Trojan + TLS", Core: CoreXray, NeedTLS: true, Landing: true, Direct: true, Desc: "经典 TLS 隧道，需要证书。实现简单，客户端支持广。"},
 		{ID: ProfileSS2022, Title: "Shadowsocks 2022", Core: CoreXray, Landing: true, Direct: true, Desc: "2022-blake3 AEAD。没有 TLS 指纹，实现干净。"},
 		{ID: ProfileAnyTLS, Title: "AnyTLS + TCP + TLS", Core: CoreSingbox, NeedTLS: true, Direct: true, Desc: "sing-box 实现，需要证书。不能当链式落地。"},
-		{ID: ProfileMieru, Title: "Mieru", Core: CoreMita, Direct: true, Desc: "只当入口，不能当链式落地。可同时开 TCP / UDP。"},
+		{ID: ProfileMieru, Title: "Mieru", Core: CoreMita, Direct: true, Desc: "只当入口，不能当链式落地。一台实例只能开一条。BOTH 同时开 TCP 和 UDP。"},
 		{ID: ProfileSOCKS5, Title: "SOCKS5", Core: CoreSingbox, Landing: true, Direct: true, Desc: "用户名密码认证，可 UDP。浏览器和 Clash 可直连。走 sing-box。可当链式落地。"},
 		{ID: ProfileWireGuard, Title: "WireGuard", Core: CoreWireGuard, Direct: true, Desc: "客户连中转机。一台入口可以同时拉多条家宽，每条一个节点。两台设备可以同时各用一条。一台设备只连一个节点。套餐可以勾选这几条入口。家宽不要另建节点。两台都要装好 WireGuard。"},
 	}
@@ -315,7 +315,7 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 			dest += ":443"
 		}
 		st["dest"] = dest
-		if err := rejectLocalDest(dest); err != nil {
+		if err := rejectBadRealityDest(dest); err != nil {
 			return err
 		}
 		if len(st.Strings("server_names")) == 0 {
@@ -398,15 +398,17 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 			st["fingerprint"] = "chrome"
 		}
 	case ProfileSS2022:
-		if st.String("method") == "" {
-			st["method"] = "2022-blake3-aes-128-gcm"
+		method := strings.TrimSpace(st.String("method"))
+		if method == "" {
+			method = "2022-blake3-aes-128-gcm"
 		}
-		if st.String("server_password") == "" {
-			n := 16
-			if strings.Contains(st.String("method"), "256") {
-				n = 32
-			}
-			pw, err := RandomBase64(n)
+		canon, ok := canonicalSS2022Method(method)
+		if !ok {
+			return fmt.Errorf("SS2022 加密方法无效")
+		}
+		st["method"] = canon
+		if !ssPasswordOK(st.String("server_password"), SSKeyLen(canon)) {
+			pw, err := RandomBase64(SSKeyLen(canon))
 			if err != nil {
 				return err
 			}
@@ -423,6 +425,10 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 		st["transport"] = tr
 	case ProfileSOCKS5:
 		st["udp"] = true
+		if st.String("hold_user") == "hold" && st.String("hold_pass") == "hold" {
+			delete(st, "hold_user")
+			delete(st, "hold_pass")
+		}
 		if st.String("hold_user") == "" {
 			id, err := RandomHex(8)
 			if err != nil {
@@ -518,7 +524,7 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 					return fmt.Errorf("不能把本线路当作跳点")
 				}
 			}
-			if err := ensureRelay(st, exit.Profile); err != nil {
+			if err := ensureRelay(st, exit); err != nil {
 				return err
 			}
 		}
@@ -535,8 +541,11 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 	return nil
 }
 
-func ensureRelay(st Settings, landingProfile string) error {
-	switch landingProfile {
+func ensureRelay(st Settings, land *db.Inbound) error {
+	if land == nil {
+		return fmt.Errorf("落地不存在")
+	}
+	switch land.Profile {
 	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP:
 		if st.String("relay_uuid") == "" {
 			id, err := NewUUID()
@@ -554,8 +563,15 @@ func ensureRelay(st Settings, landingProfile string) error {
 			st["relay_password"] = pw
 		}
 	case ProfileSS2022:
-		if st.String("relay_password") == "" {
-			pw, err := RandomBase64(16)
+		method := strings.TrimSpace(ParseSettings(land.Settings).String("method"))
+		if method == "" {
+			method = "2022-blake3-aes-128-gcm"
+		}
+		if !KnownSS2022Method(method) {
+			return fmt.Errorf("SS2022 加密方法无效")
+		}
+		if !ssPasswordOK(st.String("relay_password"), SSKeyLen(method)) {
+			pw, err := RandomBase64(SSKeyLen(method))
 			if err != nil {
 				return err
 			}
@@ -642,6 +658,27 @@ func rejectLocalDest(dest string) error {
 	return nil
 }
 
+func rejectBadRealityDest(dest string) error {
+	if err := rejectLocalDest(dest); err != nil {
+		return err
+	}
+	if realityAppleHost(destHost(dest)) {
+		return fmt.Errorf("REALITY 不能伪装成苹果的网站，这种目标很容易让服务器 IP 被封")
+	}
+	return nil
+}
+
+func realityAppleHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	host = strings.TrimSuffix(host, ".")
+	for _, root := range []string{"apple.com", "icloud.com"} {
+		if host == root || strings.HasSuffix(host, "."+root) {
+			return true
+		}
+	}
+	return false
+}
+
 // DestIsSelf reports whether dest's host is this machine's public address
 // (steal-self). REALITY must masquerade as someone else.
 func DestIsSelf(dest string, addrs ...string) bool {
@@ -664,11 +701,4 @@ func DestIsSelf(dest string, addrs ...string) bool {
 		}
 	}
 	return false
-}
-
-func SSKeyLen(method string) int {
-	if strings.Contains(method, "256") {
-		return 32
-	}
-	return 16
 }

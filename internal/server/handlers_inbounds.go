@@ -352,8 +352,13 @@ func (s *Server) prepareInbound(in *db.Inbound) error {
 	if err != nil {
 		return err
 	}
-	if ins, err := db.ListInboundsByServer(s.DB, in.ServerID); err == nil {
-		corecfg.MarkReservedPorts(used, ins)
+	ins, err := db.ListInboundsByServer(s.DB, in.ServerID)
+	if err != nil {
+		return err
+	}
+	corecfg.MarkReservedPorts(used, ins)
+	if err := corecfg.MieruConflict(in, ins); err != nil {
+		return err
 	}
 	if in.Port == 0 {
 		srv, err := db.GetServer(s.DB, in.ServerID)

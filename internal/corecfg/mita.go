@@ -6,7 +6,34 @@ import (
 	"liking/internal/db"
 )
 
+func MieruConflict(in *db.Inbound, others []*db.Inbound) error {
+	if in == nil || !in.Enabled || in.Profile != ProfileMieru {
+		return nil
+	}
+	for _, o := range others {
+		if o == nil || !o.Enabled || o.Profile != ProfileMieru || o.ServerID != in.ServerID {
+			continue
+		}
+		if in.ID != 0 && o.ID == in.ID {
+			continue
+		}
+		return fmt.Errorf("一台实例只能有一条 Mieru。账号和出口是整机共用的，第二条上的客户能连进第一条的端口")
+	}
+	return nil
+}
+
 func buildMita(inbounds []*db.Inbound, clients map[int64][]*db.Client) (map[string]any, error) {
+	var enabled []*db.Inbound
+	for _, in := range inbounds {
+		if in != nil && in.Enabled && in.Core == CoreMita {
+			enabled = append(enabled, in)
+		}
+	}
+	if len(enabled) > 1 {
+		if err := MieruConflict(enabled[0], enabled); err != nil {
+			return nil, err
+		}
+	}
 	var bindings []any
 	var users []any
 	var egressProxies []any

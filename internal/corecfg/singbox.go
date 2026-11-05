@@ -237,11 +237,9 @@ func singSocksInbound(in *db.Inbound, clients []*db.Client, byID map[int64]*db.I
 		users = append(users, map[string]any{"username": user, "password": pass})
 	})
 	st := ParseSettings(in.Settings)
-	if u, p := st.String("hold_user"), st.String("hold_pass"); u != "" && p != "" {
-		users = append(users, map[string]any{"username": u, "password": p})
-	}
-	if users == nil {
-		users = []any{map[string]any{"username": "hold", "password": "hold"}}
+	users, err := appendSocksHold(users, st)
+	if err != nil {
+		return nil, err
 	}
 	return map[string]any{
 		"type":        "socks",
@@ -250,6 +248,26 @@ func singSocksInbound(in *db.Inbound, clients []*db.Client, byID map[int64]*db.I
 		"listen_port": in.Port,
 		"users":       users,
 	}, nil
+}
+
+func appendSocksHold(users []any, st Settings) ([]any, error) {
+	u := strings.TrimSpace(st.String("hold_user"))
+	p := strings.TrimSpace(st.String("hold_pass"))
+	if u != "" && p != "" && !(u == "hold" && p == "hold") {
+		return append(users, map[string]any{"username": u, "password": p}), nil
+	}
+	if len(users) > 0 {
+		return users, nil
+	}
+	id, err := RandomHex(8)
+	if err != nil {
+		return nil, err
+	}
+	pw, err := RandomHex(16)
+	if err != nil {
+		return nil, err
+	}
+	return []any{map[string]any{"username": "hold." + id, "password": pw}}, nil
 }
 
 func singChainOutbounds(entry *db.Inbound, byID map[int64]*db.Inbound) ([]any, error) {

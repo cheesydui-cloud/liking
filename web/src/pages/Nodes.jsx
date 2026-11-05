@@ -415,6 +415,8 @@ export default function Nodes() {
   const missingCore = selectedServer && meta && !serverHasCore(selectedServer, meta.core)
   const protoList = profiles.length ? profiles : [{ id: f.profile, title: f.profile, desc: '' }]
   const destHostName = String(f.dest || '').split(':')[0].trim().toLowerCase()
+  const sniNames = String(f.sni || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+  const sniDiffers = isReality(f.profile) && sniNames.length > 0 && destHostName && !sniNames.includes(destHostName)
   const destIsSelf = isReality(f.profile) && destHostName && [selectedServer?.public_host, selectedServer?.connect_ip]
     .filter(Boolean)
     .some(h => String(h).split(':')[0].trim().toLowerCase() === destHostName)
@@ -900,7 +902,7 @@ export default function Nodes() {
           )}
           {isReality(f.profile) && (
             <div className="sm:col-span-2">
-              <Field as="div" label="伪装目标 dest" hint="点开从这台实例测延迟，选数字最小的。也可自己填。SNI 默认用 dest 域名。">
+              <Field as="div" label="伪装目标 dest" hint="点开从这台实例测延迟，选数字最小的。也可自己填。SNI 默认用 dest 域名。不要填苹果的网站。监听端口尽量用 443。">
                 <DestPicker
                   value={f.dest}
                   server={selectedServer}
@@ -919,7 +921,7 @@ export default function Nodes() {
             </Field>
           )}
           {f.profile === 'ss2022' && (
-            <Field label="加密" hint="256 更稳妥。已有节点改方法会让旧订阅失效。">
+            <Field label="加密" hint="256 更稳妥。改方法或密钥长度不对时会换成新密钥，旧订阅失效。">
               <select className="input-field" value={f.method} onChange={e => setF({ ...f, method: e.target.value })}>
                 <option value="2022-blake3-aes-256-gcm">2022-blake3-aes-256-gcm</option>
                 <option value="2022-blake3-aes-128-gcm">2022-blake3-aes-128-gcm</option>
@@ -927,7 +929,7 @@ export default function Nodes() {
             </Field>
           )}
           {f.profile === 'mieru' && (
-            <Field label="传输" hint="BOTH 同时开 TCP 和 UDP。只当入口，不能当链式落地。">
+            <Field label="传输" hint="BOTH 同时开 TCP 和 UDP。一台实例只能有一条 Mieru。">
               <select className="input-field" value={f.transport} onChange={e => setF({ ...f, transport: e.target.value })}>
                 <option value="BOTH">BOTH（TCP + UDP）</option>
                 <option value="TCP">仅 TCP</option>
@@ -939,7 +941,7 @@ export default function Nodes() {
             <div className="notice sm:col-span-2">AnyTLS 走 sing-box，需要证书。不能当链式落地。</div>
           )}
           {f.profile === 'mieru' && (
-            <div className="notice sm:col-span-2">Mieru 只当入口。链式转发时请把它放在入口机，落地用 VLESS / Trojan / SS2022 / SOCKS5。</div>
+            <div className="notice sm:col-span-2">Mieru 只当入口，一台实例只能开一条。账号和出口是整机共用的，开第二条会让客户串到别的端口。链式转发时请把它放在入口机，落地用 VLESS / Trojan / SS2022 / SOCKS5。</div>
           )}
           {f.profile === 'socks5' && (
             <div className="notice sm:col-span-2">SOCKS5 走 sing-box，用户名密码认证，可 UDP。浏览器和 Clash 可直连，也可当链式落地。</div>
@@ -967,7 +969,10 @@ export default function Nodes() {
             </>
           )}
           {destIsSelf && (
-            <div className="notice sm:col-span-2">dest 指向了这台机器自己，伪装会失效，也无法保存。请改成 microsoft / apple 这类真实网站。</div>
+            <div className="notice sm:col-span-2">dest 指向了这台机器自己，伪装会失效，也无法保存。请改成别的公开网站，不要用苹果的网站。</div>
+          )}
+          {sniDiffers && (
+            <div className="notice sm:col-span-2">SNI 和伪装目标的域名不一样。对得上证书就可以用，对不上时客户端会连不上。</div>
           )}
           {f.profile !== 'wireguard' && (
           <div className="sm:col-span-2">
@@ -1067,7 +1072,10 @@ export default function Nodes() {
               )}
             </>
           )}
-          {Number(f.port) === 443 && f.profile !== 'wireguard' && (
+          {isReality(f.profile) && Number(f.port) !== 443 && (
+            <div className="notice sm:col-span-2">REALITY 监听端口不是 443 时，探测更容易把服务器 IP 封掉。能用 443 就用 443。不要伪装成苹果的网站。</div>
+          )}
+          {Number(f.port) === 443 && !isReality(f.profile) && f.profile !== 'wireguard' && (
             <div className="notice sm:col-span-2">443 很容易被 Nginx / 其它面板占用。建议改成 8443 或其它空闲端口。</div>
           )}
           {missingCore && f.profile !== 'wireguard' && (

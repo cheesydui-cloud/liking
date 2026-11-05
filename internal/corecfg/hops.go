@@ -220,7 +220,7 @@ func ApplyHopRelays(st Settings, lands map[int64]*db.Inbound, entryID, exitID in
 		}
 		seen[land.ID] = struct{}{}
 		cred := h.cred()
-		if err := ensureRelay(cred, land.Profile); err != nil {
+		if err := ensureRelay(cred, land); err != nil {
 			return err
 		}
 		h.RelayUUID = cred.String("relay_uuid")
