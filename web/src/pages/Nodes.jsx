@@ -7,6 +7,8 @@ import { isDirectNode, nodeStatus, serverHasCore } from '../lib/status'
 import { useToast, useDialog } from '../components/Layout'
 import { coreLabel } from '../lib/display'
 import { cacheGen, peekList, putList } from '../lib/listCache'
+import { spliceById } from '../lib/cardOrder'
+import { DragHandle, SortableGrid, useCardOrder } from '../components/SortableGrid'
 import { startPoll } from '../lib/poll'
 import { createOpLock } from '../lib/opLock'
 import { asArray, isAbort } from '../lib/safe'
@@ -376,23 +378,28 @@ export default function Nodes() {
   const [statusFilter, setStatusFilter] = useState('')
   const [pollErr, setPollErr] = useState('')
   const ops = useRef(createOpLock())
+  const loadRef = useRef(() => {})
+  const order = useCardOrder('inbounds', () => loadRef.current())
 
   const load = async () => {
+    const started = order.generation()
     try {
       const g = cacheGen()
       const [a, b, c, d] = await Promise.all([
         api.get('/servers'), api.get('/inbounds'), api.get('/certs'), api.get('/profiles'),
       ])
       setServers(putList('servers', asArray(a.servers), g))
-      setList(putList('inbounds', asArray(b.inbounds), g))
+      setList(prev => putList('inbounds', order.applyIncoming(prev, asArray(b.inbounds), started), g))
       setCerts(putList('certs', asArray(c.certs), g))
       setProfiles(putList('profiles', asArray(d.profiles), g))
     } catch (e) { toast(e.message, 'error') }
     finally { setReady(true) }
   }
+  loadRef.current = load
   useEffect(() => {
     load()
     return startPoll(async (signal) => {
+      const started = order.generation()
       const g = cacheGen()
       try {
         const [a, b] = await Promise.all([
@@ -400,7 +407,7 @@ export default function Nodes() {
           api.get('/inbounds', signal),
         ])
         setServers(putList('servers', asArray(a.servers), g))
-        setList(putList('inbounds', asArray(b.inbounds), g))
+        setList(prev => putList('inbounds', order.applyIncoming(prev, asArray(b.inbounds), started), g))
         setPollErr('')
       } catch (e) {
         if (isAbort(e)) return
@@ -756,13 +763,20 @@ export default function Nodes() {
                   />
                 </div>
               ) : (
-                <div className="machine-grid">
-                  {nodes.map(inb => {
+                <SortableGrid
+                  items={nodes}
+                  className="machine-grid"
+                  onPreview={(next) => {
+                    order.hold()
+                    setList(prev => putList('inbounds', spliceById(prev, next), cacheGen()))
+                  }}
+                  onCommit={(next) => order.commit(next)}
+                  renderItem={(inb, drag) => {
                     const st = nodeStatus(inb, s)
                     const used = (inb.used_up || 0) + (inb.used_down || 0)
                     const exitSrv = inb.profile === 'wireguard' ? servers.find(x => Number(x.id) === wgExitServerID(inb)) : null
                     return (
-                      <div key={inb.id} className={`machine ${nodeTone(st)}`}>
+                      <div key={inb.id} className={`machine ${nodeTone(st)}${drag.dragging ? ' is-sorting' : ''}`} {...drag.itemProps}>
                         <div className="machine-head">
                           <div className="min-w-0 flex-1">
                             <div className="machine-title">
@@ -781,6 +795,7 @@ export default function Nodes() {
                             ) : null}
                           </div>
                           <div className="machine-toolbar">
+                            <DragHandle drag={drag} />
                             <button type="button" className="icon-btn" onClick={() => startEdit(inb)} aria-label="编辑节点" title="编辑">
                               <Icon name="pencil" size={14} />
                             </button>
@@ -817,8 +832,8 @@ export default function Nodes() {
                         </div>
                       </div>
                     )
-                  })}
-                </div>
+                  }}
+                />
               )}
             </section>
           ))}

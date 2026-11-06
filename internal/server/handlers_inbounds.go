@@ -100,6 +100,10 @@ func (s *Server) handleListInbounds(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if err := db.ArrangeByDisplay(s.DB, db.CardInbounds, list, func(in *db.Inbound) int64 { return in.ID }); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	totals, _ := db.InboundTrafficTotals(s.DB)
 	out := make([]map[string]any, 0, len(list))
 	for _, in := range list {

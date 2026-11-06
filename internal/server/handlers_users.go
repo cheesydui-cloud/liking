@@ -160,6 +160,10 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if err := db.ArrangeByDisplay(s.DB, db.CardUsers, list, func(u *db.User) int64 { return u.ID }); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	out := make([]any, 0, len(list))
 	for _, u := range list {
 		if up, down, ok := s.Hub.UserLive(u.ID); ok {

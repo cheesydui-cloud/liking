@@ -12,7 +12,7 @@ import {
   LAND_PROFILES, MAX_HOPS, inboundSettings, forwardKind, kindLabel, protoShort,
   formatSocks, hopText, hopProto, pathHops, landingText, usedPortsText, hopFromSaved,
 } from '../lib/forwards'
-import { Badge, Empty, Field, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows } from '../components/ui'
+import { Empty, Field, Icon, LineStatus, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows } from '../components/ui'
 
 function emptyHop() {
   return { kind: 'panel', inbound_id: '', sk5_host: '', sk5_port: '1080', sk5_user: '', sk5_pass: '', uri: '' }
@@ -124,6 +124,39 @@ function pathSub(inb, byID) {
   return [protoShort(inb.profile), ...hops.map(h => hopProto(h, byID))].join(' → ')
 }
 
+function forwardStatus(inb, byID, serversByID) {
+  const entrySrv = serversByID.get(Number(inb.server_id))
+  const st = nodeStatus(inb, entrySrv, { byID })
+  if (st !== '正常' || forwardKind(inb) !== 'chain') return st
+  for (const h of pathHops(inb)) {
+    const hs = hopStatus(h, byID, serversByID)
+    if (hs && hs !== '正常') return hs
+  }
+  return st
+}
+
+function forwardCardTone(st) {
+  if (st === '正常') return 'is-live'
+  if (st === '故障' || st === '流量已满') return 'is-fault'
+  return 'is-off'
+}
+
+function Metric({ label, value, plain }) {
+  return (
+    <div className="metric">
+      <span className="metric-k">{label}</span>
+      <span className={`metric-v${plain ? ' is-plain' : ''}`}>{value}</span>
+    </div>
+  )
+}
+
+function latencyValue(row) {
+  if (!row) return '—'
+  if (row.state === 'busy') return '…'
+  if (row.state === 'ok') return `${row.ms} ms`
+  return '失败'
+}
+
 function formFromInbound(inb) {
   const st = inboundSettings(inb)
   return {
@@ -171,6 +204,7 @@ function ForwardsPanel() {
   const [q, setQ] = useState('')
   const [kindFilter, setKindFilter] = useState('')
   const [pollErr, setPollErr] = useState('')
+  const [probes, setProbes] = useState({})
   const ops = useRef(createOpLock())
 
   const load = async () => {
@@ -467,6 +501,27 @@ function ForwardsPanel() {
     })
   }
 
+  const probeLatency = async (inb) => {
+    await ops.current.run(`probe-${inb.id}`, async () => {
+      setProbes(p => ({ ...p, [inb.id]: { state: 'busy' } }))
+      try {
+        const d = await api.post(`/inbounds/${inb.id}/probe`)
+        if (d.ok) {
+          const ms = Number(d.latency_ms) || 0
+          setProbes(p => ({ ...p, [inb.id]: { state: 'ok', ms, host: d.host, port: d.port } }))
+          toast(`入口到 ${d.host}:${d.port}，${ms} ms`)
+        } else {
+          const error = d.error || '探测失败'
+          setProbes(p => ({ ...p, [inb.id]: { state: 'err', error } }))
+          toast(error, 'error')
+        }
+      } catch (e) {
+        setProbes(p => ({ ...p, [inb.id]: { state: 'err', error: e.message } }))
+        toast(e.message, 'error')
+      }
+    })
+  }
+
   const del = async (inb) => {
     if (!(await dialog.confirm({ title: '删除中转', message: '入口会立刻停掉。链式入口会从订阅里消失。原来的节点不受影响。', danger: true }))) return
     await ops.current.run(`del-${inb.id}`, async () => {
@@ -518,100 +573,84 @@ function ForwardsPanel() {
         </div>
       ) : null}
 
-      <div className="card overflow-hidden">
-        {!ready ? (
-          <SkeletonRows />
-        ) : forwards.length === 0 ? (
+      {!ready ? (
+        <div className="card overflow-hidden"><SkeletonRows /></div>
+      ) : forwards.length === 0 ? (
+        <div className="card overflow-hidden">
           <Empty title="还没有中转" hint="默认入口加一跳落地。需要时再加跳。端口中转只把本机端口转到别人的 IP。" action={
             <button type="button" className="btn-primary" onClick={openCreate}>
               <Icon name="plus" size={15} /> 新建中转
             </button>
           } />
-        ) : rows.length === 0 ? (
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="card overflow-hidden">
           <Empty title="没有匹配的中转" hint="换个关键词或类型。" />
-        ) : (
-          <>
-            <div className="hidden md:block table-wrap">
-              <table className="data">
-                <thead><tr><th>路径</th><th>类型</th><th>入口</th><th></th></tr></thead>
-                <tbody>
-                  {rows.map(inb => {
-                    const k = forwardKind(inb)
-                    const n = k === 'chain' ? pathHops(inb).length : 0
-                    return (
-                      <tr key={inb.id} className={!inb.enabled ? 'opacity-50' : ''}>
-                        <td className="min-w-0">
-                          <PathHops inb={inb} byID={byID} serversByID={serversByID} />
-                          {inb.name && inb.name !== pathLine(inb, byID) ? (
-                            <div className="text-[12px] text-ink-soft mt-0.5 truncate">{inb.name}</div>
-                          ) : null}
-                          <div className="text-[11px] text-ink-mut mt-0.5">{pathSub(inb, byID)}</div>
-                        </td>
-                        <td>
-                          <Badge tone="muted">{kindLabel(k)}</Badge>
-                          {n > 1 ? <span className="ml-1 text-[11px] text-ink-mut tabular-nums">{n} 跳</span> : null}
-                          {!inb.enabled ? <Badge tone="muted" className="ml-1">停用</Badge> : null}
-                        </td>
-                        <td className="min-w-0">
-                          <div className="truncate">{inb.server_name || '—'}</div>
-                          <div className="text-[11px] text-ink-mut font-mono tabular-nums truncate">{inb.server_host || ''}{inb.port ? `:${inb.port}` : ''}</div>
-                        </td>
-                        <td className="whitespace-nowrap">
-                          <div className="icon-row">
-                            <button type="button" className="icon-btn" onClick={() => startEdit(inb)} aria-label="编辑中转" title="编辑">
-                              <Icon name="pencil" size={14} />
-                            </button>
-                            <MoreMenu iconOnly items={[
-                              { label: inb.enabled ? '停用' : '启用', onSelect: () => toggle(inb) },
-                              { sep: true },
-                              { label: '删除', danger: true, onSelect: () => del(inb) },
-                            ]} />
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="md:hidden divide-y" style={{ borderColor: 'var(--color-line-soft)' }}>
-              {rows.map(inb => {
-                const k = forwardKind(inb)
-                const n = k === 'chain' ? pathHops(inb).length : 0
-                return (
-                  <div key={inb.id} className={`px-3.5 py-3 ${!inb.enabled ? 'opacity-50' : ''}`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <PathHops inb={inb} byID={byID} serversByID={serversByID} />
-                        {inb.name && inb.name !== pathLine(inb, byID) ? (
-                          <div className="text-[12px] text-ink-soft mt-0.5 truncate">{inb.name}</div>
-                        ) : null}
-                        <div className="text-[12px] text-ink-mut mt-0.5">
-                          {kindLabel(k)}{n > 1 ? ` · ${n} 跳` : ''} · {pathSub(inb, byID)}
-                          {!inb.enabled ? ' · 停用' : ''}
-                        </div>
-                        <div className="text-[12px] text-ink-mut mt-0.5 truncate">
-                          {inb.server_name || '—'} {inb.server_host || ''}{inb.port ? `:${inb.port}` : ''}
-                        </div>
-                      </div>
-                      <div className="icon-row shrink-0">
-                        <button type="button" className="icon-btn" onClick={() => startEdit(inb)} aria-label="编辑中转" title="编辑">
-                          <Icon name="pencil" size={14} />
-                        </button>
-                        <MoreMenu iconOnly items={[
-                          { label: inb.enabled ? '停用' : '启用', onSelect: () => toggle(inb) },
-                          { sep: true },
-                          { label: '删除', danger: true, onSelect: () => del(inb) },
-                        ]} />
-                      </div>
+        </div>
+      ) : (
+        <div className="machine-grid">
+          {rows.map(inb => {
+            const k = forwardKind(inb)
+            const n = k === 'chain' ? pathHops(inb).length : 0
+            const st = forwardStatus(inb, byID, serversByID)
+            const title = inb.name || (k === 'port' ? '端口中转' : '链式中转')
+            const addr = `${inb.server_host || ''}${inb.port ? `:${inb.port}` : ''}`
+            const row = probes[inb.id]
+            const foot = !row
+              ? (k === 'port' ? '从入口测到目标' : (n > 1 ? '从入口直连最后一跳' : '从入口测到落地'))
+              : row.state === 'busy'
+                ? '测量中…'
+                : row.state === 'ok'
+                  ? `${row.host}:${row.port}`
+                  : (row.error || '探测失败')
+            return (
+              <div key={inb.id} className={`machine is-static ${forwardCardTone(st)}`}>
+                <div className="machine-head">
+                  <div className="min-w-0 flex-1">
+                    <div className="machine-title">
+                      <span className="machine-name truncate">{title}</span>
+                      <LineStatus status={st} />
+                    </div>
+                    <div className="machine-host">
+                      <span className="machine-host-addr">{inb.server_name || '—'}{addr ? ` · ${addr}` : ''}</span>
                     </div>
                   </div>
-                )
-              })}
-            </div>
-          </>
-        )}
-      </div>
+                  <div className="machine-toolbar">
+                    <button type="button" className="icon-btn" onClick={() => startEdit(inb)} aria-label="编辑中转" title="编辑">
+                      <Icon name="pencil" size={14} />
+                    </button>
+                    <MoreMenu iconOnly items={[
+                      { label: '编辑', onSelect: () => startEdit(inb) },
+                      { label: '测延迟', onSelect: () => probeLatency(inb) },
+                      { label: inb.enabled ? '停用' : '启用', onSelect: () => toggle(inb) },
+                      { sep: true },
+                      { label: '删除', danger: true, onSelect: () => del(inb) },
+                    ]} />
+                  </div>
+                </div>
+                <div className="fwd-path">
+                  <PathHops inb={inb} byID={byID} serversByID={serversByID} />
+                  <div className="text-[11px] text-ink-mut mt-0.5">{pathSub(inb, byID)}{n > 1 ? ` · ${n} 跳` : ''}</div>
+                </div>
+                <div className="machine-metrics">
+                  <Metric label="类型" value={kindLabel(k)} plain />
+                  {k === 'port'
+                    ? <Metric label="网络" value={pathSub(inb, byID)} plain />
+                    : <Metric label="跳数" value={String(n || 1)} />}
+                  <Metric label="延迟" value={latencyValue(row)} />
+                  <Metric label="入口" value={inb.server_name || '—'} plain />
+                </div>
+                <div className="machine-foot">
+                  <span className="fwd-probe-note" title={foot}>{foot}</span>
+                  <button type="button" className="row-act" disabled={row?.state === 'busy'} onClick={() => probeLatency(inb)}>
+                    {row?.state === 'busy' ? '测量中…' : '测延迟'}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       <Modal
         open={open}

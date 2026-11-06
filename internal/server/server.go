@@ -179,6 +179,7 @@ func (s *Server) Router() http.Handler {
 			r.Put("/api/certs/{id}", s.handleUpdateCert)
 			r.Delete("/api/certs/{id}", s.handleDeleteCert)
 
+			r.Put("/api/card-order", s.handleCardOrder)
 			r.Get("/api/settings", s.handleGetSettings)
 			r.Put("/api/settings", s.handlePutSettings)
 			r.Get("/api/panel/upgrade", s.handlePanelUpgradeInfo)

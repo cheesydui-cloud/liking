@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { cacheGen, peekList, putList } from '../lib/listCache'
+import { spliceById } from '../lib/cardOrder'
+import { DragHandle, SortableGrid, useCardOrder } from '../components/SortableGrid'
 import { startPoll } from '../lib/poll'
 import { createOpLock } from '../lib/opLock'
 import { asArray, isAbort } from '../lib/safe'
@@ -117,14 +119,17 @@ export default function Servers() {
   const [allowProto, setAllowProto] = useState('both')
   const [loadErr, setLoadErr] = useState('')
   const listSeq = useRef(0)
+  const loadRef = useRef(() => {})
+  const order = useCardOrder('servers', () => loadRef.current())
 
   const load = async () => {
     const seq = ++listSeq.current
+    const started = order.generation()
     try {
       const g = cacheGen()
       const [a, b] = await Promise.all([api.get('/servers'), api.get('/inbounds')])
       if (seq !== listSeq.current) return
-      setList(putList('servers', asArray(a.servers), g))
+      setList(prev => putList('servers', order.applyIncoming(prev, asArray(a.servers), started), g))
       setIns(putList('inbounds', asArray(b.inbounds), g))
       setLoadErr('')
       setReady(true)
@@ -135,15 +140,17 @@ export default function Servers() {
       setReady(true)
     }
   }
+  loadRef.current = load
   useEffect(() => {
     load()
     return startPoll(async (signal) => {
       const seq = ++listSeq.current
+      const started = order.generation()
       const g = cacheGen()
       try {
         const [a, b] = await Promise.all([api.get('/servers', signal), api.get('/inbounds', signal)])
         if (seq !== listSeq.current) return
-        setList(putList('servers', asArray(a.servers), g))
+        setList(prev => putList('servers', order.applyIncoming(prev, asArray(a.servers), started), g))
         setIns(putList('inbounds', asArray(b.inbounds), g))
         setPollErr('')
         setLoadErr('')
@@ -634,8 +641,15 @@ export default function Servers() {
           <Empty title="没有匹配的实例" hint="换个关键词或筛选。" />
         </div>
       ) : (
-        <div className="machine-grid">
-          {visible.map(s => {
+        <SortableGrid
+          items={visible}
+          className="machine-grid"
+          onPreview={(next) => {
+            order.hold()
+            setList(prev => putList('servers', spliceById(prev, next), cacheGen()))
+          }}
+          onCommit={(next) => order.commit(next)}
+          renderItem={(s, drag) => {
             const n = nodesOf(s.id).length
             const used = (s.used_up || 0) + (s.used_down || 0)
             const loadAvg = s.online && s.load_milli ? (Number(s.load_milli) / 1000).toFixed(2) : '—'
@@ -645,7 +659,7 @@ export default function Servers() {
             const expSoon = !expired && s.expires_at && Number(s.expires_at) * 1000 < Date.now() + 7 * 86400 * 1000
             const quotaPct = s.traffic_limit ? Math.min(100, Math.floor(used * 100 / Number(s.traffic_limit))) : 0
             return (
-              <div key={s.id} className={`machine ${machineTone(s)}`}>
+              <div key={s.id} className={`machine ${machineTone(s)}${drag.dragging ? ' is-sorting' : ''}`} {...drag.itemProps}>
                 <div className="machine-head">
                   <div className="min-w-0 flex-1">
                     <div className="machine-title">
@@ -665,6 +679,7 @@ export default function Servers() {
                     </div>
                   </div>
                   <div className="machine-toolbar">
+                    <DragHandle drag={drag} />
                     {s.online && !fresh ? (
                       <button type="button" className="row-act" disabled={busyId === s.id} onClick={() => sync(s.id)}>同步</button>
                     ) : null}
@@ -777,8 +792,8 @@ export default function Servers() {
                 </div>
               </div>
             )
-          })}
-        </div>
+          }}
+        />
       )}
 
       <Modal open={formOpen} title="添加实例" onClose={() => setFormOpen(false)} footer={

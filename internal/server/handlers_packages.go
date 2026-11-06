@@ -17,6 +17,10 @@ func (s *Server) handleListPackages(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []*db.Package{}
 	}
+	if err := db.ArrangeByDisplay(s.DB, db.CardPackages, list, func(p *db.Package) int64 { return p.ID }); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	jsonOK(w, map[string]any{"packages": list})
 }
 

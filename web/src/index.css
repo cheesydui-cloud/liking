@@ -550,6 +550,19 @@ table.data tbody tr.is-off td:first-child { border-left-color: #c8c8c8; }
 
 .path-line { font-size: 13px; font-weight: 500; line-height: 1.55; }
 .path-arrow { color: var(--color-ink-mut); font-weight: 400; }
+.fwd-path {
+  padding: 0 10px 8px;
+  min-width: 0;
+}
+.fwd-path .path-line { overflow-wrap: anywhere; }
+.fwd-probe-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--color-ink-mut);
+}
 
 .dot {
   display: inline-block;
@@ -1543,6 +1556,30 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
   gap: 10px;
 }
+.machine-grid.is-sorting {
+  user-select: none;
+}
+.drag-handle {
+  cursor: grab;
+  touch-action: none;
+  color: var(--color-ink-mut);
+}
+.drag-handle:active,
+.machine.is-sorting .drag-handle {
+  cursor: grabbing;
+}
+.machine.is-sorting {
+  opacity: 0.82;
+  z-index: 2;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.16);
+}
+.dark .machine.is-sorting {
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+}
+.machine-grid.is-sorting .machine,
+.machine-grid.is-sorting .machine:hover {
+  transform: none;
+}
 
 .machine {
   display: flex;
@@ -1602,6 +1639,19 @@ html.dark.page-aliyun .machine {
   justify-content: space-between;
   gap: 8px;
   padding: 10px 10px 6px;
+  cursor: grab;
+}
+.machine-toolbar {
+  cursor: default;
+}
+.machine-grid.is-sorting,
+.machine-grid.is-sorting .machine,
+.machine-grid.is-sorting .machine-head {
+  cursor: grabbing;
+}
+.machine.is-static,
+.machine.is-static .machine-head {
+  cursor: default;
 }
 .machine-title {
   display: flex;

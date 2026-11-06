@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { cacheGen, peekList, putList } from '../lib/listCache'
+import { spliceById } from '../lib/cardOrder'
+import { DragHandle, SortableGrid, useCardOrder } from '../components/SortableGrid'
 import { startPoll } from '../lib/poll'
 import { createOpLock } from '../lib/opLock'
 import { asArray, isAbort } from '../lib/safe'
@@ -536,14 +538,17 @@ export default function Users() {
   const [loadErr, setLoadErr] = useState('')
   const [bulkResult, setBulkResult] = useState('')
   const listSeq = useRef(0)
+  const loadRef = useRef(() => {})
+  const order = useCardOrder('users', () => loadRef.current())
 
   const load = async () => {
     const seq = ++listSeq.current
+    const started = order.generation()
     try {
       const g = cacheGen()
       const [a, b] = await Promise.all([api.get('/users'), api.get('/packages')])
       if (seq !== listSeq.current) return
-      setList(putList('users', asArray(a.users), g))
+      setList(prev => putList('users', order.applyIncoming(prev, asArray(a.users), started), g))
       setPkgs(putList('packages', asArray(b.packages), g))
       setLoadErr('')
       setReady(true)
@@ -554,15 +559,17 @@ export default function Users() {
       setReady(true)
     }
   }
+  loadRef.current = load
   useEffect(() => {
     load()
     return startPoll(async (signal) => {
       const seq = ++listSeq.current
+      const started = order.generation()
       const g = cacheGen()
       try {
         const a = await api.get('/users', signal)
         if (seq !== listSeq.current) return
-        setList(putList('users', asArray(a.users), g))
+        setList(prev => putList('users', order.applyIncoming(prev, asArray(a.users), started), g))
         setPollErr('')
       } catch (e) {
         if (isAbort(e)) return
@@ -1055,8 +1062,15 @@ export default function Users() {
           <Empty title="没有匹配的用户" hint="换个关键词或套餐筛选。" />
         </div>
       ) : (
-        <div className="machine-grid">
-          {rows.map(u => {
+        <SortableGrid
+          items={rows}
+          className="machine-grid"
+          onPreview={(next) => {
+            order.hold()
+            setList(prev => putList('users', spliceById(prev, next), cacheGen()))
+          }}
+          onCommit={(next) => order.commit(next)}
+          renderItem={(u, drag) => {
             const cap = u.traffic_cap || trafficCap(u, pkgs)
             const used = billedBytes(u)
             const expTs = userExpiryTs(u)
@@ -1067,7 +1081,7 @@ export default function Users() {
             const hint = wgHint(u)
             const ratePlain = wgSilent(u) && !(u.net_up_bps > 0) && !(u.net_down_bps > 0)
             return (
-              <div key={u.id} className={`machine ${userTone(u)}`}>
+              <div key={u.id} className={`machine ${userTone(u)}${drag.dragging ? ' is-sorting' : ''}`} {...drag.itemProps}>
                 <div className="machine-head">
                   <button
                     type="button"
@@ -1102,6 +1116,7 @@ export default function Users() {
                     ) : null}
                   </div>
                   <div className="machine-toolbar">
+                    <DragHandle drag={drag} />
                     <button type="button" className="icon-btn" onClick={() => openEdit(u)} aria-label="编辑用户" title="编辑">
                       <Icon name="pencil" size={14} />
                     </button>
@@ -1142,8 +1157,8 @@ export default function Users() {
                 </div>
               </div>
             )
-          })}
-        </div>
+          }}
+        />
       )}
       <Modal open={formOpen} title={editing ? `编辑 ${editUser.username}` : '新建用户'} onClose={closeForm} size="lg" footer={
         <>

@@ -94,6 +94,10 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 		list = []*db.Server{}
 	}
 	s.decorateServers(list)
+	if err := db.ArrangeByDisplay(s.DB, db.CardServers, list, func(srv *db.Server) int64 { return srv.ID }); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	jsonOK(w, map[string]any{"servers": list})
 }
 

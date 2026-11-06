@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { cacheGen, peekList, putList } from '../lib/listCache'
+import { spliceById } from '../lib/cardOrder'
+import { DragHandle, SortableGrid, useCardOrder } from '../components/SortableGrid'
 import { asArray } from '../lib/safe'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, FilterTabs, Icon, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, StatusWord } from '../components/ui'
@@ -158,12 +160,15 @@ export default function Packages() {
   const [denyCatalog, setDenyCatalog] = useState([])
   const [globalCats, setGlobalCats] = useState([])
   const [loadErr, setLoadErr] = useState('')
+  const loadRef = useRef(() => {})
+  const order = useCardOrder('packages', () => loadRef.current())
 
   const load = async () => {
+    const started = order.generation()
     try {
       const g = cacheGen()
       const [a, b, c, d] = await Promise.all([api.get('/packages'), api.get('/servers'), api.get('/inbounds'), api.get('/users')])
-      setList(putList('packages', asArray(a.packages), g))
+      setList(prev => putList('packages', order.applyIncoming(prev, asArray(a.packages), started), g))
       setServers(putList('servers', asArray(b.servers), g))
       setIns(putList('inbounds', asArray(c.inbounds), g))
       setUsers(putList('users', asArray(d.users), g))
@@ -175,6 +180,7 @@ export default function Packages() {
       setReady(true)
     }
   }
+  loadRef.current = load
   useEffect(() => { load() }, [])
   useEffect(() => {
     api.get('/settings').then(d => {
@@ -373,13 +379,20 @@ export default function Packages() {
           } />
         </div>
       ) : (
-        <div className="machine-grid">
-          {list.map(p => {
+        <SortableGrid
+          items={list}
+          className="machine-grid"
+          onPreview={(next) => {
+            order.hold()
+            setList(prev => putList('packages', spliceById(prev, next), cacheGen()))
+          }}
+          onCommit={(next) => order.commit(next)}
+          renderItem={(p, drag) => {
             const n = users.filter(u => u.role !== 'admin' && u.package_id === p.id).length
             const meta = packageNodes(p, ins, servers)
             const nodeTip = meta.names.length ? meta.names.join('、') : (meta.servers.join(' · ') || undefined)
             return (
-              <div key={p.id} className="machine is-pkg">
+              <div key={p.id} className={`machine is-pkg${drag.dragging ? ' is-sorting' : ''}`} {...drag.itemProps}>
                 <div className="machine-head">
                   <div className="min-w-0 flex-1">
                     <div className="machine-title">
@@ -392,6 +405,7 @@ export default function Packages() {
                     ) : null}
                   </div>
                   <div className="machine-toolbar">
+                    <DragHandle drag={drag} />
                     <button type="button" className="icon-btn" onClick={() => startEdit(p)} aria-label="编辑套餐" title="编辑">
                       <Icon name="pencil" size={14} />
                     </button>
@@ -431,8 +445,8 @@ export default function Packages() {
                 </div>
               </div>
             )
-          })}
-        </div>
+          }}
+        />
       )}
       <Modal open={formOpen} title={editId ? '编辑套餐' : '新建套餐'} onClose={closeForm} size="lg" footer={
         <>
