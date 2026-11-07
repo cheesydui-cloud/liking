@@ -65,6 +65,66 @@ func TestWithGHProxy(t *testing.T) {
 	}
 }
 
+func TestAssetSHA256FromRelease(t *testing.T) {
+	sum := strings.Repeat("ab", 32)
+	other := strings.Repeat("cd", 32)
+	body := []byte(`{"assets":[
+		{"name":"sing-box-1.14.0-linux-amd64.tar.gz.1","digest":"sha256:` + other + `","state":"uploaded"},
+		{"name":"sing-box-1.14.0-linux-amd64.tar.gz","digest":"SHA256:` + sum + `","state":"uploaded"},
+		{"name":"sing-box-1.14.0-linux-amd64.tar.gz","digest":"sha256:` + other + `","state":"starter"}
+	]}`)
+	got, err := assetSHA256FromRelease(body, "sing-box-1.14.0-linux-amd64.tar.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != sum {
+		t.Fatalf("got %s", got)
+	}
+}
+
+func TestAssetSHA256FromReleaseRejects(t *testing.T) {
+	sum := strings.Repeat("ab", 32)
+	asset := "sing-box-1.14.0-linux-amd64.tar.gz"
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"missing", `{"assets":[]}`, "没有 " + asset},
+		{"bad digest", `{"assets":[{"name":"` + asset + `","digest":"md5:abcd","state":"uploaded"}]}`, "没有给出"},
+		{"duplicate", `{"assets":[{"name":"` + asset + `","digest":"sha256:` + sum + `","state":"uploaded"},{"name":"` + asset + `","digest":"sha256:` + sum + `","state":"uploaded"}]}`, "多份摘要"},
+		{"not json", `{`, "无法解析"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := assetSHA256FromRelease([]byte(tc.body), asset)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+}
+
+func TestGitHubReleaseAPIIgnoresDownloadProxy(t *testing.T) {
+	t.Setenv("LIKING_GITHUB_PROXY", "https://gh-proxy.example/")
+	u, err := githubReleaseAPI("SagerNet", "sing-box", "v"+singboxVer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://api.github.com/repos/SagerNet/sing-box/releases/tags/v" + singboxVer
+	if u != want {
+		t.Fatal(u)
+	}
+	if strings.Contains(u, "gh-proxy") || strings.Contains(u, "checksums.txt") {
+		t.Fatal(u)
+	}
+	for _, bad := range [][3]string{{"../Sager", "sing-box", "v1"}, {"Sager", "sing/box", "v1"}, {"Sager", "sing-box", "v1 2"}} {
+		if _, err := githubReleaseAPI(bad[0], bad[1], bad[2]); err == nil {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+}
+
 func TestWithGHProxyFromFile(t *testing.T) {
 	t.Setenv("LIKING_GITHUB_PROXY", "")
 	f := filepath.Join(t.TempDir(), "gh-proxy")

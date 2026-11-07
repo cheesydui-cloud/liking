@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -20,14 +21,15 @@ import (
 )
 
 const (
-	mitaVer        = "3.36.1"
-	singboxVer     = "1.14.0"
-	xrayVer        = "26.3.27"
-	coreHTTPTO     = 90 * time.Second
-	mitaReadyTO    = 15 * time.Second
-	maxCoreArchive = 256 << 20
-	maxCoreBinary  = 128 << 20
-	maxChecksumDoc = 1 << 20
+	mitaVer             = "3.36.1"
+	singboxVer          = "1.14.0"
+	xrayVer             = "26.3.27"
+	coreHTTPTO          = 90 * time.Second
+	mitaReadyTO         = 15 * time.Second
+	maxCoreArchive      = 256 << 20
+	maxCoreBinary       = 128 << 20
+	maxChecksumDoc      = 1 << 20
+	maxGitHubReleaseDoc = 8 << 20
 )
 
 // ensureCore installs the named core (xray / singbox / mita) into PATH if missing.
@@ -311,8 +313,11 @@ func installSingbox() error {
 	}
 	defer os.RemoveAll(tmp)
 	tg := filepath.Join(tmp, name)
-	checksums := fmt.Sprintf("https://github.com/SagerNet/sing-box/releases/download/v%s/sing-box-%s-checksums.txt", singboxVer, singboxVer)
-	if err := downloadVerified(u, checksums, name, tg); err != nil {
+	// v1.14.0 no longer publishes sing-box-<ver>-checksums.txt. GitHub still
+	// attests each uploaded asset with a sha256 digest. Read that from
+	// api.github.com, never through the download proxy, so a proxy cannot
+	// forge both the archive and the hash.
+	if err := downloadVerifiedGitHub(u, "SagerNet", "sing-box", "v"+singboxVer, name, tg); err != nil {
 		return err
 	}
 	dest := "/usr/local/bin/sing-box"
@@ -358,6 +363,22 @@ func downloadVerified(u, shaURL, asset, dest string) error {
 		_ = os.Remove(dest)
 		return fmt.Errorf("无法校验 %s: %w", asset, err)
 	}
+	return matchFileSHA256(dest, want)
+}
+
+func downloadVerifiedGitHub(archiveURL, owner, repo, tag, asset, dest string) error {
+	if err := download(archiveURL, dest); err != nil {
+		return err
+	}
+	want, err := fetchGitHubAssetSHA256(owner, repo, tag, asset)
+	if err != nil {
+		_ = os.Remove(dest)
+		return fmt.Errorf("无法校验 %s: %w", asset, err)
+	}
+	return matchFileSHA256(dest, want)
+}
+
+func matchFileSHA256(dest, want string) error {
 	got, err := fileSHA256(dest)
 	if err != nil {
 		_ = os.Remove(dest)
@@ -368,6 +389,128 @@ func downloadVerified(u, shaURL, asset, dest string) error {
 		return fmt.Errorf("sha256 不匹配 %s", filepath.Base(dest))
 	}
 	return nil
+}
+
+func githubPathSegment(s string) bool {
+	if s == "" || s == "." || s == ".." || len(s) > 128 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.' || r == '_' || r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func githubReleaseAPI(owner, repo, tag string) (string, error) {
+	if !githubPathSegment(owner) || !githubPathSegment(repo) || !githubPathSegment(tag) {
+		return "", fmt.Errorf("发布坐标不合法")
+	}
+	return "https://api.github.com/repos/" + owner + "/" + repo + "/releases/tags/" + tag, nil
+}
+
+func parseGitHubDigest(d string) (string, bool) {
+	algo, sum, ok := strings.Cut(strings.TrimSpace(d), ":")
+	if !ok || !strings.EqualFold(algo, "sha256") || !validSHA256(sum) {
+		return "", false
+	}
+	return strings.ToLower(sum), true
+}
+
+func assetSHA256FromRelease(body []byte, asset string) (string, error) {
+	var rel struct {
+		Assets []struct {
+			Name   string `json:"name"`
+			Digest string `json:"digest"`
+			State  string `json:"state"`
+		} `json:"assets"`
+	}
+	if err := json.Unmarshal(body, &rel); err != nil {
+		return "", fmt.Errorf("发布数据无法解析")
+	}
+	asset = strings.TrimSpace(asset)
+	if asset == "" {
+		return "", fmt.Errorf("缺少安装包名称")
+	}
+	var found string
+	n := 0
+	for _, a := range rel.Assets {
+		if a.Name != asset {
+			continue
+		}
+		if a.State != "" && a.State != "uploaded" {
+			continue
+		}
+		sum, ok := parseGitHubDigest(a.Digest)
+		if !ok {
+			return "", fmt.Errorf("GitHub 没有给出 %s 的 SHA-256", asset)
+		}
+		n++
+		found = sum
+	}
+	if n == 0 {
+		return "", fmt.Errorf("GitHub 发布没有 %s 的 SHA-256", asset)
+	}
+	if n > 1 {
+		return "", fmt.Errorf("GitHub 发布里 %s 有多份摘要", asset)
+	}
+	return found, nil
+}
+
+func fetchGitHubAssetSHA256(owner, repo, tag, asset string) (string, error) {
+	// Direct from api.github.com. A download proxy may serve the archive, but
+	// must not be able to supply the digest that the archive is checked against.
+	u, err := githubReleaseAPI(owner, repo, tag)
+	if err != nil {
+		return "", err
+	}
+	parsed, err := url.Parse(u)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || !strings.EqualFold(parsed.Host, "api.github.com") || parsed.User != nil {
+		return "", fmt.Errorf("校验地址必须是 api.github.com")
+	}
+	req, err := http.NewRequest(http.MethodGet, u, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "liking-agent")
+	req.Header.Set("Accept", "application/vnd.github+json")
+	client := &http.Client{
+		Timeout: 20 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if !strings.EqualFold(req.URL.Scheme, "https") || !strings.EqualFold(req.URL.Host, "api.github.com") || req.URL.User != nil {
+				return fmt.Errorf("校验地址重定向离开 api.github.com")
+			}
+			if len(via) >= 5 {
+				return fmt.Errorf("校验地址重定向过多")
+			}
+			return nil
+		},
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		if res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusTooManyRequests {
+			return "", fmt.Errorf("GitHub 资产摘要 HTTP %d，可能被限流", res.StatusCode)
+		}
+		return "", fmt.Errorf("GitHub 资产摘要 HTTP %d", res.StatusCode)
+	}
+	if res.ContentLength > maxGitHubReleaseDoc {
+		return "", fmt.Errorf("发布数据过大")
+	}
+	b, err := io.ReadAll(io.LimitReader(res.Body, maxGitHubReleaseDoc+1))
+	if err != nil {
+		return "", err
+	}
+	if len(b) > maxGitHubReleaseDoc {
+		return "", fmt.Errorf("发布数据过大")
+	}
+	return assetSHA256FromRelease(b, asset)
 }
 
 func assetName(u string) string {
