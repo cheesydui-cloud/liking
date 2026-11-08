@@ -985,6 +985,11 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
   .page-cta-bar > div { display: flex; gap: 8px; width: 100%; }
   .page-cta-bar > div > .btn-primary,
   .page-cta-bar > div > .btn-ghost { flex: 1; min-height: 44px; }
+  /* The bar is fixed over the viewport bottom. Inset the page so the last
+     card's actions (复制名片, 复制, 编辑) stay above it and can be tapped. */
+  main:has(.page-cta-bar) {
+    padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
+  }
 }
 
 .traffic-area-card {
