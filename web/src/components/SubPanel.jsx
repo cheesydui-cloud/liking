@@ -217,7 +217,7 @@ export function SubPanel({ token, onCopied, onRotate, rotating }) {
         <QRBlock label={pack.label} value={pack.qr} />
         <div className="min-w-0 flex-1">
           <div className="kicker mb-1">{pack.label}</div>
-          <div className="flex gap-2 items-start">
+          <div className="sub-link-row flex gap-2 items-start">
             <code className="copy-text copy-text-wrap flex-1">{shown}</code>
             <button type="button" className="btn-ghost h-8 shrink-0" onClick={() => setShow(v => !v)}>{show ? '隐藏' : '显示'}</button>
             <button type="button" className="btn-primary h-8 shrink-0" onClick={() => copy(pack.link, pack.copied)}>复制</button>

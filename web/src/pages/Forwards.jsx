@@ -558,6 +558,15 @@ function ForwardsPanel() {
 
   return (
     <div>
+      <PageHead
+        title="中转"
+        desc="入口加一跳落地。需要时再加跳，最多 5 跳。保存后到套餐里勾选这条入口。"
+        actions={
+          <button type="button" className="btn-primary" onClick={openCreate}>
+            <Icon name="plus" size={15} /> 新建中转
+          </button>
+        }
+      />
       {pollErr ? <div className="alert-row is-warn mb-4">{pollErr}</div> : null}
       {forwards.length > 0 ? (
         <div className="flex flex-col sm:flex-row gap-2 mb-3">
@@ -567,9 +576,6 @@ function ForwardsPanel() {
             <option value="chain">链式</option>
             <option value="port">端口中转</option>
           </select>
-          <button type="button" className="btn-primary sm:ml-auto shrink-0" onClick={openCreate}>
-            <Icon name="plus" size={15} /> 新建中转
-          </button>
         </div>
       ) : null}
 
@@ -896,13 +902,5 @@ function ForwardsPanel() {
 }
 
 export default function Forwards() {
-  return (
-    <div>
-      <PageHead
-        title="中转"
-        desc="入口加一跳落地。需要时再加跳，最多 5 跳。保存后到套餐里勾选这条入口。"
-      />
-      <ForwardsPanel />
-    </div>
-  )
+  return <ForwardsPanel />
 }

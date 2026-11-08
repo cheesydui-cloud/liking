@@ -966,30 +966,47 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
   color: var(--color-on-accent);
 }
 
-.page-cta-bar { display: none; }
+.page-head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.page-cta-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+@media (min-width: 640px) {
+  .page-head {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+  .page-cta-bar { flex-shrink: 0; justify-content: flex-end; }
+}
 
 @media (max-width: 639px) {
+  /* Phones clip position:fixed inside the scrolling pane, and bottom:0 sits
+     under the browser toolbar. Keep the actions in flow, stuck under the top bar. */
   .page-cta-bar {
-    display: flex;
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 25;
-    gap: 8px;
-    padding: 10px max(12px, env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
-    border-top: 1px solid var(--color-line);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    margin-left: -12px;
+    margin-right: -12px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--color-line);
     background: var(--color-surface);
   }
-  .page-cta-bar > .btn-primary { flex: 1; min-height: 44px; }
+  .page-cta-bar > .btn-primary,
+  .page-cta-bar > .btn-ghost,
+  .page-cta-bar > a { flex: 1; min-height: 44px; }
   .page-cta-bar > div { display: flex; gap: 8px; width: 100%; }
   .page-cta-bar > div > .btn-primary,
-  .page-cta-bar > div > .btn-ghost { flex: 1; min-height: 44px; }
-  /* The bar is fixed over the viewport bottom. Inset the page so the last
-     card's actions (复制名片, 复制, 编辑) stay above it and can be tapped. */
-  main:has(.page-cta-bar) {
-    padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
-  }
+  .page-cta-bar > div > .btn-ghost,
+  .page-cta-bar > div > a { flex: 1; min-height: 44px; }
 }
 
 .traffic-area-card {
@@ -1937,11 +1954,21 @@ html.dark.page-aliyun .machine {
   .used-edit-actions > button { flex: 1; }
   .input-field:not(textarea):not(select) { min-height: 44px; height: 44px; }
   .unit-switch button { min-height: 44px; height: 44px; }
+  .machine-head, .machine-foot { flex-wrap: wrap; }
+  .machine-toolbar { margin-left: auto; }
+  .seg { height: auto; flex-wrap: wrap; }
+  .seg-item { min-height: 44px; flex: 1 1 4.5rem; }
+  .used-edit .seg { flex-wrap: nowrap; }
+  .sub-link-row { flex-wrap: wrap; }
+  .sub-link-row .copy-text { flex: 1 1 100%; }
+  .sub-link-row > .btn-ghost,
+  .sub-link-row > .btn-primary { flex: 1; }
+  .scroll-pane { padding-bottom: calc(1rem + env(safe-area-inset-bottom)); }
   .btn-primary, .btn-ghost, .btn-danger { min-height: 44px; }
   .btn-ghost.w-8, .btn-ghost.w-9,
   .btn-primary.w-8, .btn-primary.w-9 { min-width: 44px; min-height: 44px; }
   .icon-btn { width: 44px; height: 44px; }
-  .row-act, .linkish { min-height: 36px; }
+  .row-act, .linkish, .machine-ports { min-height: 36px; }
   .filter-tabs, .lk-tabs {
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -1963,7 +1990,7 @@ html.dark.page-aliyun .machine {
   .toast-stack {
     left: 12px;
     right: 12px;
-    bottom: calc(4.75rem + env(safe-area-inset-bottom));
+    bottom: calc(12px + env(safe-area-inset-bottom));
   }
   .toast-stack .card { min-width: 0; }
   .login-box .relative .btn-ghost {
@@ -2142,4 +2169,12 @@ html.dark.page-aliyun .dash-stat.is-live {
   html.page-aliyun .dash-stat { padding: 14px 14px 12px; }
   html.page-aliyun .dash-stat-v { font-size: 20px; }
   html.page-aliyun .page-title { font-size: 18px; }
+}
+@media (max-width: 1023px) {
+  .topbar,
+  html.page-aliyun .topbar {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top);
+    height: calc(52px + env(safe-area-inset-top));
+  }
 }

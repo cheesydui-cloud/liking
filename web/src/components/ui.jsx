@@ -412,13 +412,10 @@ export function PageHead({ title, desc, actions }) {
     )
   }
   return (
-    <div className="mb-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="page-title">{title}</h1>
-          {desc && <p className="page-desc max-lg:mt-0 mt-1.5 max-w-2xl leading-relaxed">{desc}</p>}
-        </div>
-        {actions && <div className="hidden sm:flex flex-wrap items-center gap-2 shrink-0">{actions}</div>}
+    <div className="page-head">
+      <div className="min-w-0">
+        <h1 className="page-title">{title}</h1>
+        {desc && <p className="page-desc max-lg:mt-0 mt-1.5 max-w-2xl leading-relaxed">{desc}</p>}
       </div>
       {actions ? <div className="page-cta-bar">{actions}</div> : null}
     </div>
@@ -475,6 +472,7 @@ const modalStack = []
 
 export function Modal({ open, title, onClose, children, footer, wide, size }) {
   const titleId = useId()
+  const frameRef = useRef(null)
   useEffect(() => {
     if (!open) return
     const id = {}
@@ -496,10 +494,43 @@ export function Modal({ open, title, onClose, children, footer, wide, size }) {
     }
   }, [open, onClose])
 
+  useLayoutEffect(() => {
+    if (!open) return
+    const frame = frameRef.current
+    const vv = window.visualViewport
+    if (!frame || !vv) return
+    const apply = () => {
+      const narrow = window.matchMedia('(max-width: 639px)').matches
+      if (!narrow) {
+        frame.style.top = ''
+        frame.style.height = ''
+        frame.style.bottom = ''
+        return
+      }
+      // Keep the sheet inside the visible area. A fixed layer inside the
+      // scrolling pane is clipped on phones, and the keyboard covers bottom: 0.
+      frame.style.top = `${vv.offsetTop}px`
+      frame.style.height = `${vv.height}px`
+      frame.style.bottom = 'auto'
+    }
+    apply()
+    vv.addEventListener('resize', apply)
+    vv.addEventListener('scroll', apply)
+    window.addEventListener('resize', apply)
+    return () => {
+      vv.removeEventListener('resize', apply)
+      vv.removeEventListener('scroll', apply)
+      window.removeEventListener('resize', apply)
+      frame.style.top = ''
+      frame.style.height = ''
+      frame.style.bottom = ''
+    }
+  }, [open])
+
   if (!open) return null
   const max = size === 'xl' ? 'max-w-3xl' : (size === 'lg' || wide) ? 'max-w-2xl' : 'max-w-md'
-  return (
-    <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-0 sm:p-6">
+  return createPortal(
+    <div ref={frameRef} className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-0 sm:p-6">
       <button type="button" className="absolute inset-0 modal-scrim" aria-label="关闭" onClick={onClose} />
       <div
         role="dialog"
@@ -516,7 +547,8 @@ export function Modal({ open, title, onClose, children, footer, wide, size }) {
         <div className="modal-body">{children}</div>
         {footer ? <div className="modal-foot">{footer}</div> : null}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
