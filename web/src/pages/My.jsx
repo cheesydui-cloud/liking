@@ -7,9 +7,19 @@ import { startPoll } from '../lib/poll'
 import { asArray, isAbort } from '../lib/safe'
 import { DayBars, Meter, PageHead, billedBytes, fmtBytes, fmtDateShort } from '../components/ui'
 import { SubPanel } from '../components/SubPanel'
+import { NodeCard, periodBytes } from '../components/LineCard'
+import { copyText } from '../lib/copy'
 
 function sumDays(days) {
   return asArray(days).reduce((n, d) => n + (Number(d.up) || 0) + (Number(d.down) || 0), 0)
+}
+
+function sumDir(days) {
+  return asArray(days).reduce((acc, d) => {
+    acc.up += Number(d.up) || 0
+    acc.down += Number(d.down) || 0
+    return acc
+  }, { up: 0, down: 0 })
 }
 
 export default function My() {
@@ -54,29 +64,50 @@ export default function My() {
   const cap = traffic ? (Number(traffic.traffic_cap) || 0) : (user?.traffic_cap || 0)
   const ratio = cap > 0 ? Math.min(100, Math.round(used * 100 / cap)) : 0
   const nodes = asArray(payload.nodes)
+  const starred = asArray(payload.starred)
+  const starring = starred.length > 0
+  const inSub = nodes.filter(n => !starring || n.starred || starred.includes(Number(n.id)))
+  const ranked = [...inSub].sort((a, b) => periodBytes(b) - periodBytes(a))
   const period = sumDays(traffic?.days)
+  const dir = sumDir(traffic?.days)
   const rawUsed = (Number(user?.used_up) || 0) + (Number(user?.used_down) || 0)
+
+  const copyNode = async (n) => {
+    const text = n?.profile === 'wireguard' && n.conf ? n.conf : n?.uri
+    if (!text) {
+      toast('这个节点还没有分享链接', 'error')
+      return
+    }
+    try {
+      await copyText(text)
+      toast(n.profile === 'wireguard' ? '已复制 WireGuard 配置' : '已复制节点链接')
+    } catch {
+      toast('浏览器不允许自动复制，请到节点页复制', 'error')
+    }
+  }
 
   return (
     <div>
       <PageHead
         title={isAdmin ? '订阅' : '我的订阅'}
         desc={isAdmin
-          ? '包含全部节点。用管理员自己的身份，不占用用户额度。单条复制和常用节点在「节点」。'
+          ? '用自己的身份导入。不占用用户额度。'
           : '把链接导入 Clash Meta、sing-box、小火箭或 v2rayN，也可以扫码。流量按 G（1024³ 字节）计。'}
       />
       <div className="stat-row">
         {isAdmin ? (
           <>
             <div>
-              <div className="kicker">可用节点</div>
-              <span className="stat-val">{ready ? nodes.length : '—'}</span>
-              <div className="text-[12px] text-ink-mut mt-1">进订阅的节点</div>
+              <div className="kicker">进订阅</div>
+              <span className="stat-val">{ready ? inSub.length : '—'}</span>
+              <div className="text-[12px] text-ink-mut mt-1">
+                {starring ? `星标 ${starred.length} 个，其余不进` : '未标星，全部可用节点都进'}
+              </div>
             </div>
             <div>
               <div className="kicker">近 14 日（原始）</div>
               <span className="stat-val">{fmtBytes(period)}</span>
-              <div className="text-[12px] text-ink-mut mt-1">不含其他用户</div>
+              <div className="text-[12px] text-ink-mut mt-1">上行 {fmtBytes(dir.up)} · 下行 {fmtBytes(dir.down)}</div>
             </div>
             <div>
               <div className="kicker">累计（计费）</div>
@@ -123,7 +154,7 @@ export default function My() {
             rotating={rotating}
             onCopied={(msg, kind) => toast(msg, kind)}
             onRotate={async () => {
-              if (!(await dialog.confirm({ title: '重置订阅令牌', message: '旧订阅链接立刻失效。' }))) return
+              if (!(await dialog.confirm({ title: '重置订阅令牌', message: '旧订阅链接立刻失效。已经导入的节点 UUID 不变。' }))) return
               setRotating(true)
               try {
                 await api.post('/me/rotate-sub')
@@ -133,18 +164,27 @@ export default function My() {
               finally { setRotating(false) }
             }}
           />
-          {isAdmin ? (
-            <div className="text-[12px] text-ink-mut mt-3">
-              星标的节点会进订阅；未标星则全部可用节点都进。
-              <Link to="/my/nodes" className="linkish ml-1">去节点复制或标星</Link>
-            </div>
-          ) : null}
+        </div>
+      ) : null}
+
+      {isAdmin && ready && ranked.length > 0 ? (
+        <div className="mb-4">
+          <div className="node-cluster-head">
+            <span className="machine-name">进订阅的节点</span>
+            <span className="node-cluster-count">{ranked.length} 个</span>
+            <Link to="/my/nodes" className="linkish ml-auto">去节点标星</Link>
+          </div>
+          <div className="machine-grid">
+            {ranked.map(n => (
+              <NodeCard key={n.id} n={n} onCopy={copyNode} />
+            ))}
+          </div>
         </div>
       ) : null}
 
       {asArray(traffic?.days).length ? (
         <div className="mb-4">
-          <div className="text-[14px] font-semibold mb-3">近 14 日（原始）</div>
+          <div className="text-[14px] font-semibold mb-3">近 14 日 · 绿上行 · 橙下行</div>
           <DayBars days={asArray(traffic.days)} />
         </div>
       ) : null}

@@ -1,13 +1,29 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useToast } from '../components/Layout'
+import { useDialog, useToast } from '../components/Layout'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { cacheGen, peekList, putList } from '../lib/listCache'
 import { startPoll } from '../lib/poll'
 import { asArray, isAbort } from '../lib/safe'
+import { NodeCard, periodBytes } from '../components/LineCard'
 import {
-  Empty, FilterTabs, Icon, Modal, PageHead, SearchInput, SkeletonRows, StatusWord, fmtBytes,
+  Empty, FilterTabs, Icon, Modal, PageHead, SearchInput, SkeletonRows, StatusWord,
 } from '../components/ui'
+
+function groupByServer(list) {
+  const sorted = [...list].sort((a, b) => periodBytes(b) - periodBytes(a) || String(a.name || '').localeCompare(String(b.name || ''), 'zh'))
+  const by = new Map()
+  for (const n of sorted) {
+    const sid = Number(n.server_id) || 0
+    let g = by.get(sid)
+    if (!g) {
+      g = { id: sid, name: n.server_name || '未分组', online: !!n.server_online, nodes: [] }
+      by.set(sid, g)
+    }
+    g.nodes.push(n)
+  }
+  return [...by.values()]
+}
 
 function hiddenSummary(hidden) {
   const n = { '停用': 0, '实例已满': 0, '缺核心': 0 }
@@ -20,6 +36,7 @@ function hiddenSummary(hidden) {
 
 export default function MyNodes() {
   const toast = useToast()
+  const dialog = useDialog()
   const cached = peekList('me-nodes')
   const [payload, setPayload] = useState(() => cached ?? { nodes: [], hidden: [], starred: [] })
   const [ready, setReady] = useState(() => cached !== undefined)
@@ -84,24 +101,17 @@ export default function MyNodes() {
     })
   }, [nodes, q, kind])
 
-  const groups = useMemo(() => {
-    const by = new Map()
-    for (const n of filtered) {
-      const sid = Number(n.server_id) || 0
-      let g = by.get(sid)
-      if (!g) {
-        g = {
-          id: sid,
-          name: n.server_name || '未分组',
-          online: !!n.server_online,
-          nodes: [],
-        }
-        by.set(sid, g)
-      }
-      g.nodes.push(n)
-    }
-    return [...by.values()]
-  }, [filtered])
+  const starring = starred.length > 0
+  const inSub = useMemo(
+    () => filtered.filter(n => !starring || n.starred || starred.includes(Number(n.id))),
+    [filtered, starring, starred],
+  )
+  const outSub = useMemo(
+    () => (starring ? filtered.filter(n => !n.starred && !starred.includes(Number(n.id))) : []),
+    [filtered, starring, starred],
+  )
+  const inGroups = useMemo(() => groupByServer(inSub), [inSub])
+  const outGroups = useMemo(() => groupByServer(outSub), [outSub])
 
   const copyNode = async (n) => {
     if (n?.profile === 'wireguard' && n.conf) {
@@ -124,7 +134,7 @@ export default function MyNodes() {
   }
 
   const copyAll = async () => {
-    const uris = filtered.map(n => n.uri).filter(Boolean)
+    const uris = inSub.map(n => n.uri).filter(Boolean)
     if (!uris.length) {
       toast('没有可复制的链接', 'error')
       return
@@ -142,6 +152,14 @@ export default function MyNodes() {
   const toggleStar = async (n) => {
     const id = Number(n.id)
     const on = starred.includes(id)
+    if (!on && starred.length === 0) {
+      const ok = await dialog.confirm({
+        title: '只让标星的进订阅',
+        message: '之后只有标星的节点进 Clash 和订阅，其余会消失。一个都不标时，全部可用节点都会进。',
+        okText: '标星',
+      })
+      if (!ok) return
+    }
     const next = on ? starred.filter(x => Number(x) !== id) : [...starred, id]
     setPayload(prev => {
       const updated = {
@@ -173,9 +191,9 @@ export default function MyNodes() {
     <div>
       <PageHead
         title="节点"
-        desc="按实例分组。复制是当前账号的链接。星标的会进 Clash / 订阅；一个都不标则全部可用节点都进。"
-        actions={filtered.some(n => n.uri) ? (
-          <button type="button" className="btn-ghost" onClick={copyAll}>复制全部链接</button>
+        desc="复制的是当前账号的链接。星标后只把常用节点放进订阅；一个都不标则全部可用节点都进。"
+        actions={inSub.some(n => n.uri) ? (
+          <button type="button" className="btn-ghost" onClick={copyAll}>复制进订阅的链接</button>
         ) : null}
       />
       {error ? <div className="alert-row is-warn mb-4">{error}</div> : null}
@@ -192,115 +210,83 @@ export default function MyNodes() {
 
       {!ready ? (
         <div className="card overflow-hidden"><SkeletonRows /></div>
-      ) : groups.length === 0 ? (
+      ) : nodes.length === 0 ? (
         <div className="card overflow-hidden">
-          <Empty title={q || kind ? '没有匹配的节点' : '还没有可用节点'} hint={emptyHint()} />
+          <Empty title="还没有可用节点" hint={emptyHint()} />
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="card overflow-hidden">
+          <Empty title="没有匹配的节点" hint="换个关键词或筛选。" />
         </div>
       ) : (
         <div>
-          {groups.map(g => (
-            <section key={g.id || g.name} className="node-cluster">
+          <div className="text-[13px] text-ink-soft mb-3">
+            {starring ? `星标 ${starred.length} 个进订阅，其余不进。` : '未标星，下面全部进订阅。'}
+          </div>
+          {inGroups.map(g => (
+            <section key={`in-${g.id}`} className="node-cluster">
               <div className="node-cluster-head">
                 <span className="machine-name truncate">{g.name}</span>
                 <StatusWord online={g.online} />
                 <span className="node-cluster-count">{g.nodes.length} 个</span>
               </div>
-              <div className="card overflow-hidden mb-4">
-                <div className="hidden md:block table-wrap">
-                  <table className="data">
-                    <thead>
-                      <tr>
-                        <th>名称</th>
-                        <th>地址</th>
-                        <th>协议</th>
-                        <th>近 14 日（原始）</th>
-                        <th>累计（原始）</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {g.nodes.map(n => (
-                        <tr key={n.id}>
-                          <td className="font-medium">
-                            {n.name}
-                            {n.line_kind === 'chain' ? <span className="line-tag">中转</span> : null}
-                          </td>
-                          <td className="copy-text">{n.host ? `${n.host}:${n.port}` : '—'}</td>
-                          <td className="text-[12px] text-ink-mut">{n.profile}</td>
-                          <td className="tabular-nums text-[12px] font-mono whitespace-nowrap">{fmtBytes((n.period_up || 0) + (n.period_down || 0))}</td>
-                          <td className="tabular-nums text-[12px] font-mono whitespace-nowrap">{fmtBytes((n.used_up || 0) + (n.used_down || 0))}</td>
-                          <td className="text-right whitespace-nowrap w-px">
-                            <div className="inline-flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                className={`icon-btn${n.starred ? ' is-on' : ''}`}
-                                disabled={starBusy}
-                                onClick={() => toggleStar(n)}
-                                aria-label={n.starred ? '取消常用' : '标为常用'}
-                                title={n.starred ? '取消常用' : '常用，进订阅'}
-                              >
-                                <Icon name={n.starred ? 'star-on' : 'star'} size={14} />
-                              </button>
-                              <button type="button" className="row-act" disabled={!n.uri} onClick={() => copyNode(n)}>复制</button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="md:hidden divide-y" style={{ borderColor: 'var(--color-line-soft)' }}>
-                  {g.nodes.map(n => (
-                    <div key={n.id} className="px-3.5 py-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="font-medium">
-                            {n.name}
-                            {n.line_kind === 'chain' ? <span className="line-tag">中转</span> : null}
-                          </div>
-                          <div className="copy-text mt-0.5">{n.host ? `${n.host}:${n.port}` : '—'}</div>
-                          <div className="text-[12px] text-ink-mut mt-0.5">
-                            {n.profile} · 近 14 日 {fmtBytes((n.period_up || 0) + (n.period_down || 0))} · 累计 {fmtBytes((n.used_up || 0) + (n.used_down || 0))}
-                          </div>
-                        </div>
-                        <div className="inline-flex items-center gap-1.5 shrink-0">
-                          <button
-                            type="button"
-                            className={`icon-btn${n.starred ? ' is-on' : ''}`}
-                            disabled={starBusy}
-                            onClick={() => toggleStar(n)}
-                            aria-label={n.starred ? '取消常用' : '标为常用'}
-                            title={n.starred ? '取消常用' : '常用，进订阅'}
-                          >
-                            <Icon name={n.starred ? 'star-on' : 'star'} size={14} />
-                          </button>
-                          <button type="button" className="row-act" disabled={!n.uri} onClick={() => copyNode(n)}>复制</button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              <div className="machine-grid">
+                {g.nodes.map(n => (
+                  <NodeCard key={n.id} n={n} starBusy={starBusy} onStar={toggleStar} onCopy={copyNode} />
+                ))}
               </div>
             </section>
           ))}
+          {outGroups.length > 0 ? (
+            <div className="mt-6">
+              <div className="node-cluster-head">
+                <span className="machine-name">未进订阅</span>
+                <span className="node-cluster-count">{outSub.length} 个</span>
+              </div>
+              {outGroups.map(g => (
+                <section key={`out-${g.id}`} className="node-cluster">
+                  <div className="node-cluster-head">
+                    <span className="machine-name truncate">{g.name}</span>
+                    <StatusWord online={g.online} />
+                    <span className="node-cluster-count">{g.nodes.length} 个</span>
+                  </div>
+                  <div className="machine-grid">
+                    {g.nodes.map(n => (
+                      <NodeCard key={n.id} n={n} starBusy={starBusy} onStar={toggleStar} onCopy={copyNode} />
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : null}
         </div>
       )}
 
       {ready && hidden.length > 0 ? (
-        <div className="card p-4">
-          <button type="button" className="row-act" onClick={() => setOpenHidden(v => !v)}>
-            未进订阅：{hidden.length} 个（{hiddenSummary(hidden)}）
-          </button>
+        <div className="mt-6">
+          <div className="node-cluster-head">
+            <button type="button" className="row-act" onClick={() => setOpenHidden(v => !v)}>
+              {openHidden ? '收起' : '不可用'}：{hidden.length} 个（{hiddenSummary(hidden)}）
+            </button>
+          </div>
           {openHidden ? (
-            <ul className="mt-3 space-y-1.5 text-[13px] text-ink-soft">
+            <div className="machine-grid">
               {hidden.map(h => (
-                <li key={h.id}>
-                  <span className="font-medium text-ink">{h.name}</span>
-                  {h.server_name ? <span className="text-ink-mut"> · {h.server_name}</span> : null}
-                  <span className="text-ink-mut"> · {h.reason}</span>
-                </li>
+                <div key={h.id} className="machine is-static is-off">
+                  <div className="machine-head">
+                    <div className="min-w-0 flex-1">
+                      <div className="machine-title">
+                        <span className="machine-name truncate">{h.name}</span>
+                        <span className="status-word is-mute">{h.reason}</span>
+                      </div>
+                      <div className="machine-host">
+                        <span className="machine-host-addr">{h.server_name || '—'}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               ))}
-            </ul>
+            </div>
           ) : null}
         </div>
       ) : null}

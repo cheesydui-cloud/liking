@@ -1,8 +1,25 @@
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
 import { copyText } from '../lib/copy'
-import { Icon } from './ui'
+import { FilterTabs } from './ui'
 import { useUser } from './Layout'
+
+const CLIENT_KEY = 'liking.sub.client'
+const CLIENTS = [
+  ['clash', 'Clash Meta'],
+  ['singbox', 'sing-box'],
+  ['rocket', '小火箭'],
+  ['v2rayn', 'v2rayN'],
+  ['auto', '自动识别'],
+]
+
+function loadClient() {
+  try {
+    const v = localStorage.getItem(CLIENT_KEY)
+    if (CLIENTS.some(c => c[0] === v)) return v
+  } catch { /* private mode */ }
+  return 'clash'
+}
 
 export function panelBase(panelUrl) {
   const raw = String(panelUrl || '').trim().replace(/\/+$/, '')
@@ -39,6 +56,14 @@ export function shadowrocketQRPayload(token, base) {
 
 export function shadowrocketImportURL(token, base) {
   return `shadowrocket://add/sub://${toBase64(subURL(token, 'uri', base))}`
+}
+
+export function maskSubURL(url) {
+  const s = String(url || '')
+  if (!s) return ''
+  if (s.startsWith('sub://')) return 'sub://••••'
+  const masked = s.replace(/(\/api\/sub\/)[^/?#]+/, '$1••••')
+  return masked === s ? '••••' : masked
 }
 
 function qrOpts() {
@@ -83,20 +108,68 @@ function QRBlock({ label, value }) {
   )
 }
 
+function clientBundle(id, token, base) {
+  const uri = subURL(token, 'uri', base)
+  if (id === 'singbox') {
+    return {
+      label: 'sing-box',
+      link: subURL(token, 'singbox', base),
+      qr: subURL(token, 'singbox', base),
+      open: singboxImportURL(token, base),
+      openLabel: '打开 sing-box',
+      download: ['singbox', 'liking.json', '下载 sing-box'],
+      copied: '已复制 sing-box 订阅',
+    }
+  }
+  if (id === 'rocket') {
+    return {
+      label: '小火箭',
+      link: uri,
+      qr: shadowrocketQRPayload(token, base),
+      open: shadowrocketImportURL(token, base),
+      openLabel: '打开小火箭',
+      copied: '已复制小火箭订阅',
+    }
+  }
+  if (id === 'v2rayn') {
+    return {
+      label: 'v2rayN',
+      link: uri,
+      qr: uri,
+      copied: '已复制 v2rayN 订阅',
+    }
+  }
+  if (id === 'auto') {
+    return {
+      label: '自动识别',
+      link: subURL(token, '', base),
+      qr: subURL(token, '', base),
+      copied: '已复制自动识别链接',
+    }
+  }
+  return {
+    label: 'Clash Meta',
+    link: subURL(token, 'clash', base),
+    qr: subURL(token, 'clash', base),
+    open: clashImportURL(token, base),
+    openLabel: '打开 Clash',
+    download: ['clash', 'liking.yaml', '下载 Clash'],
+    copied: '已复制 Clash 订阅',
+  }
+}
+
 export function SubPanel({ token, onCopied, onRotate, rotating }) {
   const { panelUrl } = useUser() || {}
   const base = panelBase(panelUrl)
+  const [client, setClient] = useState(loadClient)
+  const [show, setShow] = useState(false)
   const [downloading, setDownloading] = useState('')
-  const auto = subURL(token, '', base)
-  const uri = subURL(token, 'uri', base)
-  const rocket = shadowrocketQRPayload(token, base)
-  const rows = [
-    ['自动识别', auto],
-    ['Clash Meta', subURL(token, 'clash', base)],
-    ['sing-box', subURL(token, 'singbox', base)],
-    ['小火箭', rocket],
-    ['v2rayN', uri],
-  ]
+  const pack = clientBundle(client, token, base)
+
+  const pick = (id) => {
+    setClient(id)
+    try { localStorage.setItem(CLIENT_KEY, id) } catch { /* private mode */ }
+  }
 
   const copy = async (v, ok = '已复制') => {
     try {
@@ -129,43 +202,40 @@ export function SubPanel({ token, onCopied, onRotate, rotating }) {
     }
   }
 
+  const shown = show ? pack.link : maskSubURL(pack.link)
   return (
-    <div className="flex flex-col md:flex-row gap-5">
-      <div className="flex flex-wrap gap-4 shrink-0 justify-center md:justify-start">
-        <QRBlock label="扫码导入" value={auto} />
-        <QRBlock label="小火箭" value={rocket} />
-        <QRBlock label="v2rayN" value={uri} />
+    <div>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+        <FilterTabs value={client} onChange={pick} items={CLIENTS} />
+        {onRotate ? (
+          <button type="button" className="btn-ghost h-8 shrink-0" disabled={rotating} onClick={onRotate}>
+            {rotating ? '重置中…' : '重置令牌'}
+          </button>
+        ) : null}
       </div>
-      <div className="flex-1 space-y-3 min-w-0">
-        {rows.map(([k, v]) => (
-          <div key={k}>
-            <div className="kicker mb-1">{k}</div>
-            <div className="flex gap-2 items-center">
-              <code className="copy-text copy-text-wrap flex-1">{v}</code>
-              <button type="button" className="icon-btn" onClick={() => copy(v)} aria-label={`复制${k}`} title="复制">
-                <Icon name="copy" size={14} />
-              </button>
-            </div>
+      <div className="flex flex-col sm:flex-row gap-4 min-w-0">
+        <QRBlock label={pack.label} value={pack.qr} />
+        <div className="min-w-0 flex-1">
+          <div className="kicker mb-1">{pack.label}</div>
+          <div className="flex gap-2 items-start">
+            <code className="copy-text copy-text-wrap flex-1">{shown}</code>
+            <button type="button" className="btn-ghost h-8 shrink-0" onClick={() => setShow(v => !v)}>{show ? '隐藏' : '显示'}</button>
+            <button type="button" className="btn-primary h-8 shrink-0" onClick={() => copy(pack.link, pack.copied)}>复制</button>
           </div>
-        ))}
-        <div className="flex flex-wrap gap-2 pt-1">
-          <button type="button" className="btn-primary h-8" onClick={() => copy(subURL(token, 'clash', base), '已复制 Clash 订阅')}>复制 Clash 订阅</button>
-          <a className="btn-ghost h-8" href={clashImportURL(token, base)}>打开 Clash</a>
-          <a className="btn-ghost h-8" href={singboxImportURL(token, base)}>打开 sing-box</a>
-          <a className="btn-ghost h-8" href={shadowrocketImportURL(token, base)}>打开小火箭</a>
-          <button type="button" className="btn-ghost h-8" onClick={() => copy(uri, '已复制 v2rayN 订阅')}>复制 v2rayN 订阅</button>
-          <button type="button" className="btn-ghost h-8" disabled={!!downloading} onClick={() => download('clash', 'liking.yaml')}>
-            {downloading === 'clash' ? '下载中…' : '下载 Clash'}
-          </button>
-          <button type="button" className="btn-ghost h-8" disabled={!!downloading} onClick={() => download('singbox', 'liking.json')}>
-            {downloading === 'singbox' ? '下载中…' : '下载 sing-box'}
-          </button>
-          <button type="button" className="btn-ghost h-8" onClick={() => copy(auto, '已复制自动识别链接')}><Icon name="link" size={14} /> 复制自动识别</button>
-          {onRotate ? (
-            <button type="button" className="btn-ghost h-8" disabled={rotating} onClick={onRotate}>
-              {rotating ? '重置中…' : '重置令牌'}
-            </button>
-          ) : null}
+          <div className="text-[12px] text-ink-mut mt-2">复制拿到完整地址。显示只用来核对。</div>
+          <div className="flex flex-wrap gap-2 mt-3">
+            {pack.open ? <a className="btn-ghost h-8" href={pack.open}>{pack.openLabel}</a> : null}
+            {pack.download ? (
+              <button
+                type="button"
+                className="btn-ghost h-8"
+                disabled={!!downloading}
+                onClick={() => download(pack.download[0], pack.download[1])}
+              >
+                {downloading === pack.download[0] ? '下载中…' : pack.download[2]}
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>
