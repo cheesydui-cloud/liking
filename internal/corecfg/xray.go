@@ -29,6 +29,11 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 		if in.Core != CoreXray || !in.Enabled {
 			continue
 		}
+		if in.Profile == ProfilePortForward && in.OwnerUserID != 0 {
+			if _, _, ok := ownerPortClient(in, clients[in.ID]); !ok {
+				continue
+			}
+		}
 		obj, err := xrayInbound(in, clients[in.ID], certs, byID)
 		if err != nil {
 			return nil, err
@@ -51,6 +56,19 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 				"type": "field", "inboundTag": []string{tag}, "outboundTag": obTag,
 			})
 			continue
+		}
+		if in.Profile == ProfilePortForward && in.OwnerUserID != 0 {
+			mark, _, ok := ownerPortClient(in, clients[in.ID])
+			if ok {
+				if _, seen := limitOuts[mark]; !seen {
+					limitOuts[mark] = struct{}{}
+					outs = append(outs, xrayLimitFreedom(mark))
+				}
+				directRules = append(directRules, map[string]any{
+					"type": "field", "inboundTag": []string{tag}, "outboundTag": limitTag(mark),
+				})
+				continue
+			}
 		}
 		// Each direct user gets a marked freedom outbound. The mark is how the
 		// agent attributes bytes when the stats API returns nothing. Speed
@@ -134,6 +152,15 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 		"outbounds": outs,
 		"routing":   map[string]any{"domainStrategy": "AsIs", "rules": rules},
 	}, nil
+}
+
+func ownerPortClient(in *db.Inbound, clients []*db.Client) (uint32, string, bool) {
+	for _, c := range clients {
+		if mark, email, ok := ownerPortAcct(in, c); ok {
+			return mark, email, true
+		}
+	}
+	return 0, "", false
 }
 
 func inboundTag(id int64) string  { return fmt.Sprintf("in-%d", id) }

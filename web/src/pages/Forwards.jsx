@@ -251,7 +251,7 @@ function ForwardsPanel() {
     return m
   }, [servers])
 
-  const forwards = useMemo(() => list.filter(x => forwardKind(x)), [list])
+  const forwards = useMemo(() => list.filter(x => forwardKind(x) && !Number(x.owner_user_id)), [list])
   const directs = useMemo(() => list.filter(x => isDirectNode(x) && x.profile !== 'wireguard'), [list])
   const landings = useMemo(
     () => list.filter(x => isDirectNode(x) && LAND_PROFILES.includes(x.profile) && Number(x.id) !== Number(editId)),

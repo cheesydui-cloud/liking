@@ -27,7 +27,7 @@ func TestConfiguredPackageWritesAreAtomic(t *testing.T) {
 	}
 	defer d.Close()
 	p := &Package{Name: "bad", Direction: "oneway", CycleDays: 30}
-	if _, err := CreatePackageConfigured(d, p, PackageRelationsServer, []int64{999}, nil); err == nil {
+	if _, err := CreatePackageConfigured(d, p, PackageRelationsServer, []int64{999}, nil, nil); err == nil {
 		t.Fatal("expected invalid server error")
 	}
 	list, err := ListPackages(d)
@@ -43,7 +43,7 @@ func TestConfiguredPackageWritesAreAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	good.Name = "changed"
-	if err := UpdatePackageConfigured(d, good, PackageRelationsServer, []int64{999}, nil); err == nil {
+	if err := UpdatePackageConfigured(d, good, PackageRelationsServer, []int64{999}, nil, nil); err == nil {
 		t.Fatal("expected invalid server error")
 	}
 	fresh, err := GetPackage(d, good.ID)

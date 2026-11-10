@@ -1331,6 +1331,28 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
   font-size: 12px;
   flex: 0 0 auto;
 }
+.pkg-node-acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.pkg-transit {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-ctl);
+  background: transparent;
+  color: var(--color-ink-mut);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pkg-transit.is-on {
+  color: var(--color-ink);
+  border-color: var(--color-accent);
+  background: var(--color-fill);
+}
 .param-row {
   @apply grid gap-2 items-start py-2 border-b;
   grid-template-columns: 6.5rem minmax(0, 1fr) auto;
@@ -2006,7 +2028,13 @@ html.dark.page-aliyun .machine {
     padding-right: 12px;
     padding-bottom: 8px;
   }
-  .pkg-mult-wrap { padding-left: 42px; width: 100%; }
+  .pkg-node-acts {
+    width: 100%;
+    padding-left: 42px;
+    justify-content: flex-start;
+  }
+  .pkg-mult-wrap { width: auto; }
+  .pkg-transit { min-height: 36px; }
   .pkg-node-meta { white-space: normal; }
   .traffic-area-tip { white-space: normal; max-width: calc(100% - 24px); }
 }

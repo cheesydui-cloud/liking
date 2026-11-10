@@ -639,7 +639,11 @@ func (h *Hub) applySamples(serverID int64, samples []wsproto.Sample, skipWGEmail
 					pkgCache[pid] = p
 				}
 			}
-			mult = db.PackageMultiplier(pkgCache[pid], in.ID)
+			billID := in.ID
+			if in.OwnerUserID != 0 && in.EntryInboundID != 0 {
+				billID = in.EntryInboundID
+			}
+			mult = db.PackageMultiplier(pkgCache[pid], billID)
 		}
 		upB, okUp := billBytes(up, mult)
 		downB, okDown := billBytes(down, mult)

@@ -2,6 +2,7 @@ package corecfg
 
 import (
 	"sort"
+	"strings"
 
 	"liking/internal/db"
 	"liking/internal/wsproto"
@@ -53,6 +54,22 @@ func AcctMark(c *db.Client, inboundID int64) uint32 {
 	return SpeedMarkBase | uint32(id)
 }
 
+// ownerPortAcct bills a personal port-forward on the owner's mark.
+// Shared port-forwards stay unmarked, the same as before.
+func ownerPortAcct(in *db.Inbound, c *db.Client) (mark uint32, email string, ok bool) {
+	if in == nil || c == nil || !c.Enabled || in.Profile != ProfilePortForward || in.OwnerUserID == 0 {
+		return 0, "", false
+	}
+	if c.UserID != in.OwnerUserID || strings.TrimSpace(c.Email) == "" {
+		return 0, "", false
+	}
+	mark = AcctMark(c, in.ID)
+	if mark == 0 {
+		return 0, "", false
+	}
+	return mark, c.Email, true
+}
+
 func clientAcct(in *db.Inbound, c *db.Client) (mark uint32, email string, ok bool) {
 	if !acctProfile(in) || c == nil || !c.Enabled {
 		return 0, "", false
@@ -77,6 +94,9 @@ func collectAcctMarks(ins []*db.Inbound, clients map[int64][]*db.Client) []wspro
 		}
 		for _, c := range clients[in.ID] {
 			mark, email, ok := clientAcct(in, c)
+			if !ok {
+				mark, email, ok = ownerPortAcct(in, c)
+			}
 			if !ok {
 				continue
 			}

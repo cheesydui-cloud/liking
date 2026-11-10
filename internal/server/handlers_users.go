@@ -546,6 +546,10 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if fresh, err := db.GetUser(s.DB, u.ID); err == nil && fresh != nil {
 		u = fresh
 	}
+	if err := db.SyncUserForwards(s.DB, u); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	s.provisionAndSyncUser(u)
 	jsonOK(w, map[string]any{"user": adminUserView(u)})
 }
@@ -565,11 +569,20 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "不能删除当前登录账号")
 		return
 	}
+	servers, err := db.DeleteOwnedInbounds(s.DB, id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if err := db.DeleteUser(s.DB, id); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.syncAll()
+	if _, err := corecfg.ProvisionAll(s.DB); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.syncServers(servers...)
 	jsonOK(w, map[string]any{"ok": true})
 }
 

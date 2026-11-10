@@ -52,6 +52,12 @@ func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
 			continue
 		}
 		if !UserFacing(in.Profile) {
+			if in.OwnerUserID == u.ID && in.Profile == ProfilePortForward {
+				if err := ensureOwnerPortClient(d, u, in, ok); err != nil {
+					return nil, err
+				}
+				touched[in.ServerID] = struct{}{}
+			}
 			continue
 		}
 		created := false
@@ -115,6 +121,33 @@ func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
 		out = append(out, id)
 	}
 	return out, nil
+}
+
+func ensureOwnerPortClient(d *sql.DB, u *db.User, in *db.Inbound, accessOK bool) error {
+	if u == nil || in == nil || in.OwnerUserID != u.ID {
+		return nil
+	}
+	want := accessOK && in.Enabled
+	email := db.EmailFor(u.ID, in.ID)
+	c, err := db.GetClient(d, in.ID, u.ID)
+	if err == sql.ErrNoRows {
+		c = &db.Client{
+			InboundID: in.ID,
+			UserID:    u.ID,
+			Email:     email,
+			Enabled:   want,
+		}
+		return db.UpsertClient(d, c)
+	}
+	if err != nil {
+		return err
+	}
+	if c.Enabled == want && c.Email == email {
+		return nil
+	}
+	c.Enabled = want
+	c.Email = email
+	return db.UpsertClient(d, c)
 }
 
 func newClient(u *db.User, in *db.Inbound) (*db.Client, error) {

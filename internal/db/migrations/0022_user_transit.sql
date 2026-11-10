@@ -1,0 +1,6 @@
+ALTER TABLE package_inbounds ADD COLUMN transit INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE inbounds ADD COLUMN owner_user_id INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE inbounds ADD COLUMN entry_inbound_id INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE inbounds ADD COLUMN auth_hold INTEGER NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS idx_inbounds_owner ON inbounds(owner_user_id);

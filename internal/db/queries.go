@@ -949,9 +949,15 @@ func updatePackageTx(tx *sql.Tx, p *Package) error {
 	return err
 }
 
-func setPackageInboundsTx(tx *sql.Tx, pkgID int64, inboundIDs []int64, multipliers []float64) error {
+func setPackageInboundsTx(tx *sql.Tx, pkgID int64, inboundIDs []int64, multipliers []float64, transitIDs []int64) error {
 	if _, err := tx.Exec(`DELETE FROM package_inbounds WHERE package_id=?`, pkgID); err != nil {
 		return err
+	}
+	transit := map[int64]struct{}{}
+	for _, id := range transitIDs {
+		if id > 0 {
+			transit[id] = struct{}{}
+		}
 	}
 	for i, iid := range inboundIDs {
 		m := 1.0
@@ -962,7 +968,11 @@ func setPackageInboundsTx(tx *sql.Tx, pkgID int64, inboundIDs []int64, multiplie
 			}
 			m = got
 		}
-		if _, err := tx.Exec(`INSERT INTO package_inbounds(package_id,inbound_id,multiplier) VALUES(?,?,?)`, pkgID, iid, m); err != nil {
+		flag := 0
+		if _, ok := transit[iid]; ok {
+			flag = 1
+		}
+		if _, err := tx.Exec(`INSERT INTO package_inbounds(package_id,inbound_id,multiplier,transit) VALUES(?,?,?,?)`, pkgID, iid, m, flag); err != nil {
 			return err
 		}
 	}
@@ -989,7 +999,7 @@ func setPackageServersTx(tx *sql.Tx, pkgID int64, serverIDs []int64) error {
 	return nil
 }
 
-func CreatePackageConfigured(d *sql.DB, p *Package, relation string, ids []int64, multipliers []float64) (*Package, error) {
+func CreatePackageConfigured(d *sql.DB, p *Package, relation string, ids []int64, multipliers []float64, transitIDs []int64) (*Package, error) {
 	tx, err := d.Begin()
 	if err != nil {
 		return nil, err
@@ -1001,7 +1011,7 @@ func CreatePackageConfigured(d *sql.DB, p *Package, relation string, ids []int64
 	}
 	switch relation {
 	case PackageRelationsInbound:
-		if err := setPackageInboundsTx(tx, id, ids, multipliers); err != nil {
+		if err := setPackageInboundsTx(tx, id, ids, multipliers, transitIDs); err != nil {
 			return nil, err
 		}
 		if err := setPackageServersTx(tx, id, nil); err != nil {
@@ -1011,7 +1021,7 @@ func CreatePackageConfigured(d *sql.DB, p *Package, relation string, ids []int64
 		if err := setPackageServersTx(tx, id, ids); err != nil {
 			return nil, err
 		}
-		if err := setPackageInboundsTx(tx, id, nil, nil); err != nil {
+		if err := setPackageInboundsTx(tx, id, nil, nil, nil); err != nil {
 			return nil, err
 		}
 	default:
@@ -1023,7 +1033,7 @@ func CreatePackageConfigured(d *sql.DB, p *Package, relation string, ids []int64
 	return GetPackage(d, id)
 }
 
-func UpdatePackageConfigured(d *sql.DB, p *Package, relation string, ids []int64, multipliers []float64) error {
+func UpdatePackageConfigured(d *sql.DB, p *Package, relation string, ids []int64, multipliers []float64, transitIDs []int64) error {
 	tx, err := d.Begin()
 	if err != nil {
 		return err
@@ -1035,7 +1045,7 @@ func UpdatePackageConfigured(d *sql.DB, p *Package, relation string, ids []int64
 	switch relation {
 	case PackageRelationsNone:
 	case PackageRelationsInbound:
-		if err := setPackageInboundsTx(tx, p.ID, ids, multipliers); err != nil {
+		if err := setPackageInboundsTx(tx, p.ID, ids, multipliers, transitIDs); err != nil {
 			return err
 		}
 		if err := setPackageServersTx(tx, p.ID, nil); err != nil {
@@ -1045,7 +1055,7 @@ func UpdatePackageConfigured(d *sql.DB, p *Package, relation string, ids []int64
 		if err := setPackageServersTx(tx, p.ID, ids); err != nil {
 			return err
 		}
-		if err := setPackageInboundsTx(tx, p.ID, nil, nil); err != nil {
+		if err := setPackageInboundsTx(tx, p.ID, nil, nil, nil); err != nil {
 			return err
 		}
 	default:
@@ -1065,19 +1075,23 @@ func GetPackage(d *sql.DB, id int64) (*Package, error) {
 	p.SubRuleCategories = decodeStringSlice(catsRaw)
 	p.SiteDenyCategories = decodeStringSlice(denyCatsRaw)
 	p.SiteDenyDomains = decodeStringSlice(denyDomsRaw)
-	rows, err := d.Query(`SELECT inbound_id, multiplier FROM package_inbounds WHERE package_id=?`, id)
+	rows, err := d.Query(`SELECT inbound_id, multiplier, transit FROM package_inbounds WHERE package_id=?`, id)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var iid int64
 		var m float64
-		if err := rows.Scan(&iid, &m); err != nil {
+		var transit int
+		if err := rows.Scan(&iid, &m, &transit); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		p.InboundIDs = append(p.InboundIDs, iid)
 		p.Multipliers = append(p.Multipliers, m)
+		if transit != 0 {
+			p.TransitIDs = append(p.TransitIDs, iid)
+		}
 	}
 	err = rows.Err()
 	rows.Close()
@@ -1122,7 +1136,7 @@ func SetPackageInbounds(d *sql.DB, pkgID int64, inboundIDs []int64, multipliers 
 		return err
 	}
 	defer tx.Rollback()
-	if err := setPackageInboundsTx(tx, pkgID, inboundIDs, multipliers); err != nil {
+	if err := setPackageInboundsTx(tx, pkgID, inboundIDs, multipliers, nil); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1211,10 +1225,10 @@ func CreateInbound(d *sql.DB, in *Inbound) (*Inbound, error) {
 			return nil, fmt.Errorf("该服务器上端口已被占用")
 		}
 	}
-	res, err := tx.Exec(`INSERT INTO inbounds(server_id,name,profile,protocol,network,security,core,listen,port,enabled,settings,cert_id,line_kind,exit_inbound_id,exit_uri,reject_cn,created_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	res, err := tx.Exec(`INSERT INTO inbounds(server_id,name,profile,protocol,network,security,core,listen,port,enabled,settings,cert_id,line_kind,exit_inbound_id,exit_uri,reject_cn,owner_user_id,entry_inbound_id,auth_hold,created_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		in.ServerID, in.Name, in.Profile, in.Protocol, in.Network, in.Security, in.Core, in.Listen, in.Port, boolInt(in.Enabled),
-		in.Settings, in.CertID, nz(in.LineKind, "direct"), in.ExitInboundID, in.ExitURI, boolInt(in.RejectCN), now())
+		in.Settings, in.CertID, nz(in.LineKind, "direct"), in.ExitInboundID, in.ExitURI, boolInt(in.RejectCN), in.OwnerUserID, in.EntryInboundID, boolInt(in.AuthHold), now())
 	if err != nil {
 		return nil, err
 	}
@@ -1230,18 +1244,19 @@ func CreateInbound(d *sql.DB, in *Inbound) (*Inbound, error) {
 
 func GetInbound(d *sql.DB, id int64) (*Inbound, error) {
 	in := &Inbound{}
-	var en, rejectCN int
+	var en, rejectCN, authHold int
 	var certID, exitID sql.NullInt64
-	err := d.QueryRow(`SELECT i.id,i.server_id,i.name,i.profile,i.protocol,i.network,i.security,i.core,i.listen,i.port,i.enabled,i.settings,i.cert_id,i.line_kind,i.exit_inbound_id,i.exit_uri,i.reject_cn,i.created_at,
+	err := d.QueryRow(`SELECT i.id,i.server_id,i.name,i.profile,i.protocol,i.network,i.security,i.core,i.listen,i.port,i.enabled,i.settings,i.cert_id,i.line_kind,i.exit_inbound_id,i.exit_uri,i.reject_cn,i.owner_user_id,i.entry_inbound_id,i.auth_hold,i.created_at,
 		s.name, s.public_host, s.connect_ip, s.online
 		FROM inbounds i JOIN servers s ON s.id=i.server_id WHERE i.id=?`, id).
-		Scan(&in.ID, &in.ServerID, &in.Name, &in.Profile, &in.Protocol, &in.Network, &in.Security, &in.Core, &in.Listen, &in.Port, &en, &in.Settings, &certID, &in.LineKind, &exitID, &in.ExitURI, &rejectCN, &in.CreatedAt,
+		Scan(&in.ID, &in.ServerID, &in.Name, &in.Profile, &in.Protocol, &in.Network, &in.Security, &in.Core, &in.Listen, &in.Port, &en, &in.Settings, &certID, &in.LineKind, &exitID, &in.ExitURI, &rejectCN, &in.OwnerUserID, &in.EntryInboundID, &authHold, &in.CreatedAt,
 			&in.ServerName, &in.ServerHost, &in.ConnectIP, &in.ServerOnline)
 	if err != nil {
 		return nil, err
 	}
 	in.Enabled = en == 1
 	in.RejectCN = rejectCN == 1
+	in.AuthHold = authHold == 1
 	if certID.Valid {
 		v := certID.Int64
 		in.CertID = &v
@@ -1726,29 +1741,43 @@ func UserNeedsProvision(d *sql.DB, u *User) (bool, error) {
 
 func InboundIDsForUser(d *sql.DB, u *User) ([]int64, error) {
 	if u.Role == "admin" {
-		rows, err := d.Query(`SELECT id FROM inbounds ORDER BY id`)
+		return queryIDs(d, `SELECT id FROM inbounds WHERE owner_user_id=0 ORDER BY id`)
+	}
+	var shared []int64
+	if u.PackageID != nil {
+		p, err := GetPackage(d, *u.PackageID)
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
-		var ids []int64
-		for rows.Next() {
-			var id int64
-			if err := rows.Scan(&id); err != nil {
-				return nil, err
-			}
-			ids = append(ids, id)
+		shared, err = PackageInboundIDs(d, p)
+		if err != nil {
+			return nil, err
 		}
-		return ids, rows.Err()
 	}
-	if u.PackageID == nil {
-		return nil, nil
-	}
-	p, err := GetPackage(d, *u.PackageID)
+	owned, err := queryIDs(d, `SELECT id FROM inbounds WHERE owner_user_id=? ORDER BY id`, u.ID)
 	if err != nil {
 		return nil, err
 	}
-	return PackageInboundIDs(d, p)
+	if len(owned) == 0 {
+		return shared, nil
+	}
+	seen := map[int64]struct{}{}
+	out := make([]int64, 0, len(shared)+len(owned))
+	for _, id := range shared {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	for _, id := range owned {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out, nil
 }
 
 func PackageInboundIDs(d *sql.DB, p *Package) ([]int64, error) {
@@ -1757,7 +1786,7 @@ func PackageInboundIDs(d *sql.DB, p *Package) ([]int64, error) {
 	}
 	if len(p.ServerIDs) > 0 {
 		ph, args := intPlaceholders(p.ServerIDs)
-		ids, err := queryIDs(d, `SELECT id FROM inbounds WHERE server_id IN (`+ph+`) ORDER BY id`, args...)
+		ids, err := queryIDs(d, `SELECT id FROM inbounds WHERE owner_user_id=0 AND server_id IN (`+ph+`) ORDER BY id`, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -1769,7 +1798,22 @@ func PackageInboundIDs(d *sql.DB, p *Package) ([]int64, error) {
 	if len(p.InboundIDs) == 0 {
 		return []int64{}, nil
 	}
-	return append([]int64(nil), p.InboundIDs...), nil
+	ph, args := intPlaceholders(p.InboundIDs)
+	rows, err := queryIDs(d, `SELECT id FROM inbounds WHERE owner_user_id=0 AND id IN (`+ph+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	keep := map[int64]struct{}{}
+	for _, id := range rows {
+		keep[id] = struct{}{}
+	}
+	out := make([]int64, 0, len(rows))
+	for _, id := range p.InboundIDs {
+		if _, ok := keep[id]; ok {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 func intPlaceholders(ids []int64) (string, []any) {
@@ -1910,6 +1954,198 @@ func PackageMultiplier(p *Package, inboundID int64) float64 {
 		}
 	}
 	return 1
+}
+
+// TransitEntryOK reports a shared direct node that can authorize its machine
+// as a personal forward entry. Chain lines, port forwards, and WireGuard cannot.
+func TransitEntryOK(in *Inbound) bool {
+	if in == nil || in.OwnerUserID != 0 {
+		return false
+	}
+	if in.LineKind == "chain" || strings.TrimSpace(in.ExitURI) != "" {
+		return false
+	}
+	switch in.Profile {
+	case "", "port-forward", "wireguard":
+		return false
+	default:
+		return true
+	}
+}
+
+func UserIDsByPackage(d *sql.DB, packageID int64) ([]int64, error) {
+	return queryIDs(d, `SELECT user_id FROM user_packages WHERE package_id=? ORDER BY user_id`, packageID)
+}
+
+func PackageIDsByInbound(d *sql.DB, inboundID int64) ([]int64, error) {
+	return queryIDs(d, `SELECT package_id FROM package_inbounds WHERE inbound_id=? ORDER BY package_id`, inboundID)
+}
+
+func CountOwnedInbounds(d *sql.DB, userID int64) (int, error) {
+	var n int
+	err := d.QueryRow(`SELECT COUNT(*) FROM inbounds WHERE owner_user_id=?`, userID).Scan(&n)
+	return n, err
+}
+
+func ListInboundsByOwner(d *sql.DB, userID int64) ([]*Inbound, error) {
+	ids, err := queryIDs(d, `SELECT id FROM inbounds WHERE owner_user_id=? ORDER BY id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	return getInbounds(d, ids)
+}
+
+func SetInboundRunState(d *sql.DB, id int64, enabled, authHold bool) error {
+	_, err := d.Exec(`UPDATE inbounds SET enabled=?, auth_hold=? WHERE id=?`, boolInt(enabled), boolInt(authHold), id)
+	return err
+}
+
+func DeleteOwnedInbounds(d *sql.DB, userID int64) ([]int64, error) {
+	servers, err := queryIDs(d, `SELECT DISTINCT server_id FROM inbounds WHERE owner_user_id=?`, userID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := d.Exec(`DELETE FROM inbounds WHERE owner_user_id=?`, userID); err != nil {
+		return nil, err
+	}
+	return servers, nil
+}
+
+// ValidatePackageNodes rejects personal forwards inside a shared package, and
+// transit marks that are not a checked direct node.
+func ValidatePackageNodes(d *sql.DB, inboundIDs, transitIDs []int64) error {
+	picked := map[int64]struct{}{}
+	for _, id := range inboundIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := picked[id]; ok {
+			continue
+		}
+		picked[id] = struct{}{}
+		in, err := GetInbound(d, id)
+		if err != nil {
+			return fmt.Errorf("节点不存在")
+		}
+		if in.OwnerUserID != 0 {
+			return fmt.Errorf("这是用户自己的中转，不能放进套餐")
+		}
+	}
+	for _, id := range transitIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := picked[id]; !ok {
+			return fmt.Errorf("中转入口必须是已勾选的节点")
+		}
+		in, err := GetInbound(d, id)
+		if err != nil {
+			return fmt.Errorf("节点不存在")
+		}
+		if !TransitEntryOK(in) {
+			return fmt.Errorf("链式线路、端口中转和 WireGuard 不能当中转入口")
+		}
+	}
+	return nil
+}
+
+func transitServerSet(d *sql.DB, u *User) (map[int64]struct{}, error) {
+	out := map[int64]struct{}{}
+	if u == nil || u.PackageID == nil {
+		return out, nil
+	}
+	p, err := GetPackage(d, *u.PackageID)
+	if err != nil {
+		return out, nil
+	}
+	for _, id := range p.TransitIDs {
+		in, err := GetInbound(d, id)
+		if err != nil || in == nil || !TransitEntryOK(in) {
+			continue
+		}
+		out[in.ServerID] = struct{}{}
+	}
+	return out, nil
+}
+
+// UserHasTransit reports that the user's package marks at least one entry.
+func UserHasTransit(d *sql.DB, u *User) bool {
+	set, err := transitServerSet(d, u)
+	return err == nil && len(set) > 0
+}
+
+// UserTransitServer reports that this machine is still marked on the user's package.
+func UserTransitServer(d *sql.DB, u *User, serverID int64) bool {
+	if serverID == 0 {
+		return false
+	}
+	set, err := transitServerSet(d, u)
+	if err != nil {
+		return false
+	}
+	_, ok := set[serverID]
+	return ok
+}
+
+// TransitEntries are the marked nodes this user may clone as a personal entry.
+func TransitEntries(d *sql.DB, u *User) ([]*Inbound, error) {
+	if u == nil || u.PackageID == nil {
+		return []*Inbound{}, nil
+	}
+	p, err := GetPackage(d, *u.PackageID)
+	if err != nil {
+		return []*Inbound{}, nil
+	}
+	out := make([]*Inbound, 0, len(p.TransitIDs))
+	seen := map[int64]struct{}{}
+	for _, id := range p.TransitIDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		in, err := GetInbound(d, id)
+		if err != nil || in == nil || !TransitEntryOK(in) {
+			continue
+		}
+		out = append(out, in)
+	}
+	return out, nil
+}
+
+// SyncUserForwards stops personal forwards whose machine is no longer marked,
+// and resumes ones that were stopped only because the mark was removed.
+func SyncUserForwards(d *sql.DB, u *User) error {
+	if u == nil || u.ID == 0 {
+		return nil
+	}
+	allowed, err := transitServerSet(d, u)
+	if err != nil {
+		return err
+	}
+	owned, err := ListInboundsByOwner(d, u.ID)
+	if err != nil {
+		return err
+	}
+	for _, in := range owned {
+		if in == nil {
+			continue
+		}
+		_, ok := allowed[in.ServerID]
+		if ok {
+			if in.AuthHold {
+				if err := SetInboundRunState(d, in.ID, true, false); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if in.Enabled {
+			if err := SetInboundRunState(d, in.ID, false, true); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func DeleteExpiredSessions(d *sql.DB) error {

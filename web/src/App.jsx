@@ -14,6 +14,7 @@ import Subscribe from './pages/Subscribe'
 import My from './pages/My'
 import MyNodes from './pages/MyNodes'
 import MyForwards from './pages/MyForwards'
+import Transit from './pages/Transit'
 import { BrandMark } from './components/ui'
 
 function Loading() {
@@ -54,6 +55,13 @@ function MySettings() {
   return <Settings accountOnly />
 }
 
+function MyTransit() {
+  const { user } = useUser()
+  if (user?.role === 'admin') return <MyForwards />
+  if (!user?.transit) return <Navigate to="/my" replace />
+  return <Transit />
+}
+
 export default function App() {
   return (
     <BrowserRouter useTransitions={false}>
@@ -64,6 +72,7 @@ export default function App() {
             <Route path="/my" element={<My />} />
             <Route path="/my/settings" element={<MySettings />} />
             <Route path="/my/password" element={<MySettings />} />
+            <Route path="/my/forwards" element={<MyTransit />} />
             <Route element={<RequireAdmin />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/nodes" element={<Nodes />} />
@@ -78,7 +87,6 @@ export default function App() {
               <Route path="/settings" element={<Settings />} />
               <Route path="/password" element={<Navigate to="/settings?tab=account" replace />} />
               <Route path="/my/nodes" element={<MyNodes />} />
-              <Route path="/my/forwards" element={<MyForwards />} />
             </Route>
           </Route>
           <Route path="*" element={

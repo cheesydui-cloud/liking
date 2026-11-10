@@ -783,12 +783,15 @@ export default function Nodes() {
         </div>
       ) : (
         <div>
-          {groups.map(({ server: s, nodes }) => (
+          {groups.map(({ server: s, nodes }) => {
+            const userForwards = list.filter(x => Number(x.owner_user_id) && Number(x.server_id) === Number(s.id)).length
+            return (
             <section key={s.id} className="node-cluster">
               <div className="node-cluster-head">
                 <span className="machine-name truncate">{s.name}</span>
                 <StatusWord online={s.online} fault={!!s.last_error} />
                 <span className="node-cluster-count">{nodes.length} 个</span>
+                {userForwards ? <span className="node-cluster-count">用户中转 {userForwards}</span> : null}
               </div>
               {nodes.length === 0 ? (
                 <div className="card overflow-hidden">
@@ -876,7 +879,8 @@ export default function Nodes() {
                 />
               )}
             </section>
-          ))}
+            )
+          })}
         </div>
       )}
 

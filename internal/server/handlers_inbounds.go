@@ -16,28 +16,31 @@ import (
 func inboundJSON(in *db.Inbound) map[string]any {
 	st := corecfg.ParseSettings(in.Settings)
 	m := map[string]any{
-		"id":              in.ID,
-		"server_id":       in.ServerID,
-		"name":            in.Name,
-		"profile":         in.Profile,
-		"protocol":        in.Protocol,
-		"network":         in.Network,
-		"security":        in.Security,
-		"core":            in.Core,
-		"listen":          in.Listen,
-		"port":            in.Port,
-		"enabled":         in.Enabled,
-		"settings":        st,
-		"cert_id":         in.CertID,
-		"line_kind":       in.LineKind,
-		"exit_inbound_id": in.ExitInboundID,
-		"exit_uri":        in.ExitURI,
-		"reject_cn":       in.RejectCN,
-		"user_facing":     corecfg.UserFacing(in.Profile),
-		"created_at":      in.CreatedAt,
-		"server_name":     in.ServerName,
-		"server_host":     in.ServerHost,
-		"server_online":   in.ServerOnline,
+		"id":               in.ID,
+		"server_id":        in.ServerID,
+		"name":             in.Name,
+		"profile":          in.Profile,
+		"protocol":         in.Protocol,
+		"network":          in.Network,
+		"security":         in.Security,
+		"core":             in.Core,
+		"listen":           in.Listen,
+		"port":             in.Port,
+		"enabled":          in.Enabled,
+		"settings":         st,
+		"cert_id":          in.CertID,
+		"line_kind":        in.LineKind,
+		"exit_inbound_id":  in.ExitInboundID,
+		"exit_uri":         in.ExitURI,
+		"reject_cn":        in.RejectCN,
+		"owner_user_id":    in.OwnerUserID,
+		"entry_inbound_id": in.EntryInboundID,
+		"auth_hold":        in.AuthHold,
+		"user_facing":      corecfg.UserFacing(in.Profile),
+		"created_at":       in.CreatedAt,
+		"server_name":      in.ServerName,
+		"server_host":      in.ServerHost,
+		"server_online":    in.ServerOnline,
 	}
 	withExitConf(m, in)
 	return m
@@ -325,6 +328,7 @@ func (s *Server) handleDeleteInbound(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusConflict, "仍有链式线路指向此入站")
 		return
 	}
+	pkgIDs, _ := db.PackageIDsByInbound(s.DB, id)
 	sid := in.ServerID
 	peers := chainPeerServerIDs(s, in)
 	if exitID := corecfg.WGExitServerID(in); exitID != 0 {
@@ -334,11 +338,24 @@ func (s *Server) handleDeleteInbound(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if err := s.syncForwardPackages(pkgIDs); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if _, err := corecfg.ProvisionAll(s.DB); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	s.respondAfterApply(w, map[string]any{"ok": true}, append([]int64{sid}, peers...)...)
+}
+
+func (s *Server) syncForwardPackages(packageIDs []int64) error {
+	for _, id := range packageIDs {
+		if err := s.syncPackageForwards(id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Server) prepareInbound(in *db.Inbound) error {

@@ -130,6 +130,7 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		Direction    string    `json:"direction"`
 		InboundIDs   []int64   `json:"inbound_ids"`
 		Multipliers  []float64 `json:"multipliers"`
+		TransitIDs   []int64   `json:"transit_ids"`
 		ServerIDs    []int64   `json:"server_ids"`
 		packagePolicyReq
 	}
@@ -187,8 +188,12 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		}
 		relation = db.PackageRelationsInbound
 		ids = req.InboundIDs
+		if err := db.ValidatePackageNodes(s.DB, req.InboundIDs, req.TransitIDs); err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
-	p, err = db.CreatePackageConfigured(s.DB, p, relation, ids, req.Multipliers)
+	p, err = db.CreatePackageConfigured(s.DB, p, relation, ids, req.Multipliers, req.TransitIDs)
 	if err != nil {
 		jsonErr(w, http.StatusBadRequest, "节点或套餐参数无效："+err.Error())
 		return
@@ -222,6 +227,7 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 		Direction    string    `json:"direction"`
 		InboundIDs   []int64   `json:"inbound_ids"`
 		Multipliers  []float64 `json:"multipliers"`
+		TransitIDs   []int64   `json:"transit_ids"`
 		ServerIDs    []int64   `json:"server_ids"`
 		packagePolicyReq
 	}
@@ -281,6 +287,10 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 		}
 		relation = db.PackageRelationsInbound
 		ids = req.InboundIDs
+		if err := db.ValidatePackageNodes(s.DB, req.InboundIDs, req.TransitIDs); err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	} else if req.ServerIDs != nil {
 		if !hasPositiveID(req.ServerIDs) {
 			jsonErr(w, http.StatusBadRequest, "请选择实例或节点")
@@ -289,8 +299,12 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 		relation = db.PackageRelationsServer
 		ids = req.ServerIDs
 	}
-	if err := db.UpdatePackageConfigured(s.DB, p, relation, ids, req.Multipliers); err != nil {
+	if err := db.UpdatePackageConfigured(s.DB, p, relation, ids, req.Multipliers, req.TransitIDs); err != nil {
 		jsonErr(w, http.StatusBadRequest, "节点或套餐参数无效："+err.Error())
+		return
+	}
+	if err := s.syncPackageForwards(id); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if _, err := corecfg.ProvisionAll(s.DB); err != nil {
@@ -300,6 +314,23 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 	s.syncAll()
 	p, _ = db.GetPackage(s.DB, p.ID)
 	jsonOK(w, map[string]any{"package": p})
+}
+
+func (s *Server) syncPackageForwards(packageID int64) error {
+	userIDs, err := db.UserIDsByPackage(s.DB, packageID)
+	if err != nil {
+		return err
+	}
+	for _, uid := range userIDs {
+		u, err := db.GetUser(s.DB, uid)
+		if err != nil || u == nil {
+			continue
+		}
+		if err := db.SyncUserForwards(s.DB, u); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func refuseIfInUse(w http.ResponseWriter, err error) bool {
@@ -323,9 +354,24 @@ func (s *Server) handleDeletePackage(w http.ResponseWriter, r *http.Request) {
 	if refuseIfInUse(w, db.PackageInUse(s.DB, id)) {
 		return
 	}
+	userIDs, err := db.UserIDsByPackage(s.DB, id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if err := db.DeletePackage(s.DB, id); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	for _, uid := range userIDs {
+		u, err := db.GetUser(s.DB, uid)
+		if err != nil || u == nil {
+			continue
+		}
+		if err := db.SyncUserForwards(s.DB, u); err != nil {
+			jsonErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	if _, err := corecfg.ProvisionAll(s.DB); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())

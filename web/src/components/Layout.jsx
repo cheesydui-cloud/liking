@@ -169,7 +169,7 @@ function pageTitleOf(path) {
 }
 
 export function Layout({ children }) {
-  const { user, panelName, version, announce, setUser } = useUser()
+  const { user, panelName, version, announce, setUser, refreshUser } = useUser()
   const navigate = useNavigate()
   const loc = useLocation()
   const [open, setOpen] = useState(false)
@@ -188,6 +188,7 @@ export function Layout({ children }) {
     if (scrollRef.current) scrollRef.current.scrollTop = 0
     window.scrollTo(0, 0)
     mainRef.current?.focus({ preventScroll: true })
+    if (user && user.role !== 'admin') refreshUser()
   }, [loc.pathname])
 
   useEffect(() => {
@@ -264,7 +265,9 @@ export function Layout({ children }) {
       ...(isAdmin ? [
         { to: '/my/nodes', icon: 'plugs', label: '节点' },
         { to: '/my/forwards', icon: 'forward', label: '中转' },
-      ] : []),
+      ] : (user?.transit ? [
+        { to: '/my/forwards', icon: 'forward', label: '中转' },
+      ] : [])),
     ] },
     ...(isAdmin ? [] : [{ label: '账号', items: [{ to: '/my/settings', icon: 'gear', label: '设置' }] }]),
   ]

@@ -12,7 +12,7 @@ import { SpeedField } from '../components/SpeedField'
 import { formatSpeedLimit, kbpsFromForm, speedFormFromKbps } from '../lib/speed'
 
 const emptyForm = {
-  name: '', gb: '', direction: 'oneway', reset_mode: 'anniversary', inbound_ids: [], multipliers: {},
+  name: '', gb: '', direction: 'oneway', reset_mode: 'anniversary', inbound_ids: [], transit_ids: [], multipliers: {},
   speed_value: '', speed_unit: 'mbps', sub_rule_preset: '', sub_rule_categories: [],
   site_filter_mode: '', site_deny_categories: [], site_deny_domains: '',
 }
@@ -59,6 +59,14 @@ function speedLine(p) {
   return p.speed_limit > 0 ? formatSpeedLimit(p.speed_limit) : '不限'
 }
 
+function canTransit(n) {
+  if (!n || Number(n.owner_user_id)) return false
+  if (!n.profile || n.profile === 'port-forward' || n.profile === 'wireguard') return false
+  if (n.line_kind === 'chain' || n.exit_uri) return false
+  if (n.user_facing === false) return false
+  return true
+}
+
 function protoShort(profile) {
   switch (profile) {
     case 'vless-reality-vision': return 'Vision'
@@ -81,7 +89,7 @@ function selectedInboundIds(pkg, ins = []) {
   const iids = Array.isArray(pkg.inbound_ids) ? pkg.inbound_ids.map(Number).filter(Boolean) : []
   if (iids.length) return iids
   const sids = Array.isArray(pkg.server_ids) ? pkg.server_ids.map(Number).filter(Boolean) : []
-  if (sids.length) return ins.filter(x => sids.includes(Number(x.server_id))).map(x => Number(x.id))
+  if (sids.length) return ins.filter(x => sids.includes(Number(x.server_id)) && !Number(x.owner_user_id)).map(x => Number(x.id))
   return []
 }
 
@@ -92,7 +100,7 @@ function packageNodes(p, ins, servers) {
   if (iids.length) nodes = iids.map(id => ins.find(x => Number(x.id) === id)).filter(Boolean)
   else if (sids.length) nodes = ins.filter(x => sids.includes(Number(x.server_id)))
   else return { all: true, count: 0, servers: [], names: [], lines: [] }
-  nodes = nodes.filter(n => n && n.profile !== 'port-forward' && n.user_facing !== false)
+  nodes = nodes.filter(n => n && n.profile !== 'port-forward' && n.user_facing !== false && !Number(n.owner_user_id))
 
   const seen = new Set()
   const serverNames = []
@@ -108,6 +116,7 @@ function packageNodes(p, ins, servers) {
   if (iids.length && Array.isArray(p.multipliers)) {
     iids.forEach((id, i) => { multById[id] = Number(p.multipliers[i]) })
   }
+  const transit = new Set(Array.isArray(p.transit_ids) ? p.transit_ids.map(Number) : [])
   return {
     all: false,
     count: nodes.length || iids.length || sids.length,
@@ -120,6 +129,7 @@ function packageNodes(p, ins, servers) {
         name: n.name || '',
         proto: protoShort(n.profile),
         mult: mult > 0 && mult !== 1 ? mult : 0,
+        transit: transit.has(Number(n.id)),
       }
     }),
   }
@@ -198,7 +208,20 @@ export default function Packages() {
     const n = Number(id)
     setF(prev => {
       const has = prev.inbound_ids.includes(n)
-      return { ...prev, inbound_ids: has ? prev.inbound_ids.filter(x => x !== n) : [...prev.inbound_ids, n] }
+      const inbound_ids = has ? prev.inbound_ids.filter(x => x !== n) : [...prev.inbound_ids, n]
+      const transit_ids = has
+        ? (prev.transit_ids || []).filter(x => Number(x) !== n)
+        : (prev.transit_ids || [])
+      return { ...prev, inbound_ids, transit_ids }
+    })
+  }
+
+  const toggleTransit = (id) => {
+    const n = Number(id)
+    setF(prev => {
+      const cur = (prev.transit_ids || []).map(Number)
+      const has = cur.includes(n)
+      return { ...prev, transit_ids: has ? cur.filter(x => x !== n) : [...cur, n] }
     })
   }
 
@@ -208,7 +231,11 @@ export default function Packages() {
       const allOn = ids.length && ids.every(id => set.has(id))
       if (allOn) ids.forEach(id => set.delete(id))
       else ids.forEach(id => set.add(id))
-      return { ...prev, inbound_ids: [...set] }
+      return {
+        ...prev,
+        inbound_ids: [...set],
+        transit_ids: (prev.transit_ids || []).map(Number).filter(id => set.has(id)),
+      }
     })
   }
 
@@ -232,6 +259,7 @@ export default function Packages() {
       gb: p.traffic_bytes ? String(Math.round((p.traffic_bytes / 1024 / 1024 / 1024) * 1000) / 1000) : '',
       direction: p.direction || 'oneway',
       inbound_ids: selectedInboundIds(p, ins),
+      transit_ids: Array.isArray(p.transit_ids) ? p.transit_ids.map(Number).filter(Boolean) : [],
       multipliers: Object.fromEntries((selectedInboundIds(p, ins) || []).map((id, i) => [id, p.multipliers?.[i] ?? 1])),
       speed_value: speed.value,
       speed_unit: speed.unit,
@@ -278,6 +306,7 @@ export default function Packages() {
       direction: f.direction,
       reset_mode: f.reset_mode === 'anniversary' ? 'anniversary' : 'none',
       inbound_ids: f.inbound_ids,
+      transit_ids: f.inbound_ids.filter(id => (f.transit_ids || []).map(Number).includes(Number(id))),
       multipliers: f.inbound_ids.map(id => {
         const n = Number(f.multipliers?.[id])
         return Number.isFinite(n) && n > 0 ? n : 1
@@ -325,7 +354,7 @@ export default function Packages() {
   }
 
   const pickableIns = useMemo(
-    () => ins.filter(x => x.profile !== 'port-forward' && x.user_facing !== false),
+    () => ins.filter(x => x.profile !== 'port-forward' && x.user_facing !== false && !Number(x.owner_user_id)),
     [ins],
   )
 
@@ -435,6 +464,7 @@ export default function Packages() {
                     <div key={line.id} className="pkg-card-node">
                       <span className="pkg-card-node-proto">{line.proto}</span>
                       <span className="pkg-card-node-name">{line.name}{line.mult ? ` ×${line.mult}` : ''}</span>
+                      {line.transit ? <span className="line-tag">中转</span> : null}
                     </div>
                   ))}
                   {!meta.all && meta.lines.length > 4 ? (
@@ -491,14 +521,22 @@ export default function Packages() {
                 <div className="text-[12px] font-medium text-ink-soft">节点</div>
                 <div className="text-[12px] text-ink-mut mt-0.5">
                   {f.inbound_ids.length ? `已选 ${f.inbound_ids.length} / ${pickableIns.length}` : '请勾选节点，不选则套餐里没有节点'}
+                  {(f.transit_ids || []).length ? `，其中 ${(f.transit_ids || []).length} 个可当中转入口` : ''}
+                </div>
+                <div className="text-[12px] text-ink-mut mt-0.5">
+                  勾上「中转」后，这个节点所在的机器可以给套餐用户当入口。用户自己建链式和端口转发，只在他自己的账号里，流量也算他的。不勾则还是普通订阅节点。
                 </div>
               </div>
               <div className="flex gap-2 shrink-0">
                 {filtered.length > 0 && (
-                  <button type="button" className="row-act" onClick={() => setF({ ...f, inbound_ids: filtered.map(x => Number(x.id)) })}>全选</button>
+                  <button type="button" className="row-act" onClick={() => setF(prev => {
+                    const ids = filtered.map(x => Number(x.id))
+                    const keep = new Set(ids)
+                    return { ...prev, inbound_ids: ids, transit_ids: (prev.transit_ids || []).map(Number).filter(id => keep.has(id)) }
+                  })}>全选</button>
                 )}
                 {f.inbound_ids.length > 0 && (
-                  <button type="button" className="row-act" onClick={() => setF({ ...f, inbound_ids: [] })}>清空</button>
+                  <button type="button" className="row-act" onClick={() => setF({ ...f, inbound_ids: [], transit_ids: [] })}>清空</button>
                 )}
               </div>
             </div>
@@ -558,18 +596,30 @@ export default function Packages() {
                               </span>
                             </button>
                             {on ? (
-                              <label className="pkg-mult-wrap" onClick={e => e.stopPropagation()}>
-                                倍率
-                                <input
-                                  className="input-field pkg-mult tabular-nums"
-                                  type="number"
-                                  min="0.1"
-                                  step="0.1"
-                                  aria-label={`${n.name} 倍率`}
-                                  value={f.multipliers?.[n.id] ?? 1}
-                                  onChange={e => setF(prev => ({ ...prev, multipliers: { ...prev.multipliers, [n.id]: e.target.value } }))}
-                                />
-                              </label>
+                              <div className="pkg-node-acts" onClick={e => e.stopPropagation()}>
+                                {canTransit(n) ? (
+                                  <button
+                                    type="button"
+                                    className={`pkg-transit${(f.transit_ids || []).map(Number).includes(Number(n.id)) ? ' is-on' : ''}`}
+                                    aria-pressed={(f.transit_ids || []).map(Number).includes(Number(n.id))}
+                                    onClick={() => toggleTransit(n.id)}
+                                  >
+                                    中转
+                                  </button>
+                                ) : null}
+                                <label className="pkg-mult-wrap">
+                                  倍率
+                                  <input
+                                    className="input-field pkg-mult tabular-nums"
+                                    type="number"
+                                    min="0.1"
+                                    step="0.1"
+                                    aria-label={`${n.name} 倍率`}
+                                    value={f.multipliers?.[n.id] ?? 1}
+                                    onChange={e => setF(prev => ({ ...prev, multipliers: { ...prev.multipliers, [n.id]: e.target.value } }))}
+                                  />
+                                </label>
+                              </div>
                             ) : null}
                           </div>
                         )

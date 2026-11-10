@@ -281,6 +281,7 @@ func (s *Server) sessionPayload(u *db.User, r *http.Request) map[string]any {
 			"uri":     base + "/api/sub/" + view.SubToken + "/uri",
 		}
 		if view.Role != "admin" {
+			view.Transit = db.UserHasTransit(s.DB, view)
 			if view.TrafficLimit != nil {
 				view.TrafficCap = *view.TrafficLimit
 			} else if view.PackageID != nil {

@@ -33,6 +33,7 @@ type User struct {
 	SiteDenyCategories []string `json:"site_deny_categories"`
 	SiteDenyDomains    []string `json:"site_deny_domains"`
 	SiteFilterMode     string   `json:"site_filter_mode"`
+	Transit            bool     `json:"transit,omitempty"`
 }
 
 type Server struct {
@@ -103,6 +104,7 @@ type Package struct {
 	CreatedAt          int64     `json:"created_at"`
 	InboundIDs         []int64   `json:"inbound_ids,omitempty"`
 	Multipliers        []float64 `json:"multipliers,omitempty"`
+	TransitIDs         []int64   `json:"transit_ids,omitempty"`
 	ServerIDs          []int64   `json:"server_ids"`
 	SpeedLimit         int64     `json:"speed_limit"` // KB/s; 0 = unlimited; 1 Mbps = 125
 	SubRulePreset      string    `json:"sub_rule_preset"`
@@ -113,30 +115,33 @@ type Package struct {
 }
 
 type Inbound struct {
-	ID            int64  `json:"id"`
-	ServerID      int64  `json:"server_id"`
-	Name          string `json:"name"`
-	Profile       string `json:"profile"`
-	Protocol      string `json:"protocol"`
-	Network       string `json:"network"`
-	Security      string `json:"security"`
-	Core          string `json:"core"`
-	Listen        string `json:"listen"`
-	Port          int    `json:"port"`
-	Enabled       bool   `json:"enabled"`
-	Settings      string `json:"settings"`
-	CertID        *int64 `json:"cert_id"`
-	LineKind      string `json:"line_kind"`
-	ExitInboundID *int64 `json:"exit_inbound_id"`
-	ExitURI       string `json:"exit_uri"`
-	RejectCN      bool   `json:"reject_cn"`
-	CreatedAt     int64  `json:"created_at"`
-	ServerName    string `json:"server_name,omitempty"`
-	ServerHost    string `json:"server_host,omitempty"`
-	ConnectIP     string `json:"connect_ip,omitempty"`
-	ServerOnline  int    `json:"server_online,omitempty"`
-	UsedUp        int64  `json:"used_up,omitempty"`
-	UsedDown      int64  `json:"used_down,omitempty"`
+	ID             int64  `json:"id"`
+	ServerID       int64  `json:"server_id"`
+	Name           string `json:"name"`
+	Profile        string `json:"profile"`
+	Protocol       string `json:"protocol"`
+	Network        string `json:"network"`
+	Security       string `json:"security"`
+	Core           string `json:"core"`
+	Listen         string `json:"listen"`
+	Port           int    `json:"port"`
+	Enabled        bool   `json:"enabled"`
+	Settings       string `json:"settings"`
+	CertID         *int64 `json:"cert_id"`
+	LineKind       string `json:"line_kind"`
+	ExitInboundID  *int64 `json:"exit_inbound_id"`
+	ExitURI        string `json:"exit_uri"`
+	RejectCN       bool   `json:"reject_cn"`
+	OwnerUserID    int64  `json:"owner_user_id,omitempty"`
+	EntryInboundID int64  `json:"entry_inbound_id,omitempty"`
+	AuthHold       bool   `json:"auth_hold,omitempty"`
+	CreatedAt      int64  `json:"created_at"`
+	ServerName     string `json:"server_name,omitempty"`
+	ServerHost     string `json:"server_host,omitempty"`
+	ConnectIP      string `json:"connect_ip,omitempty"`
+	ServerOnline   int    `json:"server_online,omitempty"`
+	UsedUp         int64  `json:"used_up,omitempty"`
+	UsedDown       int64  `json:"used_down,omitempty"`
 }
 
 type Client struct {
