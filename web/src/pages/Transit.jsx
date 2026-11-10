@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { protoShort } from '../lib/forwards'
+import { createOpLock } from '../lib/opLock'
 import { asArray } from '../lib/safe'
 import { useDialog, useToast } from '../components/Layout'
 import { Badge, Empty, Field, Icon, Modal, PageHead, SkeletonRows } from '../components/ui'
@@ -35,6 +36,8 @@ export default function Transit() {
   const [editId, setEditId] = useState(0)
   const [f, setF] = useState(emptyForm)
   const [busy, setBusy] = useState(false)
+  const [probes, setProbes] = useState({})
+  const ops = useRef(createOpLock())
 
   const load = async () => {
     try {
@@ -151,6 +154,27 @@ export default function Transit() {
     }
   }
 
+  const probeLatency = async (row) => {
+    await ops.current.run(`probe-${row.id}`, async () => {
+      setProbes(p => ({ ...p, [row.id]: { state: 'busy' } }))
+      try {
+        const d = await api.post(`/me/forwards/${row.id}/probe`)
+        if (d.ok) {
+          const ms = Number(d.latency_ms) || 0
+          setProbes(p => ({ ...p, [row.id]: { state: 'ok', ms, host: d.host, port: d.port } }))
+          toast(`入口到 ${d.host}:${d.port}，${ms} ms`)
+        } else {
+          const msg = d.error || '探测失败'
+          setProbes(p => ({ ...p, [row.id]: { state: 'err', error: msg } }))
+          toast(msg, 'error')
+        }
+      } catch (e) {
+        setProbes(p => ({ ...p, [row.id]: { state: 'err', error: e.message } }))
+        toast(e.message, 'error')
+      }
+    })
+  }
+
   const copyUri = async (row) => {
     if (!row.uri) {
       toast(row.enabled ? '还没有分享链接' : '停用后没有分享链接', 'error')
@@ -202,7 +226,17 @@ export default function Transit() {
             </div>
           ) : (
             <div className="machine-grid">
-              {forwards.map(row => (
+              {forwards.map(row => {
+                const probed = probes[row.id]
+                const probeNote = !probed
+                  ? (row.kind === 'port' ? '从入口测到目标' : '从入口测到落地')
+                  : probed.state === 'busy'
+                    ? '测量中…'
+                    : probed.state === 'ok'
+                      ? `${probed.host}:${probed.port}`
+                      : (probed.error || '探测失败')
+                const probeLabel = probed?.state === 'busy' ? '测量中…' : probed?.state === 'ok' ? `${probed.ms} ms` : '测延迟'
+                return (
                 <div key={row.id} className={`machine${row.enabled ? '' : ' is-off'}`}>
                   <div className="machine-head">
                     <div className="min-w-0 flex-1">
@@ -225,15 +259,20 @@ export default function Transit() {
                       : (row.exit_uri || '还没填落地')}
                   </div>
                   <div className="machine-foot">
-                    {row.kind === 'chain' ? (
-                      <button type="button" className="row-act" onClick={() => copyUri(row)}>复制</button>
-                    ) : <span />}
-                    <button type="button" className="row-act" onClick={() => toggle(row)}>{row.enabled ? '停用' : '启用'}</button>
-                    <button type="button" className="row-act" onClick={() => openEdit(row)}>编辑</button>
-                    <button type="button" className="row-act" onClick={() => remove(row)}>删除</button>
+                    <span className="fwd-probe-note" title={probeNote}>{probeNote}</span>
+                    <div className="flex flex-wrap items-center justify-end gap-x-2.5 gap-y-1 ml-auto">
+                      <button type="button" className="row-act" disabled={probed?.state === 'busy'} onClick={() => probeLatency(row)} title={probeNote}>{probeLabel}</button>
+                      {row.kind === 'chain' ? (
+                        <button type="button" className="row-act" onClick={() => copyUri(row)}>复制</button>
+                      ) : null}
+                      <button type="button" className="row-act" onClick={() => toggle(row)}>{row.enabled ? '停用' : '启用'}</button>
+                      <button type="button" className="row-act" onClick={() => openEdit(row)}>编辑</button>
+                      <button type="button" className="row-act" onClick={() => remove(row)}>删除</button>
+                    </div>
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -294,8 +333,8 @@ export default function Transit() {
               </Field>
             </div>
           ) : (
-            <Field label="落地" hint="分享链接，或 socks5://用户:密码@地址:端口">
-              <textarea className="input-field font-mono min-h-[88px]" value={f.exit_uri} onChange={e => setF({ ...f, exit_uri: e.target.value })} placeholder="socks5://user:pass@203.0.113.9:1080" />
+            <Field label="落地" hint="直接粘贴 vless://、ss://、trojan:// 或 socks5://，编码过的链接会自动识别">
+              <textarea className="input-field font-mono min-h-[88px]" value={f.exit_uri} onChange={e => setF({ ...f, exit_uri: e.target.value })} placeholder="ss:// 或 vless:// 或 socks5://user:pass@地址:端口" />
             </Field>
           )}
         </form>

@@ -29,7 +29,7 @@ function isAbort(e) {
 }
 
 async function request(method, path, body, signal) {
-  const opts = { method, headers: {}, credentials: 'same-origin', signal }
+  const opts = { method, headers: {}, credentials: 'same-origin', cache: 'no-store', signal }
   if (body) {
     opts.headers['Content-Type'] = 'application/json'
     opts.body = JSON.stringify(body)
@@ -48,7 +48,9 @@ async function request(method, path, body, signal) {
   }
   if (res.status === 401) {
     const isLogin = path === '/login'
-    if (!isLogin) window.dispatchEvent(new CustomEvent('lk-unauthorized'))
+    // /me is also requested before login. That 401 must not clear a session
+    // that a later login response has already stored.
+    if (!isLogin && path !== '/me') window.dispatchEvent(new CustomEvent('lk-unauthorized'))
     throw fail(401, (data && data.error) || (isLogin ? '用户名或密码错误' : '登录已过期'), data)
   }
   if (res.status === 204) return null

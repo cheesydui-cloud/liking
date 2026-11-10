@@ -17,7 +17,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [panelName, setPanelName] = useState('liking')
   const navigate = useNavigate()
-  const { user, applySession } = useUser()
+  const { user, applySession, refreshUser } = useUser()
 
   useEffect(() => {
     if (user) navigate(user.role === 'admin' ? '/' : '/my', { replace: true })
@@ -42,7 +42,9 @@ export default function Login() {
       const data = await api.post('/login', body)
       try { localStorage.setItem('lk-remember', remember ? '1' : '0') } catch {}
       applySession(data)
-      navigate(data?.user?.role === 'admin' ? '/' : '/my', { replace: true })
+      const fresh = await refreshUser()
+      const role = fresh?.user?.role || data?.user?.role
+      navigate(role === 'admin' ? '/' : '/my', { replace: true })
     } catch (err) {
       if (err.need_totp) {
         setNeedTotp(true)

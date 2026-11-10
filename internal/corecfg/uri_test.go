@@ -113,6 +113,60 @@ func TestParseShareURIVariants(t *testing.T) {
 		t.Fatalf("legacy %+v", t4)
 	}
 
+	encoded := "ss://2022-blake3-aes-128-gcm%3Akey%3D%3D@203.0.113.15:43162#pro"
+	tEnc, err := ParseShareURI(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tEnc.Method != "2022-blake3-aes-128-gcm" || tEnc.Password != "key==" || tEnc.Host != "203.0.113.15" || tEnc.Port != 43162 || tEnc.Name != "pro" {
+		t.Fatalf("encoded %+v", tEnc)
+	}
+
+	colonPass := "ss://aes-256-gcm:pa%3Ass@203.0.113.16:1000"
+	tColon, err := ParseShareURI(colonPass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tColon.Method != "aes-256-gcm" || tColon.Password != "pa:ss" || tColon.Port != 1000 {
+		t.Fatalf("colon %+v", tColon)
+	}
+
+	atEnc := "ss://aes-256-gcm%3Asecret%4010.0.0.8%3A9000"
+	tAt, err := ParseShareURI(atEnc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tAt.Method != "aes-256-gcm" || tAt.Password != "secret" || tAt.Host != "10.0.0.8" || tAt.Port != 9000 {
+		t.Fatalf("pct40 %+v", tAt)
+	}
+
+	padded := "ss://YWVzLTI1Ni1nY206cGFzcw%3D%3D@1.2.3.4:8388"
+	tPad, err := ParseShareURI(padded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tPad.Method != "aes-256-gcm" || tPad.Password != "pass" || tPad.Host != "1.2.3.4" {
+		t.Fatalf("padded %+v", tPad)
+	}
+
+	doubleEnc := "ss://aes-256-gcm%253Asecret@9.9.9.9:1000"
+	tDbl, err := ParseShareURI(doubleEnc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tDbl.Method != "aes-256-gcm" || tDbl.Password != "secret" || tDbl.Host != "9.9.9.9" {
+		t.Fatalf("double %+v", tDbl)
+	}
+
+	hostEnc := "ss://aes-256-gcm:secret@ex%2Eample.com:8388"
+	tHost, err := ParseShareURI(hostEnc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tHost.Host != "ex.ample.com" || tHost.Password != "secret" {
+		t.Fatalf("host %+v", tHost)
+	}
+
 	if _, err := ParseShareURI("ss://YWVzLTI1Ni1nY206cGFzcw@1.2.3.4:8388/?plugin=obfs-local"); err == nil || !strings.Contains(err.Error(), "插件") {
 		t.Fatalf("plugin %v", err)
 	}
@@ -183,6 +237,32 @@ func TestNormalizeChainShareExitURI(t *testing.T) {
 		ExitURI: "vmess://x", Settings: "{}",
 	}, nil); err == nil {
 		t.Fatal("expected reject vmess")
+	}
+
+	ssChain := &db.Inbound{
+		Name: "ssenc", Profile: ProfileVLESSReality, Port: 8445, LineKind: "chain",
+		ExitURI:  "ss://2022-blake3-aes-128-gcm%3Akey%3D%3D@203.0.113.15:43162#pro",
+		Settings: "{}",
+	}
+	if err := Normalize(ssChain, nil); err != nil {
+		t.Fatal(err)
+	}
+	pSS, err := ChainPath(ssChain, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ssOb, err := xrayPathOutbound(pSS[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings, _ := ssOb["settings"].(map[string]any)
+	servers, _ := settings["servers"].([]any)
+	if len(servers) != 1 {
+		t.Fatalf("ss servers %+v", ssOb)
+	}
+	srv, _ := servers[0].(map[string]any)
+	if ssOb["protocol"] != "shadowsocks" || srv["method"] != "2022-blake3-aes-128-gcm" || srv["password"] != "key==" || srv["address"] != "203.0.113.15" || srv["port"] != 43162 {
+		t.Fatalf("ss outbound %+v", srv)
 	}
 }
 

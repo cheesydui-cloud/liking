@@ -272,6 +272,9 @@ func (s *Server) sessionPayload(u *db.User, r *http.Request) map[string]any {
 	announce, _ := db.GetSetting(s.DB, "announce")
 	out["announce"] = announce
 	out["timezone"] = db.Timezone(s.DB)
+	if view != nil && view.Role != "admin" {
+		view.Transit = db.UserHasTransit(s.DB, view)
+	}
 	if view != nil && view.SubToken != "" {
 		base := panelURL(s.DB, r)
 		out["sub"] = map[string]string{
@@ -281,7 +284,6 @@ func (s *Server) sessionPayload(u *db.User, r *http.Request) map[string]any {
 			"uri":     base + "/api/sub/" + view.SubToken + "/uri",
 		}
 		if view.Role != "admin" {
-			view.Transit = db.UserHasTransit(s.DB, view)
 			if view.TrafficLimit != nil {
 				view.TrafficCap = *view.TrafficLimit
 			} else if view.PackageID != nil {

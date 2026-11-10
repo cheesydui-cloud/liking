@@ -388,9 +388,20 @@ func parseSS(raw string) (*ShareTarget, error) {
 		rest = rest[:i]
 	}
 	rest = strings.TrimSpace(rest)
+	// Some panels percent-encode the whole userinfo, including '@' as %40,
+	// so the link has no raw '@'. Decode and use the SIP002 form.
+	if !strings.Contains(rest, "@") && strings.Contains(rest, "%") {
+		if decoded := pathUnescapeRepeat(rest); strings.Contains(decoded, "@") {
+			rest = decoded
+		}
+	}
 	// SIP002 has userinfo@host; legacy is base64(method:pass@host:port) and has no '@'.
 	if at := strings.LastIndex(rest, "@"); at >= 0 {
-		host, port, err := splitHostPortDefault(strings.TrimSuffix(rest[at+1:], "/"), 8388)
+		hostPart := strings.TrimSuffix(rest[at+1:], "/")
+		if strings.Contains(hostPart, "%") {
+			hostPart = pathUnescapeRepeat(hostPart)
+		}
+		host, port, err := splitHostPortDefault(hostPart, 8388)
 		if err != nil {
 			return nil, err
 		}
@@ -449,7 +460,9 @@ func parseSSLegacy(payload, name, raw string) (*ShareTarget, error) {
 }
 
 func splitSSUserinfo(userinfo string) (string, string, error) {
-	userinfo = strings.TrimSpace(userinfo)
+	// Panels often paste method:password with ':' and '=' percent-encoded
+	// (%3A / %3D). PathUnescape keeps '+' so SIP002 base64 still decodes.
+	userinfo = strings.TrimSpace(pathUnescapeRepeat(userinfo))
 	if userinfo == "" {
 		return "", "", fmt.Errorf("SS 缺少密码")
 	}
@@ -465,6 +478,17 @@ func splitSSUserinfo(userinfo string) (string, string, error) {
 		return "", "", fmt.Errorf("SS 用户信息无效")
 	}
 	return method, pass, nil
+}
+
+func pathUnescapeRepeat(s string) string {
+	for i := 0; i < 3 && strings.Contains(s, "%"); i++ {
+		next, err := url.PathUnescape(s)
+		if err != nil || next == s {
+			break
+		}
+		s = next
+	}
+	return s
 }
 
 func cutMethodPass(s string) (string, string, bool) {

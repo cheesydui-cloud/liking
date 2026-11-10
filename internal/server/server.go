@@ -108,6 +108,7 @@ func (s *Server) Router() http.Handler {
 		r.Put("/api/me/starred", s.handleMeStarred)
 		r.Get("/api/me/forwards", s.handleListMyForwards)
 		r.Post("/api/me/forwards", s.handleCreateMyForward)
+		r.Post("/api/me/forwards/{id}/probe", s.handleProbeMyForward)
 		r.Put("/api/me/forwards/{id}", s.handleUpdateMyForward)
 		r.Delete("/api/me/forwards/{id}", s.handleDeleteMyForward)
 		r.Post("/api/password", s.handlePassword)

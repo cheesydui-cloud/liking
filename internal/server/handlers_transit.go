@@ -212,6 +212,41 @@ func (s *Server) handleUpdateMyForward(w http.ResponseWriter, r *http.Request) {
 	s.respondAfterApply(w, map[string]any{"forward": myForwardJSON(s.DB, u, fresh, entries)}, applyTargets(s, fresh)...)
 }
 
+func (s *Server) handleProbeMyForward(w http.ResponseWriter, r *http.Request) {
+	u := userFromCtx(r.Context())
+	if u == nil {
+		jsonErr(w, http.StatusUnauthorized, "未登录")
+		return
+	}
+	if fresh, err := db.GetUser(s.DB, u.ID); err == nil && fresh != nil {
+		u = fresh
+	}
+	if u.Role == "admin" {
+		jsonErr(w, http.StatusForbidden, "请在管理的中转里测延迟")
+		return
+	}
+	id, err := chiID(r, "id")
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	in, err := db.GetInbound(s.DB, id)
+	if err != nil || in == nil || in.OwnerUserID != u.ID {
+		jsonErr(w, http.StatusNotFound, "中转不存在")
+		return
+	}
+	if !db.UserTransitServer(s.DB, u, in.ServerID) {
+		jsonErr(w, http.StatusForbidden, "这个入口已取消授权")
+		return
+	}
+	host, port, err := probeDialTarget(s.DB, in)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.runProbe(w, in.ServerID, host, port)
+}
+
 func (s *Server) handleDeleteMyForward(w http.ResponseWriter, r *http.Request) {
 	u := userFromCtx(r.Context())
 	if u == nil {

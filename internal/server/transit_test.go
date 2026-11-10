@@ -2,16 +2,23 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/coder/websocket"
 
 	"liking/internal/corecfg"
 	"liking/internal/db"
+	"liking/internal/wsproto"
 )
 
 func TestUserTransitForwards(t *testing.T) {
@@ -140,6 +147,25 @@ func TestUserTransitForwards(t *testing.T) {
 	createUser("alice", "alice12", pkg.Package.ID)
 	createUser("bob", "bobpass", pkg.Package.ID)
 	createUser("carol", "carol12", plain.Package.ID)
+
+	checkLoginTransit := func(name, pass string, want bool) {
+		t.Helper()
+		jar, _ := cookiejar.New(nil)
+		c := &http.Client{Jar: jar}
+		var body struct {
+			User struct {
+				Transit bool `json:"transit"`
+			} `json:"user"`
+		}
+		decodeRes(t, transitDo(t, c, http.MethodPost, ts.URL+"/api/login", map[string]string{
+			"username": name, "password": pass,
+		}), &body)
+		if body.User.Transit != want {
+			t.Fatalf("%s login transit %v", name, body.User.Transit)
+		}
+	}
+	checkLoginTransit("alice", "alice12", true)
+	checkLoginTransit("carol", "carol12", false)
 
 	alice := loginClient(t, ts.URL, "alice", "alice12")
 	bob := loginClient(t, ts.URL, "bob", "bobpass")
@@ -414,6 +440,218 @@ func TestUserTransitForwards(t *testing.T) {
 		if id == chainID || id == portID {
 			t.Fatalf("server mode leaked personal inbound %d in %v", id, ids)
 		}
+	}
+}
+
+func TestUserForwardProbe(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	hash, err := HashPassword("secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	admin := loginClient(t, ts.URL, "admin", "secret12")
+	var made struct {
+		Server struct {
+			ID int64 `json:"id"`
+		} `json:"server"`
+	}
+	decodeRes(t, transitDo(t, admin, http.MethodPost, ts.URL+"/api/servers", map[string]any{
+		"name": "线路机", "public_host": "203.0.113.10",
+	}), &made)
+	row, err := db.GetServer(d, made.Server.ID)
+	if err != nil || row == nil || row.Token == "" {
+		t.Fatal(err)
+	}
+	var createdIn struct {
+		Inbound struct {
+			ID int64 `json:"id"`
+		} `json:"inbound"`
+	}
+	decodeRes(t, transitDo(t, admin, http.MethodPost, ts.URL+"/api/inbounds", map[string]any{
+		"server_id": row.ID, "name": "入口", "profile": "socks5", "port": 18443,
+	}), &createdIn)
+	entryID := createdIn.Inbound.ID
+	var pkg struct {
+		Package struct {
+			ID int64 `json:"id"`
+		} `json:"package"`
+	}
+	decodeRes(t, transitDo(t, admin, http.MethodPost, ts.URL+"/api/packages", map[string]any{
+		"name": "标准", "traffic_bytes": 0, "direction": "oneway",
+		"inbound_ids": []int64{entryID},
+		"transit_ids": []int64{entryID},
+	}), &pkg)
+	decodeRes(t, transitDo(t, admin, http.MethodPost, ts.URL+"/api/users", map[string]any{
+		"username": "alice", "password": "alice12", "package_id": pkg.Package.ID, "days": 30,
+	}), nil)
+	decodeRes(t, transitDo(t, admin, http.MethodPost, ts.URL+"/api/users", map[string]any{
+		"username": "bob", "password": "bobpass", "package_id": pkg.Package.ID, "days": 30,
+	}), nil)
+	alice := loginClient(t, ts.URL, "alice", "alice12")
+	bob := loginClient(t, ts.URL, "bob", "bobpass")
+
+	var created struct {
+		Forward struct {
+			ID int64 `json:"id"`
+		} `json:"forward"`
+	}
+	decodeRes(t, transitDo(t, alice, http.MethodPost, ts.URL+"/api/me/forwards", map[string]any{
+		"entry_inbound_id": entryID,
+		"kind":             "chain",
+		"name":             "我的链式",
+		"port":             21001,
+		"exit_uri":         "ss://2022-blake3-aes-128-gcm%3Akey%3D%3D@203.0.113.15:43162#pro",
+	}), &created)
+	chainID := created.Forward.ID
+	created.Forward.ID = 0
+	decodeRes(t, transitDo(t, alice, http.MethodPost, ts.URL+"/api/me/forwards", map[string]any{
+		"entry_inbound_id": entryID,
+		"kind":             "port",
+		"name":             "我的端口",
+		"port":             21002,
+		"dest_host":        "198.51.100.8",
+		"dest_port":        8443,
+		"network":          "tcp",
+	}), &created)
+	portID := created.Forward.ID
+	if chainID == 0 || portID == 0 {
+		t.Fatalf("ids chain %d port %d", chainID, portID)
+	}
+
+	res := transitDo(t, bob, http.MethodPost, ts.URL+"/api/me/forwards/"+strconv.FormatInt(chainID, 10)+"/probe", map[string]any{})
+	if res.StatusCode != http.StatusNotFound {
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		t.Fatalf("bob probe %d %s", res.StatusCode, b)
+	}
+	res.Body.Close()
+	res = transitDo(t, admin, http.MethodPost, ts.URL+"/api/me/forwards/"+strconv.FormatInt(chainID, 10)+"/probe", map[string]any{})
+	if res.StatusCode != http.StatusForbidden {
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		t.Fatalf("admin probe %d %s", res.StatusCode, b)
+	}
+	res.Body.Close()
+	res = transitDo(t, alice, http.MethodPost, ts.URL+"/api/me/forwards/"+strconv.FormatInt(chainID, 10)+"/probe", map[string]any{})
+	if res.StatusCode != http.StatusBadRequest {
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		t.Fatalf("offline probe %d %s", res.StatusCode, b)
+	}
+	offlineBody, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if !strings.Contains(string(offlineBody), "不在线") {
+		t.Fatalf("offline body %s", offlineBody)
+	}
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/v1/agents"
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	ws, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close(websocket.StatusNormalClosure, "")
+	hello, _ := json.Marshal(wsproto.Hello{
+		Token: row.Token, AgentVersion: "0.3.29", OS: "linux", Arch: "amd64",
+		Cores: []string{"xray"}, Caps: []string{wsproto.CapProbe},
+	})
+	frame, _ := json.Marshal(wsproto.Envelope{Type: wsproto.TypeHello, ID: "1", Payload: hello})
+	if err := ws.Write(ctx, websocket.MessageText, frame); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ws.Read(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var dialMu sync.Mutex
+	var dials []wsproto.Probe
+	go func() {
+		for {
+			_, raw, err := ws.Read(ctx)
+			if err != nil {
+				return
+			}
+			var env wsproto.Envelope
+			if json.Unmarshal(raw, &env) != nil || env.Type != wsproto.TypeProbe {
+				continue
+			}
+			var p wsproto.Probe
+			_ = json.Unmarshal(env.Payload, &p)
+			dialMu.Lock()
+			dials = append(dials, p)
+			dialMu.Unlock()
+			ack, _ := json.Marshal(wsproto.ProbeAck{OK: true, LatencyMS: 42})
+			out, _ := json.Marshal(wsproto.Envelope{Type: wsproto.TypeProbeAck, ID: env.ID, Payload: ack})
+			_ = ws.Write(ctx, websocket.MessageText, out)
+		}
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if srv.Hub.IsOnline(row.ID) && srv.Hub.HasCap(row.ID, wsproto.CapProbe) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !srv.Hub.HasCap(row.ID, wsproto.CapProbe) {
+		t.Fatal("missing cap")
+	}
+
+	var out struct {
+		OK        bool   `json:"ok"`
+		Host      string `json:"host"`
+		Port      int    `json:"port"`
+		LatencyMS int64  `json:"latency_ms"`
+	}
+	decodeRes(t, transitDo(t, alice, http.MethodPost, ts.URL+"/api/me/forwards/"+strconv.FormatInt(chainID, 10)+"/probe", map[string]any{}), &out)
+	if !out.OK || out.Host != "203.0.113.15" || out.Port != 43162 || out.LatencyMS != 42 {
+		t.Fatalf("chain probe %+v", out)
+	}
+	out = struct {
+		OK        bool   `json:"ok"`
+		Host      string `json:"host"`
+		Port      int    `json:"port"`
+		LatencyMS int64  `json:"latency_ms"`
+	}{}
+	decodeRes(t, transitDo(t, alice, http.MethodPost, ts.URL+"/api/me/forwards/"+strconv.FormatInt(portID, 10)+"/probe", map[string]any{}), &out)
+	if !out.OK || out.Host != "198.51.100.8" || out.Port != 8443 || out.LatencyMS != 42 {
+		t.Fatalf("port probe %+v", out)
+	}
+	dialMu.Lock()
+	got := append([]wsproto.Probe(nil), dials...)
+	dialMu.Unlock()
+	if len(got) != 2 || got[0].Host != "203.0.113.15" || got[0].Port != 43162 || got[1].Host != "198.51.100.8" || got[1].Port != 8443 {
+		t.Fatalf("dials %+v", got)
+	}
+
+	decodeRes(t, transitDo(t, admin, http.MethodPut, ts.URL+"/api/packages/"+strconv.FormatInt(pkg.Package.ID, 10), map[string]any{
+		"inbound_ids": []int64{entryID},
+		"transit_ids": []int64{},
+	}), nil)
+	res = transitDo(t, alice, http.MethodPost, ts.URL+"/api/me/forwards/"+strconv.FormatInt(chainID, 10)+"/probe", map[string]any{})
+	if res.StatusCode != http.StatusForbidden {
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		t.Fatalf("revoked probe %d %s", res.StatusCode, b)
+	}
+	revoked, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if !strings.Contains(string(revoked), "取消授权") {
+		t.Fatalf("revoked body %s", revoked)
 	}
 }
 

@@ -21,10 +21,13 @@ export function UserProvider({ children }) {
   const [panelUrl, setPanelUrl] = useState('')
   const [toasts, setToasts] = useState([])
   const [dialog, setDialog] = useState(null)
+  const sessionGen = useRef(0)
 
   const refreshUser = useCallback(async () => {
+    const gen = ++sessionGen.current
     try {
       const data = await api.get('/me')
+      if (gen !== sessionGen.current) return null
       setUser(data?.user ?? null)
       if (data?.panel_name) setPanelName(data.panel_name)
       if (data?.version) setVersion(data.version)
@@ -33,6 +36,7 @@ export function UserProvider({ children }) {
       if (data?.announce != null) setAnnounce(data.announce)
       return data
     } catch (e) {
+      if (gen !== sessionGen.current) return null
       if (e?.status === 401) setUser(null)
       else setUser(prev => (prev === undefined ? null : prev))
       return null
@@ -70,6 +74,9 @@ export function UserProvider({ children }) {
   useEffect(() => () => toastTimers.current.forEach(clearTimeout), [])
 
   const applySession = useCallback((data) => {
+    // Drop a /me that started before this login, so its 401 or older user
+    // cannot erase the session we just stored.
+    sessionGen.current += 1
     if (data?.user !== undefined) setUser(data.user)
     if (data?.panel_name) setPanelName(data.panel_name)
     if (data?.version) setVersion(data.version)
@@ -178,6 +185,8 @@ export function Layout({ children }) {
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
   const mainRef = useRef(null)
   const scrollRef = useRef(null)
+  const userRef = useRef(user)
+  userRef.current = user
   const pageTitle = pageTitleOf(loc.pathname)
   const announceText = (announce || '').trim()
   const announceLong = announceText.length > 80
@@ -188,8 +197,18 @@ export function Layout({ children }) {
     if (scrollRef.current) scrollRef.current.scrollTop = 0
     window.scrollTo(0, 0)
     mainRef.current?.focus({ preventScroll: true })
-    if (user && user.role !== 'admin') refreshUser()
-  }, [loc.pathname])
+    const u = userRef.current
+    if (u && u.role !== 'admin') refreshUser()
+  }, [loc.pathname, refreshUser])
+
+  useEffect(() => {
+    if (!user || user.role === 'admin') return
+    const onVis = () => {
+      if (document.visibilityState === 'visible') refreshUser()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [user?.id, user?.role, refreshUser])
 
   useEffect(() => {
     document.documentElement.classList.add('page-aliyun')
