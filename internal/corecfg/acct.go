@@ -15,8 +15,8 @@ func acctProfile(in *db.Inbound) bool {
 		return false
 	}
 	switch in.Profile {
-	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP,
-		ProfileTrojanTLS, ProfileSS2022, ProfileAnyTLS, ProfileSOCKS5:
+	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP, ProfileVLESSXHTTPReality,
+		ProfileTrojanTLS, ProfileSS2022, ProfileAnyTLS, ProfileHysteria2, ProfileSOCKS5:
 		return true
 	default:
 		return false

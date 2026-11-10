@@ -181,7 +181,7 @@ func xrayInbound(in *db.Inbound, clients []*db.Client, certs map[int64]*db.Certi
 	}
 
 	switch in.Profile {
-	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP:
+	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP, ProfileVLESSXHTTPReality:
 		obj["protocol"] = "vless"
 		obj["settings"] = map[string]any{"clients": users, "decryption": "none"}
 	case ProfileTrojanTLS:
@@ -217,7 +217,7 @@ func xrayUsers(in *db.Inbound, clients []*db.Client, st Settings) []any {
 			continue
 		}
 		switch in.Profile {
-		case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP:
+		case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP, ProfileVLESSXHTTPReality:
 			u := map[string]any{"id": c.UUID, "email": c.Email}
 			if Vision(in.Profile) {
 				u["flow"] = "xtls-rprx-vision"
@@ -237,7 +237,7 @@ func relayUsers(landing *db.Inbound, byID map[int64]*db.Inbound) []any {
 	var users []any
 	forEachRelayTo(landing.ID, byID, func(email string, st Settings) {
 		switch landing.Profile {
-		case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP:
+		case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP, ProfileVLESSXHTTPReality:
 			if id := st.String("relay_uuid"); id != "" {
 				u := map[string]any{"id": id, "email": email}
 				if Vision(landing.Profile) {
@@ -283,6 +283,20 @@ func xrayStream(in *db.Inbound, st Settings, certs map[int64]*db.Certificate) (m
 			"network":       "xhttp",
 			"security":      "tls",
 			"tlsSettings":   tls,
+			"xhttpSettings": xrayXHTTPSettings(st),
+		}, nil
+	case ProfileVLESSXHTTPReality:
+		return map[string]any{
+			"network":  "xhttp",
+			"security": "reality",
+			"realitySettings": map[string]any{
+				"show":        false,
+				"dest":        st.String("dest"),
+				"xver":        st.Int("xver", 0),
+				"serverNames": st.Strings("server_names"),
+				"privateKey":  st.String("private_key"),
+				"shortIds":    st.Strings("short_ids"),
+			},
 			"xhttpSettings": xrayXHTTPSettings(st),
 		}, nil
 	case ProfileTrojanTLS:
@@ -588,13 +602,31 @@ func xrayLandOutbound(tag string, land *db.Inbound, st Settings) (map[string]any
 	}
 
 	switch land.Profile {
-	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP:
+	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP, ProfileVLESSXHTTPReality:
 		user := map[string]any{"id": st.String("relay_uuid"), "encryption": "none"}
 		if Vision(land.Profile) {
 			user["flow"] = "xtls-rprx-vision"
 		}
 		stream := map[string]any{}
-		if land.Profile == ProfileVLESSXHTTP {
+		if land.Profile == ProfileVLESSXHTTPReality {
+			sni := first(lst.Strings("server_names"))
+			sid := first(lst.Strings("short_ids"))
+			rs := map[string]any{
+				"serverName":  sni,
+				"fingerprint": nz(lst.String("fingerprint"), "chrome"),
+				"publicKey":   lst.String("public_key"),
+				"shortId":     sid,
+			}
+			if spx := lst.String("spider_x"); spx != "" {
+				rs["spiderX"] = spx
+			}
+			stream = map[string]any{
+				"network":         "xhttp",
+				"security":        "reality",
+				"realitySettings": rs,
+				"xhttpSettings":   xrayXHTTPSettings(lst),
+			}
+		} else if land.Profile == ProfileVLESSXHTTP {
 			sni := tlsServerName(lst.String("sni"), host)
 			stream = map[string]any{
 				"network":       "xhttp",

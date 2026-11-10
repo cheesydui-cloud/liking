@@ -150,7 +150,7 @@ func singStatUsers(inbounds []*db.Inbound, clients map[int64][]*db.Client) []str
 			switch in.Profile {
 			case ProfileSOCKS5:
 				add(clientSocksUser(c))
-			case ProfileAnyTLS:
+			case ProfileAnyTLS, ProfileHysteria2:
 				add(c.Email)
 			}
 		}
@@ -166,6 +166,8 @@ func singInbound(in *db.Inbound, clients []*db.Client, certs map[int64]*db.Certi
 	switch in.Profile {
 	case ProfileSOCKS5:
 		return singSocksInbound(in, clients, byID)
+	case ProfileHysteria2:
+		return singHysteria2Inbound(in, clients, certs)
 	case ProfileAnyTLS:
 	default:
 		return nil, nil
@@ -214,6 +216,66 @@ func singInbound(in *db.Inbound, clients []*db.Client, certs map[int64]*db.Certi
 		"users":       users,
 		"tls":         tls,
 	}, nil
+}
+
+func singHysteria2Inbound(in *db.Inbound, clients []*db.Client, certs map[int64]*db.Certificate) (map[string]any, error) {
+	st := ParseSettings(in.Settings)
+	var users []any
+	for _, c := range clients {
+		if c == nil || !c.Enabled || strings.TrimSpace(c.Password) == "" {
+			continue
+		}
+		name := strings.TrimSpace(c.Email)
+		if name == "" {
+			name = c.Username
+		}
+		if name == "" {
+			continue
+		}
+		users = append(users, map[string]any{"name": name, "password": c.Password})
+	}
+	if users == nil {
+		users = []any{}
+	}
+	if in.CertID == nil {
+		return nil, fmt.Errorf("入站 %s 需要 TLS 证书", in.Name)
+	}
+	c := certs[*in.CertID]
+	if c == nil {
+		return nil, fmt.Errorf("入站 %s 的证书不存在", in.Name)
+	}
+	tls := map[string]any{
+		"enabled":     true,
+		"certificate": pemBlock(c.CertPEM),
+		"key":         pemBlock(c.KeyPEM),
+		"alpn":        []string{"h3"},
+	}
+	if sni := tlsServerName(st.String("sni"), ""); sni != "" {
+		tls["server_name"] = sni
+	}
+	obj := map[string]any{
+		"type":        "hysteria2",
+		"tag":         inboundTag(in.ID),
+		"listen":      in.Listen,
+		"listen_port": in.Port,
+		"users":       users,
+		"tls":         tls,
+		"masquerade": map[string]any{
+			"type":         "proxy",
+			"url":          nz(st.String("masquerade"), DefaultHy2Masquerade),
+			"rewrite_host": true,
+		},
+	}
+	if st.Bool("obfs", true) {
+		obj["obfs"] = map[string]any{"type": "salamander", "password": st.String("obfs_password")}
+	}
+	if up := st.Int("up_mbps", 0); up > 0 {
+		obj["up_mbps"] = up
+		obj["down_mbps"] = st.Int("down_mbps", 0)
+	} else {
+		obj["ignore_client_bandwidth"] = true
+	}
+	return obj, nil
 }
 
 func singSocksInbound(in *db.Inbound, clients []*db.Client, byID map[int64]*db.Inbound) (map[string]any, error) {
@@ -503,6 +565,26 @@ func singLandOutbound(tag string, land *db.Inbound, st Settings) (map[string]any
 			ob["flow"] = "xtls-rprx-vision"
 		}
 		return ob, nil
+	case ProfileVLESSXHTTPReality:
+		sni := first(lst.Strings("server_names"))
+		return map[string]any{
+			"type":        "vless",
+			"tag":         tag,
+			"server":      host,
+			"server_port": land.Port,
+			"uuid":        st.String("relay_uuid"),
+			"tls": map[string]any{
+				"enabled":     true,
+				"server_name": sni,
+				"utls":        map[string]any{"enabled": true, "fingerprint": nz(lst.String("fingerprint"), "chrome")},
+				"reality": map[string]any{
+					"enabled":    true,
+					"public_key": lst.String("public_key"),
+					"short_id":   first(lst.Strings("short_ids")),
+				},
+			},
+			"transport": singXHTTPTransport(lst.String("path"), lst.String("mode"), lst.String("host")),
+		}, nil
 	case ProfileVLESSXHTTP:
 		sni := tlsServerName(lst.String("sni"), host)
 		return map[string]any{
@@ -549,6 +631,17 @@ func singLandOutbound(tag string, land *db.Inbound, st Settings) (map[string]any
 	default:
 		return nil, fmt.Errorf("不支持的落地协议 %s", land.Profile)
 	}
+}
+
+func singHy2TLS(sni string) map[string]any {
+	tls := map[string]any{
+		"enabled": true,
+		"alpn":    []string{"h3"},
+	}
+	if sni != "" {
+		tls["server_name"] = sni
+	}
+	return tls
 }
 
 func singClientTLS(st Settings, sni string) map[string]any {

@@ -50,7 +50,7 @@ function cloneEntrySettings(inb) {
 }
 
 function needsTLS(profile) {
-  return profile === 'vless-xhttp-tls' || profile === 'trojan-tls' || profile === 'anytls'
+  return profile === 'vless-xhttp-tls' || profile === 'trojan-tls' || profile === 'anytls' || profile === 'hysteria2'
 }
 
 function isReality(profile) {
@@ -779,7 +779,7 @@ function ForwardsPanel() {
                       </select>
                     </Field>
                     {h.kind === 'panel' ? (
-                      <Field label={last ? '落地节点' : '节点'} hint="只能选直出的 VLESS / Trojan / SS2022 / SOCKS5。">
+                      <Field label={last ? '落地节点' : '节点'} hint="只能选直出的 VLESS / Trojan / SS2022 / SOCKS5 / XHTTP+REALITY。Hysteria2 不能当落地。">
                         <select className="input-field" value={h.inbound_id} onChange={e => setHop(i, { inbound_id: e.target.value })}>
                           <option value="">选择节点</option>
                           {opts.map(x => (
@@ -877,6 +877,12 @@ function ForwardsPanel() {
               </select>
             </Field>
           )}
+          {f.kind !== 'port' && showNewEntry && f.profile === 'hysteria2' && (
+            <div className="notice">Hysteria2 监听 UDP，需要证书，不能当落地。混淆默认打开，带宽留空走 BBR。要改伪装或带宽，到节点页编辑。</div>
+          )}
+          {f.kind !== 'port' && showNewEntry && f.profile === 'vless-reality-xhttp' && (
+            <div className="notice">不需要证书，可以当落地。路径留空会自动生成。小火箭对 XHTTP 支持不完整。</div>
+          )}
           {f.kind !== 'port' && showNewEntry && f.profile === 'mieru' && (
             <Field label="传输" hint="一台实例只能开一条。BOTH 同时开 TCP 和 UDP。">
               <select className="input-field" value={f.transport} onChange={e => setF({ ...f, transport: e.target.value })}>
@@ -887,7 +893,7 @@ function ForwardsPanel() {
             </Field>
           )}
           {needsLanding && landings.length === 0 ? (
-            <div className="notice">还没有可落地的节点。先到「节点」增加 VLESS / Trojan / SS2022 / SOCKS5 直出。</div>
+            <div className="notice">还没有可落地的节点。先到「节点」增加 VLESS / Trojan / SS2022 / SOCKS5 / XHTTP+REALITY 直出。Hysteria2 不能当落地。</div>
           ) : null}
           {f.kind === 'chain' && selectedServer && !selectedServer.public_host ? (
             <div className="notice">入口机还没填公开地址。落地能建，用户连入口时需要地址。</div>

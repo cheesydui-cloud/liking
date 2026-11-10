@@ -48,7 +48,7 @@ func limitTag(mark uint32) string {
 
 func throttleProfile(profile string) bool {
 	switch profile {
-	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP, ProfileTrojanTLS, ProfileSS2022, ProfileAnyTLS:
+	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP, ProfileVLESSXHTTPReality, ProfileTrojanTLS, ProfileSS2022, ProfileAnyTLS, ProfileHysteria2:
 		return true
 	default:
 		return false

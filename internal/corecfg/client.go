@@ -143,7 +143,7 @@ func newClient(u *db.User, in *db.Inbound) (*db.Client, error) {
 			return nil, err
 		}
 		c.Password = pw
-	case ProfileTrojanTLS, ProfileAnyTLS:
+	case ProfileTrojanTLS, ProfileAnyTLS, ProfileHysteria2:
 		pw, err := RandomHex(16)
 		if err != nil {
 			return nil, err

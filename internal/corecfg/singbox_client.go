@@ -48,6 +48,25 @@ func SingboxOutbound(in *db.Inbound, c *db.Client) (map[string]any, error) {
 			"tls":         singClientTLS(st, sni),
 			"transport":   singXHTTPTransport(st.String("path"), st.String("mode"), st.String("host")),
 		}, nil
+	case ProfileVLESSXHTTPReality:
+		return map[string]any{
+			"type":        "vless",
+			"tag":         tag,
+			"server":      host,
+			"server_port": in.Port,
+			"uuid":        c.UUID,
+			"tls": map[string]any{
+				"enabled":     true,
+				"server_name": first(st.Strings("server_names")),
+				"utls":        map[string]any{"enabled": true, "fingerprint": nz(st.String("fingerprint"), "chrome")},
+				"reality": map[string]any{
+					"enabled":    true,
+					"public_key": st.String("public_key"),
+					"short_id":   first(st.Strings("short_ids")),
+				},
+			},
+			"transport": singXHTTPTransport(st.String("path"), st.String("mode"), st.String("host")),
+		}, nil
 	case ProfileTrojanTLS:
 		sni := tlsServerName(st.String("sni"), host)
 		return map[string]any{
@@ -77,6 +96,24 @@ func SingboxOutbound(in *db.Inbound, c *db.Client) (map[string]any, error) {
 			"password":    c.Password,
 			"tls":         singClientTLS(st, sni),
 		}, nil
+	case ProfileHysteria2:
+		sni := tlsServerName(st.String("sni"), host)
+		ob := map[string]any{
+			"type":        "hysteria2",
+			"tag":         tag,
+			"server":      host,
+			"server_port": in.Port,
+			"password":    c.Password,
+			"tls":         singHy2TLS(sni),
+		}
+		if st.Bool("obfs", true) {
+			ob["obfs"] = map[string]any{"type": "salamander", "password": st.String("obfs_password")}
+		}
+		if up := st.Int("up_mbps", 0); up > 0 {
+			ob["up_mbps"] = up
+			ob["down_mbps"] = st.Int("down_mbps", 0)
+		}
+		return ob, nil
 	case ProfileSOCKS5:
 		ob := map[string]any{
 			"type":        "socks",

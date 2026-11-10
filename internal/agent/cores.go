@@ -912,12 +912,25 @@ func dropOccupiedListen(raw json.RawMessage) (json.RawMessage, []int) {
 				keep = append(keep, x)
 				continue
 			}
-			ln, err := net.Listen("tcp", net.JoinHostPort(listen, strconv.Itoa(port)))
+			addr := net.JoinHostPort(listen, strconv.Itoa(port))
+			var err error
+			if listenUDP(m) {
+				var pc net.PacketConn
+				pc, err = net.ListenPacket("udp", addr)
+				if pc != nil {
+					_ = pc.Close()
+				}
+			} else {
+				var ln net.Listener
+				ln, err = net.Listen("tcp", addr)
+				if ln != nil {
+					_ = ln.Close()
+				}
+			}
 			if err != nil {
 				addSkip(port)
 				continue
 			}
-			_ = ln.Close()
 			keep = append(keep, x)
 		}
 		top["inbounds"] = keep
@@ -991,7 +1004,12 @@ func publicListenSpecs(raw json.RawMessage) (tcp []string, udp []string) {
 			if port == 0 {
 				continue
 			}
-			tcp = append(tcp, net.JoinHostPort(listen, strconv.Itoa(port)))
+			addr := net.JoinHostPort(listen, strconv.Itoa(port))
+			if listenUDP(m) {
+				udp = append(udp, addr)
+			} else {
+				tcp = append(tcp, addr)
+			}
 		}
 	}
 	if binds, ok := top["portBindings"].([]any); ok {
@@ -1014,6 +1032,15 @@ func publicListenSpecs(raw json.RawMessage) (tcp []string, udp []string) {
 		}
 	}
 	return tcp, udp
+}
+
+func listenUDP(m map[string]any) bool {
+	switch strings.ToLower(strAny(m["type"])) {
+	case "hysteria2", "hysteria", "tuic":
+		return true
+	default:
+		return false
+	}
 }
 
 func isLoopback(listen string) bool {

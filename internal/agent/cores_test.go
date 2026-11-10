@@ -77,6 +77,40 @@ func TestPublicListenSpecsSkipsLoopback(t *testing.T) {
 	}
 }
 
+func TestPublicListenSpecsHysteria2UDP(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	raw, _ := json.Marshal(map[string]any{
+		"inbounds": []any{
+			map[string]any{"type": "hysteria2", "listen": "127.0.0.1", "listen_port": port},
+			map[string]any{"type": "anytls", "listen": "0.0.0.0", "listen_port": 8444},
+		},
+	})
+	tcp, udp := publicListenSpecs(raw)
+	if len(udp) != 1 || udp[0] != "127.0.0.1:"+strconv.Itoa(port) {
+		t.Fatalf("udp %v", udp)
+	}
+	if len(tcp) != 1 || tcp[0] != "0.0.0.0:8444" {
+		t.Fatalf("tcp %v", tcp)
+	}
+	out, skipped := dropOccupiedListen(raw)
+	if len(skipped) != 0 {
+		t.Fatalf("skipped %v", skipped)
+	}
+	var top map[string]any
+	if err := json.Unmarshal(out, &top); err != nil {
+		t.Fatal(err)
+	}
+	ins, _ := top["inbounds"].([]any)
+	if len(ins) != 2 {
+		t.Fatalf("kept %d", len(ins))
+	}
+}
+
 func TestCheckPublicPortsBusy(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

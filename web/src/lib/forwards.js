@@ -1,7 +1,7 @@
 import { formatPortRange, serverPortRange } from './ports'
 import { parseShareURI, shareLabel, shareProto, isSocksURI } from './share'
 
-export const LAND_PROFILES = ['vless-reality', 'vless-reality-vision', 'vless-xhttp-tls', 'trojan-tls', 'ss2022', 'socks5']
+export const LAND_PROFILES = ['vless-reality', 'vless-reality-vision', 'vless-xhttp-tls', 'vless-reality-xhttp', 'trojan-tls', 'ss2022', 'socks5']
 export const MAX_HOPS = 5
 
 export function inboundSettings(inb) {
@@ -31,9 +31,11 @@ export function protoShort(profile) {
     case 'vless-reality-vision': return 'Vision'
     case 'vless-reality': return 'REALITY'
     case 'vless-xhttp-tls': return 'XHTTP'
+    case 'vless-reality-xhttp': return 'XHTTP+REALITY'
     case 'trojan-tls': return 'Trojan'
     case 'ss2022': return 'SS2022'
     case 'anytls': return 'AnyTLS'
+    case 'hysteria2': return 'Hysteria2'
     case 'mieru': return 'Mieru'
     case 'socks5': return 'SOCKS5'
     case 'wireguard': return 'WireGuard'

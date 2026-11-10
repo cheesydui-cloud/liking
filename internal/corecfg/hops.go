@@ -216,7 +216,7 @@ func ApplyHopRelays(st Settings, lands map[int64]*db.Inbound, entryID, exitID in
 			return fmt.Errorf("跳必须是直出线路")
 		}
 		if !CanLand(land.Profile) {
-			return fmt.Errorf("v1 链式落地仅支持 VLESS / Trojan / SS2022 / SOCKS5（Mieru / AnyTLS 不能当落地）")
+			return fmt.Errorf("v1 链式落地仅支持 VLESS / Trojan / SS2022 / SOCKS5（Mieru / AnyTLS / Hysteria2 不能当落地）")
 		}
 		seen[land.ID] = struct{}{}
 		cred := h.cred()

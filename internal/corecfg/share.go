@@ -67,6 +67,24 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 			q.Set("host", h)
 		}
 		return fmt.Sprintf("vless://%s@%s?%s#%s", c.UUID, hp, q.Encode(), name), nil
+	case ProfileVLESSXHTTPReality:
+		q := url.Values{}
+		q.Set("encryption", "none")
+		q.Set("security", "reality")
+		q.Set("type", "xhttp")
+		q.Set("path", st.String("path"))
+		q.Set("mode", nz(st.String("mode"), "auto"))
+		q.Set("sni", first(st.Strings("server_names")))
+		q.Set("fp", nz(st.String("fingerprint"), "chrome"))
+		q.Set("pbk", st.String("public_key"))
+		q.Set("sid", first(st.Strings("short_ids")))
+		if spx := st.String("spider_x"); spx != "" {
+			q.Set("spx", spx)
+		}
+		if h := st.String("host"); h != "" {
+			q.Set("host", h)
+		}
+		return fmt.Sprintf("vless://%s@%s?%s#%s", c.UUID, hp, q.Encode(), name), nil
 	case ProfileTrojanTLS:
 		q := url.Values{}
 		q.Set("security", "tls")
@@ -94,6 +112,23 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 		q.Set("fp", nz(st.String("fingerprint"), "chrome"))
 		q.Set("alpn", strings.Join(st.ALPN(), ","))
 		return fmt.Sprintf("anytls://%s@%s?%s#%s", url.QueryEscape(c.Password), hp, q.Encode(), name), nil
+	case ProfileHysteria2:
+		q := url.Values{}
+		sni := tlsServerName(st.String("sni"), host)
+		if sni != "" {
+			q.Set("sni", sni)
+		}
+		q.Set("alpn", "h3")
+		q.Set("insecure", "0")
+		if st.Bool("obfs", true) {
+			q.Set("obfs", "salamander")
+			q.Set("obfs-password", st.String("obfs_password"))
+		}
+		if up := st.Int("up_mbps", 0); up > 0 {
+			q.Set("upmbps", strconv.Itoa(up))
+			q.Set("downmbps", strconv.Itoa(st.Int("down_mbps", 0)))
+		}
+		return fmt.Sprintf("hysteria2://%s@%s?%s#%s", url.PathEscape(c.Password), hp, q.Encode(), name), nil
 	case ProfilePortForward:
 		return "", fmt.Errorf("端口中转没有分享链接")
 	case ProfileSOCKS5:

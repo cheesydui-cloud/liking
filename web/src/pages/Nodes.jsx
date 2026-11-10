@@ -145,6 +145,7 @@ const emptyLine = {
   line_kind: 'direct', cert_id: 0, enabled: true, reject_cn: false,
   dest: 'www.cloudflare.com:443', sni: '', path: '', host: '', mode: 'auto',
   method: '2022-blake3-aes-256-gcm', transport: 'BOTH',
+  obfs: true, masquerade: 'https://www.cloudflare.com', up_mbps: '', down_mbps: '',
   wg_network: '10.7.0.0/24', wg_address: '10.7.0.1/24', wg_exit: '10.7.0.2/32', wg_exit_server: 0,
   fingerprint: 'chrome', short_ids: '', xver: 0, spider_x: '',
   min_version: '1.3', alpn: 'h2,http/1.1', reject_unknown_sni: true,
@@ -254,6 +255,11 @@ function inboundParamRows(inb) {
     ['家宽地址', st.exit_address],
     ['中转机公钥', st.public_key && inb.profile === 'wireguard' ? st.public_key : ''],
     ['家宽公钥', st.exit_public_key],
+    ['obfs', st.obfs === true ? 'salamander' : (st.obfs === false ? '关' : '')],
+    ['obfs_password', st.obfs_password],
+    ['masquerade', st.masquerade],
+    ['up_mbps', st.up_mbps ? String(st.up_mbps) : ''],
+    ['down_mbps', st.down_mbps ? String(st.down_mbps) : ''],
     ['dest_host', st.dest_host],
     ['dest_port', st.dest_port],
     ['network', inb.profile === 'wireguard' ? '' : st.network],
@@ -270,6 +276,9 @@ function hasAdvanced(st) {
   if (st.spider_x) return true
   if (st.host) return true
   if (st.mode && st.mode !== 'auto') return true
+  if (st.obfs === false) return true
+  if (st.masquerade && st.masquerade !== 'https://www.cloudflare.com') return true
+  if (Number(st.up_mbps) > 0 || Number(st.down_mbps) > 0) return true
   const alpn = Array.isArray(st.alpn) ? st.alpn.join(',') : String(st.alpn || '')
   if (alpn && alpn !== 'h2,http/1.1') return true
   if (st.listen && st.listen !== '0.0.0.0') return true
@@ -289,9 +298,11 @@ function protoShort(profile) {
     case 'vless-reality-vision': return 'Vision'
     case 'vless-reality': return 'REALITY'
     case 'vless-xhttp-tls': return 'XHTTP'
+    case 'vless-reality-xhttp': return 'XHTTP+REALITY'
     case 'trojan-tls': return 'Trojan'
     case 'ss2022': return 'SS2022'
     case 'anytls': return 'AnyTLS'
+    case 'hysteria2': return 'Hysteria2'
     case 'mieru': return 'Mieru'
     case 'socks5': return 'SOCKS5'
     case 'wireguard': return 'WireGuard'
@@ -341,6 +352,10 @@ function formFromInbound(inb) {
     mode: st.mode || 'auto',
     method: st.method || '2022-blake3-aes-256-gcm',
     transport: st.transport || 'BOTH',
+    obfs: st.obfs !== false,
+    masquerade: st.masquerade || 'https://www.cloudflare.com',
+    up_mbps: st.up_mbps || '',
+    down_mbps: st.down_mbps || '',
     fingerprint: st.fingerprint || 'chrome',
     short_ids: short,
     xver: st.xver ?? 0,
@@ -481,12 +496,29 @@ export default function Nodes() {
       else delete settings.alpn
       settings.reject_unknown_sni = f.reject_unknown_sni !== false
     }
-    if (profile === 'vless-xhttp-tls') {
+    if (profile === 'vless-xhttp-tls' || profile === 'vless-reality-xhttp') {
       if (String(f.path || '').trim()) settings.path = f.path.trim()
       else delete settings.path
       settings.mode = f.mode || 'auto'
       if (String(f.host || '').trim()) settings.host = f.host.trim()
       else delete settings.host
+    }
+    if (profile === 'hysteria2') {
+      if (String(f.sni || '').trim()) settings.sni = f.sni.trim()
+      else delete settings.sni
+      settings.obfs = f.obfs !== false
+      if (String(f.masquerade || '').trim()) settings.masquerade = f.masquerade.trim()
+      else delete settings.masquerade
+      const up = Number(f.up_mbps) || 0
+      const down = Number(f.down_mbps) || 0
+      if (up > 0) settings.up_mbps = up
+      else delete settings.up_mbps
+      if (down > 0) settings.down_mbps = down
+      else delete settings.down_mbps
+      delete settings.fingerprint
+      delete settings.min_version
+      delete settings.alpn
+      delete settings.reject_unknown_sni
     }
     if (profile === 'ss2022') settings.method = f.method
     if (profile === 'mieru') settings.transport = f.transport
@@ -523,6 +555,14 @@ export default function Nodes() {
     if (!Number(f.server_id)) {
       toast('请选择实例', 'error')
       return
+    }
+    if (f.profile === 'hysteria2') {
+      const up = Number(f.up_mbps) || 0
+      const down = Number(f.down_mbps) || 0
+      if ((up > 0) !== (down > 0)) {
+        toast('Brutal 带宽需要上行和下行都填，或都留空', 'error')
+        return
+      }
     }
     if (f.profile === 'wireguard') {
       if (!Number(f.wg_exit_server)) {
@@ -930,7 +970,7 @@ export default function Nodes() {
               </Field>
             </div>
           )}
-          {f.profile === 'vless-xhttp-tls' && (
+          {(f.profile === 'vless-xhttp-tls' || f.profile === 'vless-reality-xhttp') && (
             <Field label="Path" hint="可留空自动生成。建议随机路径，不要用 /">
               <input className="input-field" value={f.path} onChange={e => setF({ ...f, path: e.target.value })} placeholder="/随机" />
             </Field>
@@ -955,8 +995,14 @@ export default function Nodes() {
           {f.profile === 'anytls' && (
             <div className="notice sm:col-span-2">AnyTLS 走 sing-box，需要证书。不能当链式落地。</div>
           )}
+          {f.profile === 'vless-reality-xhttp' && (
+            <div className="notice sm:col-span-2">不需要证书，可当链式落地。小火箭对 XHTTP 支持不完整，优先用 sing-box、v2rayN 或较新的 Clash Meta。</div>
+          )}
+          {f.profile === 'hysteria2' && (
+            <div className="notice sm:col-span-2">监听 UDP，需要证书，不能当链式落地。混淆默认打开。带宽留空用 BBR；上行和下行都填才改用 Brutal，并且不会超过所填速率。防火墙要放行这个 UDP 端口。</div>
+          )}
           {f.profile === 'mieru' && (
-            <div className="notice sm:col-span-2">Mieru 只当入口，一台实例只能开一条。账号和出口是整机共用的，开第二条会让客户串到别的端口。链式转发时请把它放在入口机，落地用 VLESS / Trojan / SS2022 / SOCKS5。</div>
+            <div className="notice sm:col-span-2">Mieru 只当入口，一台实例只能开一条。账号和出口是整机共用的，开第二条会让客户串到别的端口。链式转发时请把它放在入口机，落地用 VLESS / Trojan / SS2022 / SOCKS5 / XHTTP+REALITY。</div>
           )}
           {f.profile === 'socks5' && (
             <div className="notice sm:col-span-2">SOCKS5 走 sing-box，用户名密码认证，可 UDP。浏览器和 Clash 可直连，也可当链式落地。</div>
@@ -1070,7 +1116,7 @@ export default function Nodes() {
                   </label>
                 </>
               )}
-              {f.profile === 'vless-xhttp-tls' && (
+              {(f.profile === 'vless-xhttp-tls' || f.profile === 'vless-reality-xhttp') && (
                 <>
                   <Field label="XHTTP mode" hint="auto 即可。stream-up 适合大流量，老客户端可能不认。">
                     <select className="input-field" value={f.mode} onChange={e => setF({ ...f, mode: e.target.value })}>
@@ -1085,12 +1131,35 @@ export default function Nodes() {
                   </Field>
                 </>
               )}
+              {f.profile === 'hysteria2' && (
+                <>
+                  <Field label="SNI" hint="客户端校验的域名。留空则用实例公开地址。证书域名和地址不一致时要填。">
+                    <input className="input-field" value={f.sni} onChange={e => setF({ ...f, sni: e.target.value })} placeholder={selectedServer?.public_host || ''} />
+                  </Field>
+                  <Field label="探测伪装" hint="浏览器打开这个端口时转到该网站。留空用 www.cloudflare.com。">
+                    <input className="input-field" value={f.masquerade} onChange={e => setF({ ...f, masquerade: e.target.value })} placeholder="https://www.cloudflare.com" />
+                  </Field>
+                  <Field label="上行 Mbps" hint="和下一行一起填才启用 Brutal。留空用 BBR，不限这个数。">
+                    <input className="input-field" type="number" min="0" max="10000" value={f.up_mbps} onChange={e => setF({ ...f, up_mbps: e.target.value })} placeholder="留空" />
+                  </Field>
+                  <Field label="下行 Mbps" hint="客户端下载方向。要和上行一起填。">
+                    <input className="input-field" type="number" min="0" max="10000" value={f.down_mbps} onChange={e => setF({ ...f, down_mbps: e.target.value })} placeholder="留空" />
+                  </Field>
+                  <label className="flex items-start gap-2 sm:col-span-2 text-[13px] text-ink-soft">
+                    <input type="checkbox" className="mt-0.5" checked={f.obfs !== false} onChange={e => setF({ ...f, obfs: e.target.checked })} />
+                    <span>Salamander 混淆。关掉后 QUIC 特征更明显，旧订阅里的混淆密码也会失效。</span>
+                  </label>
+                </>
+              )}
             </>
           )}
           {isReality(f.profile) && Number(f.port) !== 443 && (
             <div className="notice sm:col-span-2">REALITY 监听端口不是 443 时，探测更容易把服务器 IP 封掉。能用 443 就用 443。不要伪装成苹果的网站。</div>
           )}
-          {Number(f.port) === 443 && !isReality(f.profile) && f.profile !== 'wireguard' && (
+          {Number(f.port) === 443 && f.profile === 'hysteria2' && (
+            <div className="notice sm:col-span-2">Hysteria2 用的是 UDP 443，和 Nginx 的 TCP 443 不冲突。防火墙要放行 UDP。</div>
+          )}
+          {Number(f.port) === 443 && !isReality(f.profile) && f.profile !== 'wireguard' && f.profile !== 'hysteria2' && (
             <div className="notice sm:col-span-2">443 很容易被 Nginx / 其它面板占用。建议改成 8443 或其它空闲端口。</div>
           )}
           {missingCore && f.profile !== 'wireguard' && (

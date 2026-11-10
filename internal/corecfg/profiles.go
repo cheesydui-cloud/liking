@@ -3,6 +3,7 @@ package corecfg
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -13,9 +14,11 @@ const (
 	ProfileVLESSReality       = "vless-reality"
 	ProfileVLESSRealityVision = "vless-reality-vision"
 	ProfileVLESSXHTTP         = "vless-xhttp-tls"
+	ProfileVLESSXHTTPReality  = "vless-reality-xhttp"
 	ProfileTrojanTLS          = "trojan-tls"
 	ProfileSS2022             = "ss2022"
 	ProfileAnyTLS             = "anytls"
+	ProfileHysteria2          = "hysteria2"
 	ProfileMieru              = "mieru"
 	ProfileSOCKS5             = "socks5"
 	ProfileWireGuard          = "wireguard"
@@ -26,7 +29,8 @@ const (
 	CoreMita      = "mita"
 	CoreWireGuard = "wireguard"
 
-	DefaultRealityDest = "www.cloudflare.com:443"
+	DefaultRealityDest   = "www.cloudflare.com:443"
+	DefaultHy2Masquerade = "https://www.cloudflare.com"
 )
 
 type Meta struct {
@@ -44,9 +48,11 @@ func Catalog() []Meta {
 		{ID: ProfileVLESSRealityVision, Title: "VLESS + REALITY + Vision", Core: CoreXray, Landing: true, Direct: true, Desc: "伪装成访问真实网站，不需要证书。监听用 443，不要伪装成苹果的网站。Vision 再包一层流量，抗主动探测更好。"},
 		{ID: ProfileVLESSReality, Title: "VLESS + REALITY", Core: CoreXray, Landing: true, Direct: true, Desc: "伪装成访问真实网站，不需要证书。监听用 443，不要伪装成苹果的网站。适合没有域名的机器。"},
 		{ID: ProfileVLESSXHTTP, Title: "VLESS + XHTTP + TLS", Core: CoreXray, NeedTLS: true, Landing: true, Direct: true, Desc: "走 HTTPS 外观，需要证书。路径和 SNI 可自定义。"},
+		{ID: ProfileVLESSXHTTPReality, Title: "VLESS + XHTTP + REALITY", Core: CoreXray, Landing: true, Direct: true, Desc: "伪装成访问真实网站，不需要证书。走 XHTTP，443 被限速时比纯 TCP 耐活。可当链式落地。"},
 		{ID: ProfileTrojanTLS, Title: "Trojan + TLS", Core: CoreXray, NeedTLS: true, Landing: true, Direct: true, Desc: "经典 TLS 隧道，需要证书。实现简单，客户端支持广。"},
 		{ID: ProfileSS2022, Title: "Shadowsocks 2022", Core: CoreXray, Landing: true, Direct: true, Desc: "2022-blake3 AEAD。没有 TLS 指纹，实现干净。"},
 		{ID: ProfileAnyTLS, Title: "AnyTLS + TCP + TLS", Core: CoreSingbox, NeedTLS: true, Direct: true, Desc: "sing-box 实现，需要证书。不能当链式落地。"},
+		{ID: ProfileHysteria2, Title: "Hysteria2", Core: CoreSingbox, NeedTLS: true, Direct: true, Desc: "走 QUIC，丢包高的线路比 TCP 稳。需要证书，监听的是 UDP。不能当链式落地。"},
 		{ID: ProfileMieru, Title: "Mieru", Core: CoreMita, Direct: true, Desc: "只当入口，不能当链式落地。一台实例只能开一条。BOTH 同时开 TCP 和 UDP。"},
 		{ID: ProfileSOCKS5, Title: "SOCKS5", Core: CoreSingbox, Landing: true, Direct: true, Desc: "用户名密码认证，可 UDP。浏览器和 Clash 可直连。走 sing-box。可当链式落地。"},
 		{ID: ProfileWireGuard, Title: "WireGuard", Core: CoreWireGuard, Direct: true, Desc: "客户连中转机。一台入口可以同时拉多条家宽，每条一个节点。两台设备可以同时各用一条。一台设备只连一个节点。套餐可以勾选这几条入口。家宽不要另建节点。两台都要装好 WireGuard。"},
@@ -73,7 +79,7 @@ func UserFacing(profile string) bool {
 
 func CoreFor(profile string) string {
 	switch profile {
-	case ProfileAnyTLS, ProfileSOCKS5:
+	case ProfileAnyTLS, ProfileSOCKS5, ProfileHysteria2:
 		return CoreSingbox
 	case ProfileMieru:
 		return CoreMita
@@ -117,12 +123,16 @@ func Spec(profile string) (protocol, network, security string) {
 		return "vless", "tcp", "reality"
 	case ProfileVLESSXHTTP:
 		return "vless", "xhttp", "tls"
+	case ProfileVLESSXHTTPReality:
+		return "vless", "xhttp", "reality"
 	case ProfileTrojanTLS:
 		return "trojan", "tcp", "tls"
 	case ProfileSS2022:
 		return "shadowsocks", "tcp", "none"
 	case ProfileAnyTLS:
 		return "anytls", "tcp", "tls"
+	case ProfileHysteria2:
+		return "hysteria2", "udp", "tls"
 	case ProfileMieru:
 		return "mieru", "tcp", "none"
 	case ProfileSOCKS5:
@@ -137,12 +147,12 @@ func Spec(profile string) (protocol, network, security string) {
 }
 
 func NeedTLS(profile string) bool {
-	return profile == ProfileVLESSXHTTP || profile == ProfileTrojanTLS || profile == ProfileAnyTLS
+	return profile == ProfileVLESSXHTTP || profile == ProfileTrojanTLS || profile == ProfileAnyTLS || profile == ProfileHysteria2
 }
 
 func CanLand(profile string) bool {
 	switch profile {
-	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP, ProfileTrojanTLS, ProfileSS2022, ProfileSOCKS5:
+	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP, ProfileVLESSXHTTPReality, ProfileTrojanTLS, ProfileSS2022, ProfileSOCKS5:
 		return true
 	default:
 		return false
@@ -154,7 +164,7 @@ func Vision(profile string) bool {
 }
 
 func Reality(profile string) bool {
-	return profile == ProfileVLESSReality || profile == ProfileVLESSRealityVision
+	return profile == ProfileVLESSReality || profile == ProfileVLESSRealityVision || profile == ProfileVLESSXHTTPReality
 }
 
 type Settings map[string]any
@@ -306,7 +316,7 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 	st := ParseSettings(in.Settings)
 
 	switch in.Profile {
-	case ProfileVLESSReality, ProfileVLESSRealityVision:
+	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTPReality:
 		dest := strings.TrimSpace(st.String("dest"))
 		if dest == "" {
 			dest = DefaultRealityDest
@@ -365,24 +375,14 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 		} else {
 			delete(st, "spider_x")
 		}
-	case ProfileVLESSXHTTP:
-		if st.String("path") == "" {
-			p, err := RandomHex(6)
-			if err != nil {
+		if in.Profile == ProfileVLESSXHTTPReality {
+			if err := fillXHTTP(st); err != nil {
 				return err
 			}
-			st["path"] = "/" + p
 		}
-		if !strings.HasPrefix(st.String("path"), "/") {
-			st["path"] = "/" + st.String("path")
-		}
-		mode := st.String("mode")
-		switch mode {
-		case "", "auto":
-			st["mode"] = "auto"
-		case "packet-up", "stream-up", "stream-one":
-		default:
-			return fmt.Errorf("XHTTP mode 无效")
+	case ProfileVLESSXHTTP:
+		if err := fillXHTTP(st); err != nil {
+			return err
 		}
 		fillTLSDefaults(st)
 		if fp := strings.ToLower(strings.TrimSpace(st.String("fingerprint"))); validFingerprint(fp) {
@@ -396,6 +396,10 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 			st["fingerprint"] = fp
 		} else if st.String("fingerprint") == "" {
 			st["fingerprint"] = "chrome"
+		}
+	case ProfileHysteria2:
+		if err := fillHysteria2(st); err != nil {
+			return err
 		}
 	case ProfileSS2022:
 		method := strings.TrimSpace(st.String("method"))
@@ -511,7 +515,7 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 				return fmt.Errorf("不能把本线路当作落地")
 			}
 			if !CanLand(exit.Profile) {
-				return fmt.Errorf("v1 链式落地仅支持 VLESS / Trojan / SS2022 / SOCKS5（Mieru / AnyTLS 不能当落地）")
+				return fmt.Errorf("v1 链式落地仅支持 VLESS / Trojan / SS2022 / SOCKS5（Mieru / AnyTLS / Hysteria2 不能当落地）")
 			}
 			if exit.LineKind == "chain" {
 				return fmt.Errorf("落地必须是直出线路")
@@ -546,7 +550,7 @@ func ensureRelay(st Settings, land *db.Inbound) error {
 		return fmt.Errorf("落地不存在")
 	}
 	switch land.Profile {
-	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP:
+	case ProfileVLESSReality, ProfileVLESSRealityVision, ProfileVLESSXHTTP, ProfileVLESSXHTTPReality:
 		if st.String("relay_uuid") == "" {
 			id, err := NewUUID()
 			if err != nil {
@@ -594,6 +598,85 @@ func ensureRelay(st Settings, land *db.Inbound) error {
 		}
 	}
 	return nil
+}
+
+func fillXHTTP(st Settings) error {
+	if st.String("path") == "" {
+		p, err := RandomHex(6)
+		if err != nil {
+			return err
+		}
+		st["path"] = "/" + p
+	}
+	if !strings.HasPrefix(st.String("path"), "/") {
+		st["path"] = "/" + st.String("path")
+	}
+	switch st.String("mode") {
+	case "", "auto":
+		st["mode"] = "auto"
+	case "packet-up", "stream-up", "stream-one":
+	default:
+		return fmt.Errorf("XHTTP mode 无效")
+	}
+	if host := strings.TrimSpace(st.String("host")); host != "" {
+		st["host"] = host
+	} else {
+		delete(st, "host")
+	}
+	return nil
+}
+
+func fillHysteria2(st Settings) error {
+	up := st.Int("up_mbps", 0)
+	down := st.Int("down_mbps", 0)
+	if up < 0 || down < 0 || up > 10000 || down > 10000 {
+		return fmt.Errorf("带宽只能是 1–10000 Mbps")
+	}
+	if (up == 0) != (down == 0) {
+		return fmt.Errorf("Brutal 带宽需要上行和下行都填，或都留空")
+	}
+	if up == 0 {
+		delete(st, "up_mbps")
+		delete(st, "down_mbps")
+	} else {
+		st["up_mbps"] = up
+		st["down_mbps"] = down
+	}
+	on := st.Bool("obfs", true)
+	st["obfs"] = on
+	if on {
+		if strings.TrimSpace(st.String("obfs_password")) == "" {
+			pw, err := RandomHex(16)
+			if err != nil {
+				return err
+			}
+			st["obfs_password"] = pw
+		}
+	} else {
+		delete(st, "obfs_password")
+	}
+	mask, err := normalizeMasquerade(st.String("masquerade"))
+	if err != nil {
+		return err
+	}
+	st["masquerade"] = mask
+	st["alpn"] = []string{"h3"}
+	delete(st, "fingerprint")
+	delete(st, "min_version")
+	delete(st, "reject_unknown_sni")
+	return nil
+}
+
+func normalizeMasquerade(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return DefaultHy2Masquerade, nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+		return "", fmt.Errorf("伪装地址需要是 http 或 https 链接")
+	}
+	return raw, nil
 }
 
 func fillTLSDefaults(st Settings) {

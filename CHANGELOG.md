@@ -2,6 +2,21 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.3.28 — 2026-11-10
+
+增加两种协议：Hysteria2，以及 VLESS + XHTTP + REALITY。
+
+### 变更
+- Hysteria2 走 sing-box，监听 UDP，需要证书，只能当入口。默认打开 Salamander 混淆。带宽留空用 BBR；上行和下行都填才改用 Brutal。订阅给出 hysteria2://，以及 Clash、sing-box
+- VLESS + XHTTP + REALITY 走 xray，不需要证书，可以当链式落地，不带 Vision。订阅是 vless://，参数为 type=xhttp、security=reality。小火箭对 XHTTP 支持不完整，优先用 sing-box、v2rayN 或较新的 Clash Meta
+- 链式落地仍是 VLESS / Trojan / SS2022 / SOCKS5，外加 XHTTP + REALITY。Mieru、AnyTLS、Hysteria2 不能当落地
+
+### 升级注意
+- 先在面板机器执行 `liking-upgrade`
+- 要用 Hysteria2 的实例，Agent 也要升到这一版。旧 Agent 会把这条 UDP 端口当成 TCP 去查占用，443 上已有 Nginx 时会误判端口被占。只继续用原来的协议，可以不升 Agent
+- XHTTP + REALITY 的配置由面板下发，不用为它单独换 xray。要用这条协议的实例，Agent 仍建议一起升
+- 回滚：`liking-upgrade --release v0.3.27`
+
 ## v0.3.27 — 2026-11-08
 
 手机上新建用户、批量开户、新建套餐、添加实例、增加节点不显示。这些按钮放在滚动区域里的固定底栏，手机会把底栏裁掉，或者盖在浏览器自己的底栏下面。新建和编辑窗口也挂在同一层，弹出来会被裁掉，键盘还会挡住底部的创建。

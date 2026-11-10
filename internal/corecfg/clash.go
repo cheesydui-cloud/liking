@@ -44,6 +44,21 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 		writeClashALPN(&b, st)
 		b.WriteString("    xhttp-opts:\n")
 		fmt.Fprintf(&b, "      path: %s\n", yq(st.String("path")))
+	case ProfileVLESSXHTTPReality:
+		b.WriteString("    type: vless\n")
+		fmt.Fprintf(&b, "    uuid: %s\n", yq(c.UUID))
+		b.WriteString("    network: xhttp\n    tls: true\n    udp: true\n")
+		fmt.Fprintf(&b, "    servername: %s\n", yq(first(st.Strings("server_names"))))
+		fmt.Fprintf(&b, "    client-fingerprint: %s\n", yq(nz(st.String("fingerprint"), "chrome")))
+		b.WriteString("    reality-opts:\n")
+		fmt.Fprintf(&b, "      public-key: %s\n", yq(st.String("public_key")))
+		fmt.Fprintf(&b, "      short-id: %s\n", yq(first(st.Strings("short_ids"))))
+		b.WriteString("    xhttp-opts:\n")
+		fmt.Fprintf(&b, "      path: %s\n", yq(st.String("path")))
+		fmt.Fprintf(&b, "      mode: %s\n", yq(nz(st.String("mode"), "auto")))
+		if h := st.String("host"); h != "" {
+			fmt.Fprintf(&b, "      host: %s\n", yq(h))
+		}
 	case ProfileTrojanTLS:
 		b.WriteString("    type: trojan\n")
 		fmt.Fprintf(&b, "    password: %s\n", yq(c.Password))
@@ -71,6 +86,21 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 		fmt.Fprintf(&b, "    client-fingerprint: %s\n", yq(nz(st.String("fingerprint"), "chrome")))
 		writeClashALPN(&b, st)
 		b.WriteString("    udp: true\n")
+	case ProfileHysteria2:
+		b.WriteString("    type: hysteria2\n")
+		fmt.Fprintf(&b, "    password: %s\n", yq(c.Password))
+		sni := tlsServerName(st.String("sni"), host)
+		if sni != "" {
+			fmt.Fprintf(&b, "    sni: %s\n", yq(sni))
+		}
+		b.WriteString("    alpn:\n      - \"h3\"\n    skip-cert-verify: false\n")
+		if st.Bool("obfs", true) {
+			b.WriteString("    obfs: salamander\n")
+			fmt.Fprintf(&b, "    obfs-password: %s\n", yq(st.String("obfs_password")))
+		}
+		if up := st.Int("up_mbps", 0); up > 0 {
+			fmt.Fprintf(&b, "    up: \"%d Mbps\"\n    down: \"%d Mbps\"\n", up, st.Int("down_mbps", 0))
+		}
 	case ProfilePortForward:
 		return "", "", fmt.Errorf("端口中转没有分享链接")
 	case ProfileSOCKS5:
