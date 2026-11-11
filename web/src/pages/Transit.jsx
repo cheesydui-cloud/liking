@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
+import QRCode from 'qrcode'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { protoShort } from '../lib/forwards'
+import { landingSummary } from '../lib/share'
 import { createOpLock } from '../lib/opLock'
 import { asArray } from '../lib/safe'
-import { useDialog, useToast } from '../components/Layout'
-import { Badge, Empty, Field, Icon, Modal, PageHead, SkeletonRows } from '../components/ui'
+import { useDialog, useToast, useUser } from '../components/Layout'
+import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, SkeletonRows } from '../components/ui'
 
 const emptyForm = {
   entry_inbound_id: 0,
@@ -20,13 +22,42 @@ const emptyForm = {
 
 function entryLabel(e) {
   if (!e) return ''
-  const host = e.server_name || e.server_host || '入口'
-  return `${host} · ${e.name || protoShort(e.profile)} · ${protoShort(e.profile)}:${e.port}`
+  const host = e.server_host || '入口'
+  return `${protoShort(e.profile)} ${host}:${e.port}`
+}
+
+function cardTitle(row, packageName) {
+  const name = String(row?.name || '').trim()
+  const server = String(row?.server_name || '').trim()
+  if (!name) return packageName
+  if (server && (name === server || name === `${server} 链式` || name === `${server} 端口`)) return packageName
+  return name
+}
+
+function landingText(row) {
+  if (row.kind === 'port') {
+    const net = row.network === 'tcp,udp' ? 'TCP+UDP' : 'TCP'
+    const host = row.dest_host || '—'
+    const port = row.dest_port || '—'
+    return `${net}  ${host}:${port}`
+  }
+  return landingSummary(row.exit_uri) || '落地无法识别'
+}
+
+function qrOpts() {
+  const dark = document.documentElement.classList.contains('dark')
+  return {
+    width: 280,
+    margin: 1,
+    color: dark ? { dark: '#F4F4F5', light: '#18181B' } : { dark: '#242424', light: '#FFFFFF' },
+  }
 }
 
 export default function Transit() {
   const toast = useToast()
   const dialog = useDialog()
+  const { user } = useUser()
+  const packageName = user?.package_name || '套餐'
   const [entries, setEntries] = useState([])
   const [forwards, setForwards] = useState([])
   const [max, setMax] = useState(20)
@@ -37,6 +68,7 @@ export default function Transit() {
   const [f, setF] = useState(emptyForm)
   const [busy, setBusy] = useState(false)
   const [probes, setProbes] = useState({})
+  const [qr, setQr] = useState(null)
   const ops = useRef(createOpLock())
 
   const load = async () => {
@@ -175,6 +207,19 @@ export default function Transit() {
     })
   }
 
+  const openQr = async (row) => {
+    if (!row.uri) {
+      toast(row.enabled ? '还没有分享链接' : '停用后没有分享链接', 'error')
+      return
+    }
+    try {
+      const src = await QRCode.toDataURL(row.uri, qrOpts())
+      setQr({ title: row.name || '中转', src })
+    } catch {
+      setQr({ title: row.name || '中转', error: true })
+    }
+  }
+
   const copyUri = async (row) => {
     if (!row.uri) {
       toast(row.enabled ? '还没有分享链接' : '停用后没有分享链接', 'error')
@@ -241,33 +286,43 @@ export default function Transit() {
                   <div className="machine-head">
                     <div className="min-w-0 flex-1">
                       <div className="machine-title">
-                        <span className="machine-name truncate">{row.name || '未命名'}</span>
+                        <span className="machine-name truncate">{cardTitle(row, packageName)}</span>
                         <Badge tone="muted">{row.kind === 'port' ? '端口' : '链式'}</Badge>
                         {row.auth_hold ? <Badge tone="warn">已取消授权</Badge> : null}
                         {!row.enabled && !row.auth_hold ? <Badge tone="muted">停用</Badge> : null}
                       </div>
                       <div className="machine-host">
-                        <span className="machine-host-addr">
-                          {row.server_name || '入口'} · {protoShort(row.entry_profile || row.profile)} :{row.port}
+                        <span className="machine-host-addr" title={`${packageName} · ${protoShort(row.entry_profile || row.profile)} :${row.port}`}>
+                          {packageName} · {protoShort(row.entry_profile || row.profile)} :{row.port}
                         </span>
                       </div>
                     </div>
+                  <div className="machine-toolbar">
+                    <MoreMenu
+                      colorDots
+                      label="更多操作"
+                      items={[
+                        { label: '编辑', onSelect: () => openEdit(row) },
+                        { label: row.enabled ? '停用' : '启用', onSelect: () => toggle(row) },
+                        { sep: true },
+                        { label: '删除', danger: true, onSelect: () => remove(row) },
+                      ]}
+                    />
                   </div>
-                  <div className="px-3 pb-2 text-[12px] text-ink-soft break-all">
-                    {row.kind === 'port'
-                      ? `转到 ${row.dest_host || '—'}:${row.dest_port || '—'}${row.network === 'tcp,udp' ? ' · TCP + UDP' : ''}`
-                      : (row.exit_uri || '还没填落地')}
+                </div>
+                <div className="px-3 pb-2 text-[12px] text-ink-soft truncate" title={landingText(row)}>
+                    {landingText(row)}
                   </div>
                   <div className="machine-foot">
                     <span className="fwd-probe-note" title={probeNote}>{probeNote}</span>
                     <div className="flex flex-wrap items-center justify-end gap-x-2.5 gap-y-1 ml-auto">
                       <button type="button" className="row-act" disabled={probed?.state === 'busy'} onClick={() => probeLatency(row)} title={probeNote}>{probeLabel}</button>
                       {row.kind === 'chain' ? (
-                        <button type="button" className="row-act" onClick={() => copyUri(row)}>复制</button>
+                        <>
+                          <button type="button" className="row-act" onClick={() => copyUri(row)}>复制</button>
+                          <button type="button" className="row-act" onClick={() => openQr(row)}>二维码</button>
+                        </>
                       ) : null}
-                      <button type="button" className="row-act" onClick={() => toggle(row)}>{row.enabled ? '停用' : '启用'}</button>
-                      <button type="button" className="row-act" onClick={() => openEdit(row)}>编辑</button>
-                      <button type="button" className="row-act" onClick={() => remove(row)}>删除</button>
                     </div>
                   </div>
                 </div>
@@ -277,6 +332,16 @@ export default function Transit() {
           )}
         </div>
       )}
+      <Modal open={!!qr} title={qr?.title || '二维码'} onClose={() => setQr(null)}>
+        <div className="text-center">
+          {qr?.src ? (
+            <img src={qr.src} alt="中转二维码" width={220} height={220} className="mx-auto border" style={{ borderColor: 'var(--color-line)' }} />
+          ) : (
+            <div className="text-[13px]" style={{ color: 'var(--color-danger)' }}>二维码生成失败</div>
+          )}
+          <p className="text-[12px] text-ink-mut mt-3">用客户端扫码导入这条入口</p>
+        </div>
+      </Modal>
       <Modal open={open} title={editId ? '编辑中转' : '新建中转'} onClose={() => setOpen(false)} footer={
         <>
           <button type="button" className="btn-ghost" onClick={() => setOpen(false)}>取消</button>

@@ -560,7 +560,17 @@ export function SkeletonRows({ rows = 4 }) {
   )
 }
 
-export function MoreMenu({ label = '更多', items = [], disabled, iconOnly }) {
+function ColorDots({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="3.15" r="1.45" fill="#ff6a00" />
+      <circle cx="8" cy="8" r="1.45" fill="#3b82f6" />
+      <circle cx="8" cy="12.85" r="1.45" fill="#0f766e" />
+    </svg>
+  )
+}
+
+export function MoreMenu({ label = '更多', items = [], disabled, iconOnly, colorDots }) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState(null)
   const btnRef = useRef(null)
@@ -605,14 +615,14 @@ export function MoreMenu({ label = '更多', items = [], disabled, iconOnly }) {
       <button
         ref={btnRef}
         type="button"
-        className={iconOnly ? 'icon-btn' : 'row-act'}
+        className={iconOnly || colorDots ? 'icon-btn' : 'row-act'}
         disabled={disabled}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(v => !v)}
       >
-        {iconOnly ? <Icon name="more" size={16} /> : <>{label}<Icon name="more" size={14} /></>}
+        {colorDots ? <ColorDots /> : iconOnly ? <Icon name="more" size={16} /> : <>{label}<Icon name="more" size={14} /></>}
       </button>
       {open ? createPortal(
         <div

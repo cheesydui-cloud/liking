@@ -145,6 +145,28 @@ export function parseShareURI(raw) {
   return ok(scheme, host, port, fragmentName(u.hash))
 }
 
+function ssMethod(uri) {
+  const line = firstLine(uri)
+  try {
+    const u = new URL(line)
+    return String(u.username || '').split(':')[0]
+  } catch {
+    return ''
+  }
+}
+
+// landingSummary is the protocol, host, and port of a chain landing.
+// It never includes the password or the raw share link.
+export function landingSummary(uri) {
+  const t = parseShareURI(uri)
+  if (!t.ok) return ''
+  let proto = t.proto
+  if (t.scheme === 'ss' && ssMethod(uri).startsWith('2022-')) proto = 'SS2022'
+  const host = String(t.host || '').includes(':') ? `[${t.host}]` : t.host
+  if (!host || !t.port) return ''
+  return `${proto}  ${host}:${t.port}`
+}
+
 export function shareLabel(uri) {
   const t = parseShareURI(uri)
   return t.ok ? t.label : '出口链接'
