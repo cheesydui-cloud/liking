@@ -332,6 +332,137 @@ export function HourArea({ hours = [], className = '' }) {
   )
 }
 
+export function DayLines({ days = [], className = '' }) {
+  const rows = Array.isArray(days) ? days : []
+  const wrapRef = useRef(null)
+  const [w, setW] = useState(0)
+  const [hi, setHi] = useState(-1)
+  useLayoutEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const measure = () => setW(el.clientWidth)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [rows.length])
+  if (!rows.length) return null
+  const ups = rows.map(d => Number(d.up) || 0)
+  const downs = rows.map(d => Number(d.down) || 0)
+  const peak = Math.max(0, ...ups, ...downs)
+  const max = peak > 0 ? peak / 0.9 : 1
+  const W = Math.max(Math.floor(w), 1)
+  const compact = W < 520
+  const padL = compact ? 52 : 64
+  const padR = 14
+  const padT = 14
+  const padB = 32
+  const H = compact ? 210 : 248
+  const plotW = Math.max(W - padL - padR, 1)
+  const plotH = H - padT - padB
+  const n = rows.length
+  const xAt = (i) => padL + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW)
+  const yAt = (v) => padT + (peak <= 0 ? plotH : (1 - v / max) * plotH)
+  const upPts = ups.map((v, i) => ({ x: xAt(i), y: yAt(v), v }))
+  const downPts = downs.map((v, i) => ({ x: xAt(i), y: yAt(v), v }))
+  const yTicks = peak <= 0
+    ? [{ p: 0, y: padT + plotH, label: '0' }]
+    : [1, 0.75, 0.5, 0.25, 0].map(p => ({
+      p,
+      y: padT + (1 - p) * plotH,
+      label: p === 0 ? '0' : fmtBytes(max * p),
+    }))
+  const hideX = (i) => {
+    if (n <= 8 || W >= 720) return false
+    const step = W < 420 ? 3 : 2
+    if (i === n - 1) return false
+    if ((n - 1) % step !== 0 && i > n - 1 - step && i % step === 0) return true
+    return i % step !== 0
+  }
+  const onMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    let best = 0
+    let bestD = Infinity
+    for (let i = 0; i < n; i++) {
+      const d = Math.abs(xAt(i) - x)
+      if (d < bestD) { bestD = d; best = i }
+    }
+    setHi(h => (h === best ? h : best))
+  }
+  const hover = hi >= 0 && hi < n ? hi : -1
+  const dayText = (d) => String(d?.day || '').slice(5)
+
+  return (
+    <div className={className}>
+      <div className="traffic-legend">
+        <span><i className="is-up is-curve" aria-hidden="true" />上行</span>
+        <span><i className="is-down is-curve" aria-hidden="true" />下行</span>
+      </div>
+      <div
+        className="traffic-area-body"
+        ref={wrapRef}
+        onPointerDown={onMove}
+        onPointerMove={onMove}
+        onPointerLeave={() => setHi(-1)}
+      >
+        {W > 1 ? (
+          <svg width={W} height={H} className="traffic-area-svg" role="img" aria-label="近14日流量坐标，绿色为上行，橙色为下行">
+            {yTicks.map((t, i) => (
+              <g key={i}>
+                {t.p > 0 ? (
+                  <line x1={padL} x2={W - padR} y1={t.y} y2={t.y} className="traffic-area-grid" />
+                ) : null}
+                <line x1={padL - 5} x2={padL} y1={t.y} y2={t.y} className="traffic-area-base" />
+                <text x={padL - 8} y={t.y + 3.5} textAnchor="end" className="traffic-area-ylab">{t.label}</text>
+              </g>
+            ))}
+            <line x1={padL} x2={padL} y1={padT} y2={padT + plotH} className="traffic-area-base" />
+            <line x1={padL} x2={W - padR} y1={padT + plotH} y2={padT + plotH} className="traffic-area-base" />
+            {upPts.map((p, i) => (
+              hideX(i) ? null : (
+                <line key={`tx${i}`} x1={p.x} x2={p.x} y1={padT + plotH} y2={padT + plotH + 4} className="traffic-area-base" />
+              )
+            ))}
+            {hover >= 0 ? (
+              <line x1={xAt(hover)} x2={xAt(hover)} y1={padT} y2={padT + plotH} className="traffic-area-cursor" />
+            ) : null}
+            <path d={catmullRomPath(downPts, padT, padT + plotH)} fill="none" stroke="var(--color-down)" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+            <path d={catmullRomPath(upPts, padT, padT + plotH)} fill="none" stroke="var(--color-ok)" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+            {downPts.map((p, i) => (
+              <circle key={`d${i}`} cx={p.x} cy={p.y} r={hover === i ? 4 : 2.4} fill="var(--color-down)" />
+            ))}
+            {upPts.map((p, i) => (
+              <circle key={`u${i}`} cx={p.x} cy={p.y} r={hover === i ? 4 : 2.4} fill="var(--color-ok)" />
+            ))}
+            {upPts.map((p, i) => (
+              <text
+                key={rows[i].day || i}
+                x={p.x}
+                y={H - 8}
+                textAnchor="middle"
+                className={`traffic-area-xlab${hideX(i) ? ' is-hide' : ''}`}
+              >
+                {dayText(rows[i])}
+              </text>
+            ))}
+          </svg>
+        ) : <div style={{ height: H }} />}
+        {hover >= 0 ? (
+          <div
+            className="traffic-area-tip"
+            style={{ left: Math.min(Math.max(xAt(hover), 78), Math.max(W - 78, 78)), top: 18 }}
+          >
+            <div>{rows[hover].day || dayText(rows[hover])}</div>
+            <div className="is-up">上行 {fmtBytes(ups[hover])}</div>
+            <div className="is-down">下行 {fmtBytes(downs[hover])}</div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 export function DayBars({ days = [], className = '', legend = true, label = '' }) {
   const rows = Array.isArray(days) ? days : []
   const max = Math.max(1, ...rows.map(d => (Number(d.up) || 0) + (Number(d.down) || 0)))

@@ -1095,6 +1095,13 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
 }
 .traffic-legend i.is-up { background: var(--color-ok); }
 .traffic-legend i.is-down { background: var(--color-down); }
+.traffic-legend i.is-curve {
+  width: 16px;
+  height: 3px;
+  border-radius: 2px;
+}
+.traffic-area-tip .is-up { color: var(--color-ok); }
+.traffic-area-tip .is-down { color: var(--color-down); }
 
 .traffic-bars {
   display: flex;

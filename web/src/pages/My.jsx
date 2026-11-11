@@ -5,7 +5,7 @@ import { api } from '../lib/api'
 import { cacheGen, peekList, putList } from '../lib/listCache'
 import { startPoll } from '../lib/poll'
 import { asArray, isAbort } from '../lib/safe'
-import { DayBars, Meter, PageHead, billedBytes, fmtBytes, fmtDateShort } from '../components/ui'
+import { DayLines, Meter, PageHead, billedBytes, fmtBytes, fmtDateShort } from '../components/ui'
 import { SubPanel } from '../components/SubPanel'
 import { NodeCard, periodBytes } from '../components/LineCard'
 import { copyText } from '../lib/copy'
@@ -184,8 +184,8 @@ export default function My() {
 
       {asArray(traffic?.days).length ? (
         <div className="mb-4">
-          <div className="text-[14px] font-semibold mb-3">近 14 日 · 绿上行 · 橙下行</div>
-          <DayBars days={asArray(traffic.days)} />
+          <div className="text-[14px] font-semibold mb-3">近 14 日</div>
+          <DayLines days={asArray(traffic.days)} />
         </div>
       ) : null}
     </div>
