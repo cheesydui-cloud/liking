@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
+import { copyText } from '../lib/copy'
 import { protoShort } from '../lib/forwards'
 import { landingSummary } from '../lib/share'
 import { createOpLock } from '../lib/opLock'
 import { asArray } from '../lib/safe'
 import { useDialog, useToast, useUser } from '../components/Layout'
-import { SubPanel } from '../components/SubPanel'
 import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, SkeletonRows } from '../components/ui'
 
 const emptyForm = {
@@ -31,6 +31,17 @@ function cardTitle(row, packageName) {
   if (!name) return packageName
   if (server && (name === server || name === `${server} 链式` || name === `${server} 端口`)) return packageName
   return name
+}
+
+function hostPort(host, port) {
+  const h = String(host || '').trim()
+  const p = String(port ?? '').trim()
+  if (!h || !p || p === '0') return ''
+  return h.includes(':') ? `[${h}]:${p}` : `${h}:${p}`
+}
+
+function connectAddr(row) {
+  return hostPort(row?.server_host, row?.port)
 }
 
 function landingText(row) {
@@ -59,7 +70,7 @@ function probeDraftDirty(f, row) {
 export default function Transit() {
   const toast = useToast()
   const dialog = useDialog()
-  const { user, refreshUser } = useUser()
+  const { user } = useUser()
   const packageName = user?.package_name || '套餐'
   const [entries, setEntries] = useState([])
   const [forwards, setForwards] = useState([])
@@ -71,8 +82,6 @@ export default function Transit() {
   const [f, setF] = useState(emptyForm)
   const [busy, setBusy] = useState(false)
   const [probes, setProbes] = useState({})
-  const [subOpen, setSubOpen] = useState(false)
-  const [rotating, setRotating] = useState(false)
   const ops = useRef(createOpLock())
 
   const load = async () => {
@@ -180,7 +189,7 @@ export default function Transit() {
   }
 
   const remove = async (row) => {
-    if (!(await dialog.confirm({ title: '删除中转', message: `删除「${row.name || '这条中转'}」后，这个端口不再转发。`, danger: true, okText: '删除' }))) return
+    if (!(await dialog.confirm({ title: '删除中转', message: `删除「${cardTitle(row, packageName)}」后，这个端口不再转发。`, danger: true, okText: '删除' }))) return
     try {
       await api.del(`/me/forwards/${row.id}`)
       toast('已删除')
@@ -211,17 +220,17 @@ export default function Transit() {
     })
   }
 
-  const rotateSub = async () => {
-    if (!(await dialog.confirm({ title: '重置订阅令牌', message: '旧订阅链接立刻失效。' }))) return
-    setRotating(true)
+  const copyAddr = async (row) => {
+    const addr = connectAddr(row)
+    if (!addr) {
+      toast('还没有连接地址', 'error')
+      return
+    }
     try {
-      await api.post('/me/rotate-sub')
-      await refreshUser()
-      toast('订阅令牌已更换')
-    } catch (e) {
-      toast(e.message, 'error')
-    } finally {
-      setRotating(false)
+      await copyText(addr)
+      toast('已复制连接地址')
+    } catch {
+      toast('浏览器不允许自动复制', 'error')
     }
   }
 
@@ -245,6 +254,10 @@ export default function Transit() {
   }
   const probeButton = (
     <button type="button" className="row-act shrink-0" disabled={probed?.state === 'busy'} onClick={runProbe} title={probeNote}>{probeLabel}</button>
+  )
+  const connectShown = hostPort(
+    editing?.server_host || entries.find(en => Number(en.id) === Number(f.entry_inbound_id))?.server_host,
+    f.port,
   )
 
   return (
@@ -294,9 +307,15 @@ export default function Transit() {
                         {!row.enabled && !row.auth_hold ? <Badge tone="muted">停用</Badge> : null}
                       </div>
                       <div className="machine-host">
-                        <span className="machine-host-addr" title={`${packageName} · ${protoShort(row.entry_profile || row.profile)} :${row.port}`}>
-                          {packageName} · {protoShort(row.entry_profile || row.profile)} :{row.port}
-                        </span>
+                        {row.kind === 'port' ? (
+                          <span className="machine-host-addr truncate" title={connectAddr(row) || '还没有入口地址'}>
+                            {connectAddr(row) || '还没有入口地址'}
+                          </span>
+                        ) : (
+                          <span className="machine-host-addr truncate" title={`${packageName} · ${protoShort(row.entry_profile || row.profile)} :${row.port}`}>
+                            {packageName} · {protoShort(row.entry_profile || row.profile)} :{row.port}
+                          </span>
+                        )}
                       </div>
                     </div>
                   <div className="machine-toolbar">
@@ -312,14 +331,12 @@ export default function Transit() {
                     />
                   </div>
                 </div>
-                <div className="px-3 pb-2 text-[12px] text-ink-soft truncate" title={landingText(row)}>
-                    {landingText(row)}
+                <div className="px-3 pb-2 text-[12px] text-ink-soft truncate" title={row.kind === 'port' ? `转到 ${landingText(row)}` : landingText(row)}>
+                    {row.kind === 'port' ? `转到 ${landingText(row)}` : landingText(row)}
                   </div>
-                  {row.kind === 'chain' ? (
+                  {row.kind === 'port' ? (
                     <div className="machine-foot">
-                      <div className="flex flex-wrap items-center justify-end gap-x-2.5 gap-y-1 ml-auto">
-                        <button type="button" className="row-act" onClick={() => setSubOpen(true)}>订阅</button>
-                      </div>
+                      <button type="button" className="row-act ml-auto" disabled={!connectAddr(row)} onClick={() => copyAddr(row)}>复制地址</button>
                     </div>
                   ) : null}
                 </div>
@@ -329,18 +346,6 @@ export default function Transit() {
           )}
         </div>
       )}
-      <Modal open={subOpen} title={user?.username ? `${user.username} 的订阅` : '订阅'} onClose={() => setSubOpen(false)} wide footer={
-        <>
-          <button type="button" className="btn-ghost" disabled={rotating} onClick={rotateSub}>{rotating ? '重置中…' : '重置令牌'}</button>
-          <button type="button" className="btn-ghost" onClick={() => setSubOpen(false)}>关闭</button>
-        </>
-      }>
-        {subOpen && user?.sub_token ? (
-          <SubPanel token={user.sub_token} onCopied={(msg, kind) => toast(msg, kind)} />
-        ) : (
-          <p className="text-[13px] text-ink-mut">还没有订阅链接。</p>
-        )}
-      </Modal>
       <Modal open={open} title={editId ? '编辑中转' : '新建中转'} onClose={() => setOpen(false)} footer={
         <>
           <button type="button" className="btn-ghost" onClick={() => setOpen(false)}>取消</button>
@@ -398,7 +403,9 @@ export default function Transit() {
                 </Field>
               </div>
               <div className="mt-1 flex items-center justify-between gap-3">
-                <span className="min-w-0 text-[11.5px] text-ink-mut">从入口测到目标</span>
+                <span className="min-w-0 text-[11.5px] text-ink-mut">
+                  {connectShown ? `别人连接 ${connectShown}` : '端口留空时，保存后才有连接地址'}
+                </span>
                 {probeButton}
               </div>
             </div>

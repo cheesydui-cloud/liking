@@ -120,10 +120,13 @@ export default function My() {
             <div>
               <div className="kicker">账号</div>
               <span className="stat-val">{user?.username}</span>
+              <div className="text-[12px] text-ink-mut mt-1">
+                {user?.package_name || '未绑定套餐'}{user?.direction === 'twoway' ? ' · 双向' : user?.direction === 'oneway' ? ' · 单向' : ''}
+              </div>
             </div>
             <div>
-              <div className="kicker">流量{user?.direction === 'twoway' ? ' / 双向' : ''}</div>
-              <Meter className="mt-2" value={used} max={user?.traffic_cap || 0} />
+              <div className="kicker">流量</div>
+              <Meter className="mt-2" value={used} max={cap} />
               {ratio >= 80 ? (
                 <div className="text-[12px] mt-1.5" style={{ color: ratio >= 100 ? 'var(--color-danger)' : 'var(--color-warn)' }}>
                   {ratio >= 100 ? '已用尽，节点已从订阅摘掉' : `已用 ${ratio}%`}
@@ -132,7 +135,7 @@ export default function My() {
             </div>
             <div>
               <div className="kicker">到期</div>
-              <span className="stat-val">{user?.expires_at ? fmtDateShort(user.expires_at) : '—'}</span>
+              <span className="stat-val">{user?.expires_at ? fmtDateShort(user.expires_at) : '不限期'}</span>
               {user?.expires_at && user.expires_at * 1000 < Date.now() ? (
                 <div className="text-[12px] mt-1" style={{ color: 'var(--color-danger)' }}>已到期，节点已从订阅摘掉</div>
               ) : user?.expires_at && user.expires_at * 1000 < Date.now() + 7 * 86400 * 1000 ? (
@@ -184,7 +187,8 @@ export default function My() {
 
       {asArray(traffic?.days).length ? (
         <div className="mb-4">
-          <div className="text-[14px] font-semibold mb-3">近 14 日</div>
+          <div className="text-[14px] font-semibold">近 14 日</div>
+          <div className="text-[12px] text-ink-mut mt-1 mb-3">上行 {fmtBytes(dir.up)} · 下行 {fmtBytes(dir.down)}</div>
           <DayLines days={asArray(traffic.days)} />
         </div>
       ) : null}

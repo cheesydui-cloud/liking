@@ -108,7 +108,7 @@ function TotpBox() {
     <div className="card p-5 max-w-md space-y-4 mt-4">
       <div>
         <div className="text-[15px] font-medium">两步验证</div>
-        <p className="text-[12.5px] text-ink-mut mt-1">用验证器扫码后填 6 位码。管理员建议开启。</p>
+        <p className="text-[12.5px] text-ink-mut mt-1">用验证器扫码后填 6 位码。{user?.role === 'admin' ? '建议开启。' : ''}</p>
       </div>
       {!secret ? (
         <>
@@ -178,7 +178,7 @@ function AccountForm() {
         <Field label="当前密码" hint={isAdmin ? '改用户名或密码都要填写。改完后当前会话仍然有效。' : '改密码需要填写当前密码。改完后当前会话仍然有效。'}>
           <input className="input-field" type="password" value={oldP} onChange={e => setOld(e.target.value)} required autoComplete="current-password" />
         </Field>
-        <Field label="新密码" hint={isAdmin ? '留空表示不改密码。至少 6 位。' : '至少 6 位。'}>
+        <Field label="新密码" hint={isAdmin ? '留空表示不改密码。至少 6 位。填写新密码会更换订阅链接，已经导入的客户端要重新订阅。' : '至少 6 位。改密码会更换订阅链接，已经导入的客户端要重新订阅。'}>
           <input className="input-field" type="password" value={n} onChange={e => setN(e.target.value)} autoComplete="new-password" required={!isAdmin} />
         </Field>
         <Field label="确认新密码">

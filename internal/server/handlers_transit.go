@@ -425,6 +425,19 @@ func (s *Server) forwardFromReq(cur, entry *db.Inbound, u *db.User, req myForwar
 	return in, nil
 }
 
+func forwardHost(in *db.Inbound, entries map[int64]*db.Inbound) string {
+	if in == nil {
+		return ""
+	}
+	if host := strings.TrimSpace(in.ServerHost); host != "" {
+		return host
+	}
+	if e := entries[in.EntryInboundID]; e != nil {
+		return strings.TrimSpace(e.ServerHost)
+	}
+	return ""
+}
+
 func myForwardJSON(d *sql.DB, u *db.User, in *db.Inbound, entries map[int64]*db.Inbound) map[string]any {
 	if in == nil {
 		return map[string]any{}
@@ -444,6 +457,7 @@ func myForwardJSON(d *sql.DB, u *db.User, in *db.Inbound, entries map[int64]*db.
 		"auth_hold":        in.AuthHold,
 		"server_id":        in.ServerID,
 		"server_name":      in.ServerName,
+		"server_host":      forwardHost(in, entries),
 		"entry_inbound_id": in.EntryInboundID,
 		"exit_uri":         in.ExitURI,
 		"dest_host":        st.String("dest_host"),

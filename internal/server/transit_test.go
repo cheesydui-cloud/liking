@@ -208,11 +208,12 @@ func TestUserTransitForwards(t *testing.T) {
 
 	var created struct {
 		Forward struct {
-			ID      int64  `json:"id"`
-			Port    int    `json:"port"`
-			URI     string `json:"uri"`
-			Kind    string `json:"kind"`
-			Enabled bool   `json:"enabled"`
+			ID         int64  `json:"id"`
+			Port       int    `json:"port"`
+			URI        string `json:"uri"`
+			Kind       string `json:"kind"`
+			Enabled    bool   `json:"enabled"`
+			ServerHost string `json:"server_host"`
 		} `json:"forward"`
 	}
 	decodeRes(t, transitDo(t, alice, http.MethodPost, ts.URL+"/api/me/forwards", map[string]any{
@@ -228,11 +229,12 @@ func TestUserTransitForwards(t *testing.T) {
 	chainID := created.Forward.ID
 
 	created.Forward = struct {
-		ID      int64  `json:"id"`
-		Port    int    `json:"port"`
-		URI     string `json:"uri"`
-		Kind    string `json:"kind"`
-		Enabled bool   `json:"enabled"`
+		ID         int64  `json:"id"`
+		Port       int    `json:"port"`
+		URI        string `json:"uri"`
+		Kind       string `json:"kind"`
+		Enabled    bool   `json:"enabled"`
+		ServerHost string `json:"server_host"`
 	}{}
 	decodeRes(t, transitDo(t, alice, http.MethodPost, ts.URL+"/api/me/forwards", map[string]any{
 		"entry_inbound_id": other,
@@ -243,7 +245,7 @@ func TestUserTransitForwards(t *testing.T) {
 		"dest_port":        443,
 		"network":          "tcp",
 	}), &created)
-	if created.Forward.Kind != "port" || created.Forward.Port != 20002 || created.Forward.URI != "" {
+	if created.Forward.Kind != "port" || created.Forward.Port != 20002 || created.Forward.URI != "" || created.Forward.ServerHost != "203.0.113.10" {
 		t.Fatalf("port %+v", created.Forward)
 	}
 	portID := created.Forward.ID
