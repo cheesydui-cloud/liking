@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import QRCode from 'qrcode'
 import { api } from '../lib/api'
-import { copyText } from '../lib/copy'
 import { protoShort } from '../lib/forwards'
 import { landingSummary } from '../lib/share'
 import { createOpLock } from '../lib/opLock'
 import { asArray } from '../lib/safe'
 import { useDialog, useToast, useUser } from '../components/Layout'
+import { SubPanel } from '../components/SubPanel'
 import { Badge, Empty, Field, Icon, Modal, MoreMenu, PageHead, SkeletonRows } from '../components/ui'
 
 const emptyForm = {
@@ -44,19 +43,23 @@ function landingText(row) {
   return landingSummary(row.exit_uri) || '落地无法识别'
 }
 
-function qrOpts() {
-  const dark = document.documentElement.classList.contains('dark')
-  return {
-    width: 280,
-    margin: 1,
-    color: dark ? { dark: '#F4F4F5', light: '#18181B' } : { dark: '#242424', light: '#FFFFFF' },
+function probeDraftDirty(f, row) {
+  if (!row) return true
+  if ((f.kind === 'port' ? 'port' : 'chain') !== (row.kind === 'port' ? 'port' : 'chain')) return true
+  if (f.kind === 'port') {
+    const port = String(f.dest_port ?? '').trim()
+    const saved = row.dest_port ? String(row.dest_port) : ''
+    return String(f.dest_host || '').trim() !== String(row.dest_host || '').trim()
+      || port !== saved
+      || (f.network === 'tcp,udp' ? 'tcp,udp' : 'tcp') !== (row.network === 'tcp,udp' ? 'tcp,udp' : 'tcp')
   }
+  return String(f.exit_uri || '').trim() !== String(row.exit_uri || '').trim()
 }
 
 export default function Transit() {
   const toast = useToast()
   const dialog = useDialog()
-  const { user } = useUser()
+  const { user, refreshUser } = useUser()
   const packageName = user?.package_name || '套餐'
   const [entries, setEntries] = useState([])
   const [forwards, setForwards] = useState([])
@@ -68,7 +71,8 @@ export default function Transit() {
   const [f, setF] = useState(emptyForm)
   const [busy, setBusy] = useState(false)
   const [probes, setProbes] = useState({})
-  const [qr, setQr] = useState(null)
+  const [subOpen, setSubOpen] = useState(false)
+  const [rotating, setRotating] = useState(false)
   const ops = useRef(createOpLock())
 
   const load = async () => {
@@ -207,34 +211,41 @@ export default function Transit() {
     })
   }
 
-  const openQr = async (row) => {
-    if (!row.uri) {
-      toast(row.enabled ? '还没有分享链接' : '停用后没有分享链接', 'error')
-      return
-    }
+  const rotateSub = async () => {
+    if (!(await dialog.confirm({ title: '重置订阅令牌', message: '旧订阅链接立刻失效。' }))) return
+    setRotating(true)
     try {
-      const src = await QRCode.toDataURL(row.uri, qrOpts())
-      setQr({ title: row.name || '中转', src })
-    } catch {
-      setQr({ title: row.name || '中转', error: true })
-    }
-  }
-
-  const copyUri = async (row) => {
-    if (!row.uri) {
-      toast(row.enabled ? '还没有分享链接' : '停用后没有分享链接', 'error')
-      return
-    }
-    try {
-      await copyText(row.uri)
-      toast('已复制入口链接')
-    } catch {
-      toast('浏览器不允许自动复制', 'error')
+      await api.post('/me/rotate-sub')
+      await refreshUser()
+      toast('订阅令牌已更换')
+    } catch (e) {
+      toast(e.message, 'error')
+    } finally {
+      setRotating(false)
     }
   }
 
   const atCap = forwards.length >= max
   const editing = forwards.find(x => Number(x.id) === Number(editId))
+  const probed = editing ? probes[editing.id] : null
+  const probeLabel = probed?.state === 'busy' ? '测量中…' : probed?.state === 'ok' ? `${probed.ms} ms` : '测试'
+  const probeNote = !probed
+    ? (f.kind === 'port' ? '从入口测到目标' : '从入口测到落地')
+    : probed.state === 'busy'
+      ? '测量中…'
+      : probed.state === 'ok'
+        ? `${probed.host}:${probed.port}`
+        : (probed.error || '探测失败')
+  const runProbe = () => {
+    if (!editing || probeDraftDirty(f, editing)) {
+      toast('先保存再测试', 'error')
+      return
+    }
+    probeLatency(editing)
+  }
+  const probeButton = (
+    <button type="button" className="row-act shrink-0" disabled={probed?.state === 'busy'} onClick={runProbe} title={probeNote}>{probeLabel}</button>
+  )
 
   return (
     <div>
@@ -272,15 +283,6 @@ export default function Transit() {
           ) : (
             <div className="machine-grid">
               {forwards.map(row => {
-                const probed = probes[row.id]
-                const probeNote = !probed
-                  ? (row.kind === 'port' ? '从入口测到目标' : '从入口测到落地')
-                  : probed.state === 'busy'
-                    ? '测量中…'
-                    : probed.state === 'ok'
-                      ? `${probed.host}:${probed.port}`
-                      : (probed.error || '探测失败')
-                const probeLabel = probed?.state === 'busy' ? '测量中…' : probed?.state === 'ok' ? `${probed.ms} ms` : '测延迟'
                 return (
                 <div key={row.id} className={`machine${row.enabled ? '' : ' is-off'}`}>
                   <div className="machine-head">
@@ -313,18 +315,13 @@ export default function Transit() {
                 <div className="px-3 pb-2 text-[12px] text-ink-soft truncate" title={landingText(row)}>
                     {landingText(row)}
                   </div>
-                  <div className="machine-foot">
-                    <span className="fwd-probe-note" title={probeNote}>{probeNote}</span>
-                    <div className="flex flex-wrap items-center justify-end gap-x-2.5 gap-y-1 ml-auto">
-                      <button type="button" className="row-act" disabled={probed?.state === 'busy'} onClick={() => probeLatency(row)} title={probeNote}>{probeLabel}</button>
-                      {row.kind === 'chain' ? (
-                        <>
-                          <button type="button" className="row-act" onClick={() => copyUri(row)}>复制</button>
-                          <button type="button" className="row-act" onClick={() => openQr(row)}>二维码</button>
-                        </>
-                      ) : null}
+                  {row.kind === 'chain' ? (
+                    <div className="machine-foot">
+                      <div className="flex flex-wrap items-center justify-end gap-x-2.5 gap-y-1 ml-auto">
+                        <button type="button" className="row-act" onClick={() => setSubOpen(true)}>订阅</button>
+                      </div>
                     </div>
-                  </div>
+                  ) : null}
                 </div>
                 )
               })}
@@ -332,15 +329,17 @@ export default function Transit() {
           )}
         </div>
       )}
-      <Modal open={!!qr} title={qr?.title || '二维码'} onClose={() => setQr(null)}>
-        <div className="text-center">
-          {qr?.src ? (
-            <img src={qr.src} alt="中转二维码" width={220} height={220} className="mx-auto border" style={{ borderColor: 'var(--color-line)' }} />
-          ) : (
-            <div className="text-[13px]" style={{ color: 'var(--color-danger)' }}>二维码生成失败</div>
-          )}
-          <p className="text-[12px] text-ink-mut mt-3">用客户端扫码导入这条入口</p>
-        </div>
+      <Modal open={subOpen} title={user?.username ? `${user.username} 的订阅` : '订阅'} onClose={() => setSubOpen(false)} wide footer={
+        <>
+          <button type="button" className="btn-ghost" disabled={rotating} onClick={rotateSub}>{rotating ? '重置中…' : '重置令牌'}</button>
+          <button type="button" className="btn-ghost" onClick={() => setSubOpen(false)}>关闭</button>
+        </>
+      }>
+        {subOpen && user?.sub_token ? (
+          <SubPanel token={user.sub_token} onCopied={(msg, kind) => toast(msg, kind)} />
+        ) : (
+          <p className="text-[13px] text-ink-mut">还没有订阅链接。</p>
+        )}
       </Modal>
       <Modal open={open} title={editId ? '编辑中转' : '新建中转'} onClose={() => setOpen(false)} footer={
         <>
@@ -383,23 +382,33 @@ export default function Transit() {
             </Field>
           </div>
           {f.kind === 'port' ? (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <Field label="目标地址">
-                <input className="input-field font-mono" value={f.dest_host} onChange={e => setF({ ...f, dest_host: e.target.value })} placeholder="IP 或域名" />
-              </Field>
-              <Field label="目标端口">
-                <input className="input-field font-mono" inputMode="numeric" value={f.dest_port} onChange={e => setF({ ...f, dest_port: e.target.value })} />
-              </Field>
-              <Field label="协议">
-                <select className="input-field" value={f.network} onChange={e => setF({ ...f, network: e.target.value })}>
-                  <option value="tcp">仅 TCP</option>
-                  <option value="tcp,udp">TCP + UDP</option>
-                </select>
-              </Field>
+            <div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <Field label="目标地址">
+                  <input className="input-field font-mono" value={f.dest_host} onChange={e => setF({ ...f, dest_host: e.target.value })} placeholder="IP 或域名" />
+                </Field>
+                <Field label="目标端口">
+                  <input className="input-field font-mono" inputMode="numeric" value={f.dest_port} onChange={e => setF({ ...f, dest_port: e.target.value })} />
+                </Field>
+                <Field label="协议">
+                  <select className="input-field" value={f.network} onChange={e => setF({ ...f, network: e.target.value })}>
+                    <option value="tcp">仅 TCP</option>
+                    <option value="tcp,udp">TCP + UDP</option>
+                  </select>
+                </Field>
+              </div>
+              <div className="mt-1 flex items-center justify-between gap-3">
+                <span className="min-w-0 text-[11.5px] text-ink-mut">从入口测到目标</span>
+                {probeButton}
+              </div>
             </div>
           ) : (
-            <Field label="落地" hint="直接粘贴 vless://、ss://、trojan:// 或 socks5://，编码过的链接会自动识别">
+            <Field as="div" label="落地">
               <textarea className="input-field font-mono min-h-[88px]" value={f.exit_uri} onChange={e => setF({ ...f, exit_uri: e.target.value })} placeholder="ss:// 或 vless:// 或 socks5://user:pass@地址:端口" />
+              <div className="mt-1 flex items-center justify-between gap-3">
+                <span className="min-w-0 text-[11.5px] text-ink-mut">直接粘贴 vless://、ss://、trojan:// 或 socks5://，编码过的链接会自动识别</span>
+                {probeButton}
+              </div>
             </Field>
           )}
         </form>
