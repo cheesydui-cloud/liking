@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS tg_binds (
+  user_id INTEGER PRIMARY KEY,
+  chat_id INTEGER NOT NULL UNIQUE,
+  bound_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tg_notify_state (
+  key TEXT PRIMARY KEY,
+  last_sent INTEGER NOT NULL,
+  state TEXT NOT NULL DEFAULT ''
+);

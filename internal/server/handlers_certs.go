@@ -365,7 +365,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal([]byte(ruleRaw), &custom)
 	}
 	preset, cats := corecfg.ResolveSubRules(rulePreset, custom)
-	jsonOK(w, map[string]any{
+	out := map[string]any{
 		"panel_name":          name,
 		"panel_url":           url,
 		"acme_email":          email,
@@ -382,7 +382,11 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"sub_rule_categories": cats,
 		"sub_rule_catalog":    corecfg.SubRuleCatalogPublic(),
 		"site_deny_catalog":   corecfg.SiteDenyCatalogPublic(),
-	})
+	}
+	for k, v := range s.tgPublicSettings() {
+		out[k] = v
+	}
+	jsonOK(w, out)
 }
 
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
@@ -401,6 +405,15 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		CurrentPassword   *string   `json:"current_password"`
 		SubRulePreset     *string   `json:"sub_rule_preset"`
 		SubRuleCategories *[]string `json:"sub_rule_categories"`
+		TGEnabled         *bool     `json:"tg_enabled"`
+		TGToken           *string   `json:"tg_bot_token"`
+		TGChat            *string   `json:"tg_admin_chat"`
+		TGBase            *string   `json:"tg_api_base"`
+		TGAlertServer     *bool     `json:"tg_alert_server"`
+		TGAlertCert       *bool     `json:"tg_alert_cert"`
+		TGAlertBackup     *bool     `json:"tg_alert_backup"`
+		TGAlertExpire     *bool     `json:"tg_alert_expire"`
+		TGAlertTraffic    *bool     `json:"tg_alert_traffic"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -495,6 +508,10 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		names := corecfg.NormalizeCategoryNames(*req.SubRuleCategories)
 		raw, _ := json.Marshal(names)
 		_ = db.SetSetting(s.DB, "sub_rule_categories", string(raw))
+	}
+	if err := s.saveTelegramSettings(req.TGEnabled, req.TGToken, req.TGChat, req.TGBase, req.TGAlertServer, req.TGAlertCert, req.TGAlertBackup, req.TGAlertExpire, req.TGAlertTraffic); err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	jsonOK(w, map[string]any{"ok": true, "tls_active": s.TLSActive})
 }

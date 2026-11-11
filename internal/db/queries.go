@@ -482,6 +482,9 @@ func AddTrafficBatch(d *sql.DB, day string, items []TrafficWrite) error {
 }
 
 func DeleteUser(d *sql.DB, id int64) error {
+	if _, err := d.Exec(`DELETE FROM tg_binds WHERE user_id=?`, id); err != nil {
+		return err
+	}
 	_, err := d.Exec(`DELETE FROM users WHERE id=?`, id)
 	return err
 }

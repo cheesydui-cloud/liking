@@ -30,6 +30,8 @@ type Server struct {
 	kickRun      map[int64]bool
 	acmeMu       sync.Mutex
 	backupMu     sync.Mutex
+	tgMu         sync.Mutex
+	tgCodes      map[int64]*tgCode
 	certCache    panelCertCache
 	CFAPI        string // test override for Cloudflare API base URL
 }
@@ -47,6 +49,7 @@ func New(d *sql.DB) (*Server, error) {
 		stop:         make(chan struct{}),
 		kickWant:     map[int64]bool{},
 		kickRun:      map[int64]bool{},
+		tgCodes:      map[int64]*tgCode{},
 	}
 	if tz, _ := db.GetSetting(d, "timezone"); strings.TrimSpace(tz) == "" {
 		_ = db.SetSetting(d, "timezone", db.DefaultTimezone)
@@ -68,6 +71,8 @@ func New(d *sql.DB) (*Server, error) {
 	go s.enforceLoop()
 	go s.certRenewLoop()
 	go s.backupLoop()
+	go s.telegramPollLoop()
+	go s.telegramScanLoop()
 	return s, nil
 }
 
@@ -115,6 +120,9 @@ func (s *Server) Router() http.Handler {
 		r.Post("/api/totp/begin", s.handleTOTPBegin)
 		r.Post("/api/totp/enable", s.handleTOTPEnable)
 		r.Post("/api/totp/disable", s.handleTOTPDisable)
+		r.Get("/api/me/telegram", s.handleTGMe)
+		r.Post("/api/me/telegram/bind", s.handleTGBindCode)
+		r.Delete("/api/me/telegram", s.handleTGUnbind)
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAdmin)
@@ -187,6 +195,7 @@ func (s *Server) Router() http.Handler {
 			r.Put("/api/card-order", s.handleCardOrder)
 			r.Get("/api/settings", s.handleGetSettings)
 			r.Put("/api/settings", s.handlePutSettings)
+			r.Post("/api/settings/telegram/test", s.handleTGTest)
 			r.Get("/api/panel/upgrade", s.handlePanelUpgradeInfo)
 			r.Post("/api/panel/upgrade", s.handlePanelUpgrade)
 			r.Post("/api/backup", s.handleBackupDownload)

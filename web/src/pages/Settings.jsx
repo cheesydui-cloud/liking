@@ -187,7 +187,214 @@ function AccountForm() {
         <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
       </form>
       <TotpBox />
+      {!isAdmin ? <TelegramBindBox /> : null}
     </div>
+  )
+}
+
+function TelegramBindBox() {
+  const toast = useToast()
+  const dialog = useDialog()
+  const [bound, setBound] = useState(false)
+  const [bot, setBot] = useState('')
+  const [code, setCode] = useState('')
+  const [exp, setExp] = useState(0)
+  const [busy, setBusy] = useState(false)
+
+  const load = async () => {
+    const d = await api.get('/me/telegram')
+    setBound(!!d.bound)
+    setBot(d.bot_username || '')
+    if (d.bound) setCode('')
+  }
+
+  useEffect(() => {
+    load().catch(e => toast(e.message, 'error'))
+  }, [])
+
+  useEffect(() => {
+    if (!code || bound) return undefined
+    const t = setInterval(() => {
+      load().catch(() => {})
+    }, 3000)
+    return () => clearInterval(t)
+  }, [code, bound])
+
+  useEffect(() => {
+    if (!code || !exp || bound) return undefined
+    const ms = exp * 1000 - Date.now()
+    if (ms <= 0) {
+      setCode('')
+      return undefined
+    }
+    const t = setTimeout(() => setCode(''), ms)
+    return () => clearTimeout(t)
+  }, [code, exp, bound])
+
+  const issue = async () => {
+    setBusy(true)
+    try {
+      const d = await api.post('/me/telegram/bind', {})
+      setCode(d.code || '')
+      setExp(Number(d.expires_at) || 0)
+      if (d.bot_username) setBot(d.bot_username)
+      toast('已生成绑定码')
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  const unbind = async () => {
+    if (!(await dialog.confirm({ title: '解除 Telegram 绑定', message: '解除后 Telegram 里不能再查这个账号。' }))) return
+    setBusy(true)
+    try {
+      await api.del('/me/telegram')
+      setBound(false)
+      setCode('')
+      toast('已解除绑定')
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  const who = bot ? `@${bot}` : 'Bot'
+  return (
+    <div className="card p-5 max-w-md space-y-3">
+      <div>
+        <div className="text-[15px] font-medium">Telegram</div>
+        <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
+          {bound
+            ? '已绑定。可以在私聊里查流量、到期和订阅链接。'
+            : `私聊 ${who}，发送 /bind 和下面的绑定码。10 分钟有效，错 5 次作废。只在私聊里用，不要发到群里。`}
+        </p>
+      </div>
+      {code && !bound ? (
+        <div>
+          <div className="font-mono text-[20px] tracking-widest">{code}</div>
+          <div className="text-[12px] text-ink-mut mt-1">{exp ? `${fmtDate(exp)} 前有效` : '10 分钟内有效'}</div>
+        </div>
+      ) : null}
+      {bound ? (
+        <button type="button" className="btn-danger" disabled={busy} onClick={unbind}>{busy ? '解除中…' : '解除绑定'}</button>
+      ) : (
+        <button type="button" className="btn-primary" disabled={busy} onClick={issue}>{busy ? '生成中…' : (code ? '重新生成' : '生成绑定码')}</button>
+      )}
+    </div>
+  )
+}
+
+function TelegramCard() {
+  const toast = useToast()
+  const [f, setF] = useState({
+    tg_enabled: false,
+    tg_admin_chat: '',
+    tg_api_base: '',
+    tg_bot_token: '',
+    tg_alert_server: true,
+    tg_alert_cert: true,
+    tg_alert_backup: true,
+    tg_alert_expire: true,
+    tg_alert_traffic: true,
+  })
+  const [tokenSet, setTokenSet] = useState(false)
+  const [bot, setBot] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [testing, setTesting] = useState(false)
+
+  const load = () => api.get('/settings').then(d => {
+    setF({
+      tg_enabled: !!d.tg_enabled,
+      tg_admin_chat: d.tg_admin_chat || '',
+      tg_api_base: d.tg_api_base || '',
+      tg_bot_token: '',
+      tg_alert_server: d.tg_alert_server !== false,
+      tg_alert_cert: d.tg_alert_cert !== false,
+      tg_alert_backup: d.tg_alert_backup !== false,
+      tg_alert_expire: d.tg_alert_expire !== false,
+      tg_alert_traffic: d.tg_alert_traffic !== false,
+    })
+    setTokenSet(!!d.tg_bot_token_set)
+    setBot(d.tg_bot_username || '')
+  }).catch(e => toast(e.message, 'error'))
+
+  useEffect(() => { load() }, [])
+
+  const save = async (e) => {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      const body = {
+        tg_enabled: f.tg_enabled,
+        tg_admin_chat: f.tg_admin_chat.trim(),
+        tg_api_base: f.tg_api_base.trim(),
+        tg_alert_server: f.tg_alert_server,
+        tg_alert_cert: f.tg_alert_cert,
+        tg_alert_backup: f.tg_alert_backup,
+        tg_alert_expire: f.tg_alert_expire,
+        tg_alert_traffic: f.tg_alert_traffic,
+      }
+      if (f.tg_bot_token.trim()) body.tg_bot_token = f.tg_bot_token.trim()
+      await api.put('/settings', body)
+      toast('已保存')
+      setF(x => ({ ...x, tg_bot_token: '' }))
+      load()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  const testSend = async () => {
+    setTesting(true)
+    try {
+      await api.post('/settings/telegram/test', {})
+      toast('已发送测试消息')
+      load()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setTesting(false) }
+  }
+
+  const checks = [
+    ['tg_alert_server', '机器离线或恢复'],
+    ['tg_alert_cert', '证书即将到期'],
+    ['tg_alert_backup', '备份失败'],
+    ['tg_alert_expire', '用户 3 天内到期'],
+    ['tg_alert_traffic', '流量到 80% 或用尽'],
+  ]
+
+  return (
+    <form onSubmit={save} className="card p-5 max-w-3xl space-y-4">
+      <div>
+        <div className="text-[15px] font-medium">Telegram</div>
+        <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
+          只做告警和查询。不在群里说话，也不能在 Telegram 里改密码、重置订阅或删用户。私聊 Bot 发送 /start，它会回复 Chat ID。
+          {bot ? ` 当前 Bot：@${bot}。` : ''}
+        </p>
+      </div>
+      <label className="flex items-start gap-2.5 text-[13px] leading-relaxed cursor-pointer">
+        <input type="checkbox" className="mt-1" checked={f.tg_enabled} onChange={e => setF({ ...f, tg_enabled: e.target.checked })} />
+        <span>启用</span>
+      </label>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Bot Token" hint={tokenSet ? '已填写。留空表示不改。' : '向 @BotFather 申请。只写不回显。'}>
+          <input className="input-field font-mono" type="password" autoComplete="new-password" value={f.tg_bot_token} onChange={e => setF({ ...f, tg_bot_token: e.target.value })} placeholder={tokenSet ? '••••••••' : ''} />
+        </Field>
+        <Field label="管理员 Chat ID" hint="私聊的正数 ID。群 ID 是负数，这里不收。">
+          <input className="input-field font-mono" value={f.tg_admin_chat} onChange={e => setF({ ...f, tg_admin_chat: e.target.value })} placeholder="123456789" />
+        </Field>
+        <Field label="API 根地址" hint="留空使用 https://api.telegram.org。连不上时填自己的反代，不要带末尾斜杠。">
+          <input className="input-field font-mono" value={f.tg_api_base} onChange={e => setF({ ...f, tg_api_base: e.target.value })} placeholder="https://api.telegram.org" />
+        </Field>
+      </div>
+      <div className="space-y-2">
+        {checks.map(([key, label]) => (
+          <label key={key} className="flex items-start gap-2.5 text-[13px] leading-relaxed cursor-pointer">
+            <input type="checkbox" className="mt-1" checked={!!f[key]} onChange={e => setF({ ...f, [key]: e.target.checked })} />
+            <span>{label}</span>
+          </label>
+        ))}
+      </div>
+      <div className="flex items-center gap-2">
+        <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
+        <button type="button" className="btn-ghost" disabled={testing || busy} onClick={testSend}>{testing ? '发送中…' : '发送测试'}</button>
+      </div>
+    </form>
   )
 }
 
@@ -644,6 +851,7 @@ const settingTabs = [
   { id: 'upgrade', label: '升级' },
   { id: 'certs', label: '证书' },
   { id: 'backup', label: '备份' },
+  { id: 'telegram', label: 'Telegram' },
   { id: 'security', label: '安全' },
   { id: 'account', label: '账号' },
   { id: 'audit', label: '审计' },
@@ -901,6 +1109,8 @@ export default function Settings({ accountOnly = false }) {
       )}
 
       {tab === 'backup' && <BackupPanel />}
+
+      {tab === 'telegram' && <TelegramCard />}
 
       {tab === 'security' && (
       <form onSubmit={saveSecurity} className="card p-5 max-w-3xl space-y-4">

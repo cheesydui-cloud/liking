@@ -34,6 +34,8 @@ var backupTables = []string{
 	"traffic_daily",
 	"settings",
 	"audit",
+	"tg_binds",
+	"tg_notify_state",
 }
 
 var wipeOrder = []string{
@@ -45,6 +47,8 @@ var wipeOrder = []string{
 	"user_packages",
 	"sessions",
 	"audit",
+	"tg_binds",
+	"tg_notify_state",
 	"inbounds",
 	"packages",
 	"certificates",
@@ -66,6 +70,8 @@ var insertOrder = []string{
 	"traffic_daily",
 	"settings",
 	"audit",
+	"tg_binds",
+	"tg_notify_state",
 }
 
 var autoincTables = []string{

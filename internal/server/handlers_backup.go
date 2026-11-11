@@ -255,10 +255,12 @@ func (s *Server) maybeScheduledBackup() {
 	dir := filepath.Join(s.DataDir, "backups")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		log.Printf("scheduled backup: mkdir: %v", err)
+		s.tgBackupFailed(err)
 		return
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		log.Printf("scheduled backup: chmod: %v", err)
+		s.tgBackupFailed(err)
 		return
 	}
 	pw, _ := db.GetSetting(s.DB, "backup_password")
@@ -270,11 +272,13 @@ func (s *Server) maybeScheduledBackup() {
 	raw, name, err := s.encodeBackup(pw)
 	if err != nil {
 		log.Printf("scheduled backup: %v", err)
+		s.tgBackupFailed(err)
 		return
 	}
 	path := filepath.Join(dir, "auto-"+name)
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		log.Printf("scheduled backup write: %v", err)
+		s.tgBackupFailed(err)
 		return
 	}
 	_ = db.SetSetting(s.DB, "backup_last_day", day)

@@ -117,4 +117,4 @@ make run
 
 ## 明确不做
 
-Nginx 偷自己、联邦、Telegram 机器人、十二套客户端模板、fork Xray 做 AnyTLS、把 Mieru 当链式落地。
+Nginx 偷自己、联邦、把面板搬进 Telegram（告警和自助查询除外）、十二套客户端模板、fork Xray 做 AnyTLS、把 Mieru 当链式落地。
