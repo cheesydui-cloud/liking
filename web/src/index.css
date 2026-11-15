@@ -1620,12 +1620,11 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
   cursor: grabbing;
 }
 .machine.is-sorting {
-  opacity: 0.82;
-  z-index: 2;
-  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.16);
+  box-shadow: none;
+  background: color-mix(in srgb, var(--color-ink) 5%, var(--color-surface));
 }
-.dark .machine.is-sorting {
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+.machine.is-sorting > * {
+  visibility: hidden;
 }
 .machine-grid.is-sorting .machine,
 .machine-grid.is-sorting .machine:hover {
@@ -1676,6 +1675,50 @@ html.dark.page-aliyun .machine {
   }
   html.dark.page-aliyun .machine:hover {
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+  }
+}
+.machine.is-sorting,
+.dark .machine.is-sorting,
+html.page-aliyun .machine.is-sorting,
+html.page-aliyun .machine.is-sorting:hover,
+html.dark.page-aliyun .machine.is-sorting,
+html.dark.page-aliyun .machine.is-sorting:hover,
+.machine-grid.is-sorting .machine.is-sorting,
+.machine-grid.is-sorting .machine.is-sorting:hover {
+  box-shadow: none;
+  transform: none;
+  transition: none;
+}
+.machine.drag-float,
+.dark .machine.drag-float,
+html.page-aliyun .machine.drag-float,
+html.page-aliyun .machine.drag-float:hover,
+html.dark .machine.drag-float,
+html.dark.page-aliyun .machine.drag-float,
+html.dark.page-aliyun .machine.drag-float:hover {
+  position: fixed;
+  z-index: 70;
+  margin: 0;
+  pointer-events: none;
+  opacity: 1;
+  user-select: none;
+  cursor: grabbing;
+  background: var(--color-surface);
+  transform: translateY(-10px) scale(1.03);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+  box-shadow: 0 18px 32px rgba(16, 24, 40, 0.14), 0 28px 56px rgba(16, 24, 40, 0.16);
+}
+html.dark .machine.drag-float,
+html.dark.page-aliyun .machine.drag-float,
+html.dark.page-aliyun .machine.drag-float:hover {
+  box-shadow: 0 20px 36px rgba(0, 0, 0, 0.46), 0 32px 64px rgba(0, 0, 0, 0.55);
+}
+@media (prefers-reduced-motion: reduce) {
+  .machine.drag-float,
+  html.page-aliyun .machine.drag-float,
+  html.dark .machine.drag-float,
+  html.dark.page-aliyun .machine.drag-float {
+    transition: none;
   }
 }
 

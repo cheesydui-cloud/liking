@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { mergeKeepOrder, reorderList } from '../lib/cardOrder'
 import { Icon } from './ui'
@@ -91,6 +91,55 @@ function interactiveTarget(target) {
   return !hit.classList.contains('drag-handle')
 }
 
+function mountDragFloat(card, e) {
+  const rect = card.getBoundingClientRect()
+  const clone = card.cloneNode(true)
+  clone.classList.add('drag-float')
+  clone.classList.remove('is-sorting')
+  clone.removeAttribute('data-sort-id')
+  clone.removeAttribute('id')
+  clone.setAttribute('aria-hidden', 'true')
+  clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'))
+  clone.style.width = `${rect.width}px`
+  clone.style.height = `${rect.height}px`
+  clone.style.transform = 'none'
+  document.body.appendChild(clone)
+  card.classList.add('is-sorting')
+  const float = {
+    node: clone,
+    ox: e.clientX - rect.left,
+    oy: e.clientY - rect.top,
+    raf: 0,
+  }
+  clone.style.left = `${e.clientX - float.ox}px`
+  clone.style.top = `${e.clientY - float.oy}px`
+  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  if (reduce) {
+    clone.style.transform = ''
+  } else {
+    float.raf = requestAnimationFrame(() => {
+      float.raf = 0
+      if (!float.node?.isConnected) return
+      float.node.style.transform = ''
+    })
+  }
+  return float
+}
+
+function moveDragFloat(float, e) {
+  if (!float?.node) return
+  float.node.style.left = `${e.clientX - float.ox}px`
+  float.node.style.top = `${e.clientY - float.oy}px`
+}
+
+function clearDragFloat(drag) {
+  const float = drag?.float
+  if (float?.raf) cancelAnimationFrame(float.raf)
+  float?.node?.remove()
+  if (float) float.node = null
+  if (drag) drag.float = null
+}
+
 export function SortableGrid({ items, className, renderItem, onPreview, onCommit }) {
   const itemsRef = useRef(items)
   itemsRef.current = items
@@ -98,6 +147,8 @@ export function SortableGrid({ items, className, renderItem, onPreview, onCommit
   const dragRef = useRef(null)
   const suppressClick = useRef(false)
   const [dragId, setDragId] = useState(null)
+
+  useEffect(() => () => clearDragFloat(dragRef.current), [])
 
   const bind = (item) => {
     const id = String(item.id)
@@ -113,6 +164,8 @@ export function SortableGrid({ items, className, renderItem, onPreview, onCommit
     const finish = (e) => {
       const drag = dragRef.current
       if (!drag || drag.id !== id || (e && drag.pointerId !== e.pointerId)) return
+      drag.card?.classList.remove('is-sorting')
+      clearDragFloat(drag)
       dragRef.current = null
       setDragId(null)
       if (!drag.active) return
@@ -145,8 +198,11 @@ export function SortableGrid({ items, className, renderItem, onPreview, onCommit
           if (!drag.active) {
             if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return
             drag.active = true
+            drag.card = e.currentTarget
+            drag.float = mountDragFloat(drag.card, e)
             setDragId(id)
           }
+          moveDragFloat(drag.float, e)
           e.preventDefault()
           const edge = 56
           if (e.clientY < edge) window.scrollBy(0, -14)
