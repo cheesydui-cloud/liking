@@ -1,3 +1,27 @@
+// Pick the slot whose center is nearer the dragged card than its current hole.
+// A small margin keeps the hole from flickering when the pointer sits on a boundary.
+export function targetIndexFromRects(rects, x, y, from, margin = 8) {
+  if (!Array.isArray(rects) || from < 0 || from >= rects.length) return from
+  const dist = (rect) => {
+    const dx = x - (rect.left + rect.width / 2)
+    const dy = y - (rect.top + rect.height / 2)
+    return Math.hypot(dx, dy)
+  }
+  let to = from
+  let best = Infinity
+  for (let i = 0; i < rects.length; i++) {
+    if (i === from) continue
+    const d = dist(rects[i])
+    if (d < best) {
+      best = d
+      to = i
+    }
+  }
+  if (to === from) return from
+  if (dist(rects[from]) - best < margin) return from
+  return to
+}
+
 export function reorderList(list, from, to) {
   if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return list
   const next = list.slice()

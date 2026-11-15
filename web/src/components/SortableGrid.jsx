@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
-import { mergeKeepOrder, reorderList } from '../lib/cardOrder'
+import { mergeKeepOrder, reorderList, targetIndexFromRects } from '../lib/cardOrder'
 import { Icon } from './ui'
 import { useToast } from './Layout'
 
@@ -76,7 +76,7 @@ export function DragHandle({ drag }) {
       type="button"
       className="icon-btn drag-handle"
       aria-label="拖动排序"
-      title="拖动排序，左右方向键也可以"
+      title="拖到任意位置，左右方向键也可以"
       {...drag.handleProps}
     >
       <Icon name="grip" size={14} />
@@ -102,6 +102,7 @@ function mountDragFloat(card, e) {
   clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'))
   clone.style.width = `${rect.width}px`
   clone.style.height = `${rect.height}px`
+  clone.style.transformOrigin = `${e.clientX - rect.left}px ${e.clientY - rect.top}px`
   clone.style.transform = 'none'
   document.body.appendChild(clone)
   card.classList.add('is-sorting')
@@ -109,10 +110,12 @@ function mountDragFloat(card, e) {
     node: clone,
     ox: e.clientX - rect.left,
     oy: e.clientY - rect.top,
+    width: rect.width,
+    height: rect.height,
     raf: 0,
   }
-  clone.style.left = `${e.clientX - float.ox}px`
-  clone.style.top = `${e.clientY - float.oy}px`
+  clone.style.left = `${rect.left}px`
+  clone.style.top = `${rect.top}px`
   const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   if (reduce) {
     clone.style.transform = ''
@@ -140,15 +143,102 @@ function clearDragFloat(drag) {
   if (drag) drag.float = null
 }
 
+function scrollableParent(el) {
+  let node = el?.parentElement
+  while (node && node !== document.body) {
+    const oy = getComputedStyle(node).overflowY
+    if ((oy === 'auto' || oy === 'scroll') && node.scrollHeight > node.clientHeight + 2) return node
+    node = node.parentElement
+  }
+  return document.scrollingElement
+}
+
+function autoScroll(grid, clientY) {
+  const scroller = scrollableParent(grid)
+  if (!scroller) return false
+  const bounds = scroller === document.scrollingElement
+    ? { top: 0, bottom: window.innerHeight }
+    : scroller.getBoundingClientRect()
+  const edge = 72
+  if (clientY < bounds.top + edge) {
+    scroller.scrollBy(0, -16)
+    return true
+  }
+  if (clientY > bounds.bottom - edge) {
+    scroller.scrollBy(0, 16)
+    return true
+  }
+  return false
+}
+
+function unbindDrag(drag) {
+  const h = drag?.handlers
+  if (!h) return
+  window.removeEventListener('pointermove', h.move)
+  window.removeEventListener('pointerup', h.up)
+  window.removeEventListener('pointercancel', h.up)
+  window.removeEventListener('touchmove', h.touch)
+  drag.handlers = null
+}
+
+function clearMotion(grid) {
+  if (!grid) return
+  for (const el of grid.querySelectorAll('[data-sort-id]')) {
+    el.style.transition = ''
+    el.style.transform = ''
+  }
+}
+
 export function SortableGrid({ items, className, renderItem, onPreview, onCommit }) {
   const itemsRef = useRef(items)
   itemsRef.current = items
+  const onPreviewRef = useRef(onPreview)
+  const onCommitRef = useRef(onCommit)
+  onPreviewRef.current = onPreview
+  onCommitRef.current = onCommit
   const gridRef = useRef(null)
   const dragRef = useRef(null)
+  const flipRef = useRef(null)
   const suppressClick = useRef(false)
+  const aliveRef = useRef(true)
   const [dragId, setDragId] = useState(null)
 
-  useEffect(() => () => clearDragFloat(dragRef.current), [])
+  useEffect(() => () => {
+    aliveRef.current = false
+    const drag = dragRef.current
+    clearTimeout(drag?.holdTimer)
+    clearTimeout(drag?.settleTimer)
+    if (drag?.scrollRaf) cancelAnimationFrame(drag.scrollRaf)
+    unbindDrag(drag)
+    clearDragFloat(drag)
+  }, [])
+
+  useLayoutEffect(() => {
+    const before = flipRef.current
+    if (!before) return
+    flipRef.current = null
+    const grid = gridRef.current
+    if (!grid) return
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    for (const el of grid.querySelectorAll('[data-sort-id]')) {
+      const prev = before.get(el.dataset.sortId)
+      if (!prev) continue
+      el.style.transition = 'none'
+      el.style.transform = 'none'
+      const next = el.getBoundingClientRect()
+      const dx = prev.left - next.left
+      const dy = prev.top - next.top
+      if (reduce || (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5)) {
+        el.style.transition = ''
+        el.style.transform = ''
+        continue
+      }
+      el.style.transform = `translate(${dx}px, ${dy}px)`
+      void el.offsetWidth
+      el.style.transition = 'transform 280ms cubic-bezier(0.22, 1.15, 0.36, 1)'
+      el.style.transform = ''
+    }
+  })
 
   const bind = (item) => {
     const id = String(item.id)
@@ -159,20 +249,86 @@ export function SortableGrid({ items, className, renderItem, onPreview, onCommit
       if (next.length !== orderIds.length) return
       const drag = dragRef.current
       if (drag) drag.latest = next
-      onPreview?.(next)
+      const grid = gridRef.current
+      if (grid) {
+        const map = new Map()
+        for (const el of grid.querySelectorAll('[data-sort-id]')) {
+          map.set(el.dataset.sortId, el.getBoundingClientRect())
+        }
+        flipRef.current = map
+      }
+      onPreviewRef.current?.(next)
+    }
+    const placeAt = (drag, clientX, clientY) => {
+      const grid = gridRef.current
+      const float = drag.float
+      if (!grid || !float || drag.settling) return
+      const x = clientX - float.ox + float.width / 2
+      const y = clientY - float.oy + float.height / 2
+      const cards = [...grid.querySelectorAll('[data-sort-id]')]
+      const from = cards.findIndex(el => el.dataset.sortId === drag.id)
+      if (from < 0) return
+      const rects = cards.map(el => {
+        const r = el.getBoundingClientRect()
+        return { left: r.left, top: r.top, width: r.width, height: r.height }
+      })
+      const to = targetIndexFromRects(rects, x, y, from)
+      if (to === from) return
+      const nextIds = reorderList(cards.map(el => el.dataset.sortId), from, to)
+      const wanted = nextIds.join(',')
+      const have = (drag.latest || []).map(x => String(x.id)).join(',')
+      if (wanted === have) return
+      previewFrom(nextIds)
     }
     const finish = (e) => {
       const drag = dragRef.current
-      if (!drag || drag.id !== id || (e && drag.pointerId !== e.pointerId)) return
-      drag.card?.classList.remove('is-sorting')
-      clearDragFloat(drag)
-      dragRef.current = null
-      setDragId(null)
+      if (!drag || drag.id !== id || drag.settling) return
+      if (e && drag.pointerId !== e.pointerId) return
+      drag.settling = true
+      clearTimeout(drag.holdTimer)
+      if (drag.scrollRaf) cancelAnimationFrame(drag.scrollRaf)
+      unbindDrag(drag)
+      const changed = drag.active && idsOf(drag.latest || itemsRef.current).join(',') !== drag.origin
+      const card = drag.card
+      const float = drag.float
+      const node = float?.node
+      const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+      const done = () => {
+        if (!aliveRef.current || dragRef.current !== drag) return
+        if (card) card.style.touchAction = ''
+        card?.classList.remove('is-sorting')
+        clearDragFloat(drag)
+        clearMotion(gridRef.current)
+        dragRef.current = null
+        setDragId(null)
+      }
+      if (!drag.active || !node || !card || reduce) {
+        done()
+      } else {
+        card.style.transition = 'none'
+        card.style.transform = 'none'
+        const rect = card.getBoundingClientRect()
+        if (float.raf) cancelAnimationFrame(float.raf)
+        node.style.transition = 'left 240ms cubic-bezier(0.22, 1.15, 0.36, 1), top 240ms cubic-bezier(0.22, 1.15, 0.36, 1), width 240ms cubic-bezier(0.22, 1.15, 0.36, 1), height 240ms cubic-bezier(0.22, 1.15, 0.36, 1), transform 240ms cubic-bezier(0.22, 1.15, 0.36, 1)'
+        node.style.left = `${rect.left}px`
+        node.style.top = `${rect.top}px`
+        node.style.width = `${rect.width}px`
+        node.style.height = `${rect.height}px`
+        node.style.transform = 'none'
+        let closed = false
+        const close = () => {
+          if (closed) return
+          closed = true
+          node.removeEventListener('transitionend', close)
+          done()
+        }
+        node.addEventListener('transitionend', close)
+        drag.settleTimer = setTimeout(close, 280)
+      }
       if (!drag.active) return
       suppressClick.current = true
       setTimeout(() => { suppressClick.current = false }, 400)
-      const finalItems = drag.latest || itemsRef.current
-      if (idsOf(finalItems).join(',') !== drag.origin) onCommit?.(finalItems)
+      if (changed) onCommitRef.current?.(drag.latest || itemsRef.current)
     }
     return {
       dragging: dragId != null && String(dragId) === id,
@@ -181,50 +337,74 @@ export function SortableGrid({ items, className, renderItem, onPreview, onCommit
         onPointerDown(e) {
           if (e.button != null && e.button !== 0) return
           if (interactiveTarget(e.target)) return
-          e.currentTarget.setPointerCapture?.(e.pointerId)
-          dragRef.current = {
+          if (dragRef.current?.settling) return
+          if (e.pointerType !== 'touch') {
+            e.preventDefault()
+            e.currentTarget.setPointerCapture?.(e.pointerId)
+          }
+          const drag = {
             id,
             pointerId: e.pointerId,
             x: e.clientX,
             y: e.clientY,
             active: false,
+            settling: false,
+            touch: e.pointerType === 'touch',
             origin: idsOf(itemsRef.current).join(','),
             latest: itemsRef.current,
           }
-        },
-        onPointerMove(e) {
-          const drag = dragRef.current
-          if (!drag || drag.id !== id || drag.pointerId !== e.pointerId) return
-          if (!drag.active) {
-            if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return
+          const lift = (ev) => {
+            if (drag.active || drag.settling || dragRef.current !== drag) return
             drag.active = true
             drag.card = e.currentTarget
-            drag.float = mountDragFloat(drag.card, e)
+            drag.card.style.touchAction = 'none'
+            drag.card.setPointerCapture?.(drag.pointerId)
+            drag.float = mountDragFloat(drag.card, ev)
             setDragId(id)
+            drag.scrollRaf = requestAnimationFrame(function tick() {
+              const current = dragRef.current
+              if (!current || current !== drag || current.settling) return
+              if (current.lastY != null && autoScroll(gridRef.current, current.lastY)) {
+                placeAt(current, current.lastX, current.lastY)
+              }
+              current.scrollRaf = requestAnimationFrame(tick)
+            })
           }
-          moveDragFloat(drag.float, e)
-          e.preventDefault()
-          const edge = 56
-          if (e.clientY < edge) window.scrollBy(0, -14)
-          else if (e.clientY > window.innerHeight - edge) window.scrollBy(0, 14)
-          const grid = gridRef.current
-          if (!grid) return
-          const cards = [...grid.querySelectorAll('[data-sort-id]')]
-          let over = null
-          for (const el of cards) {
-            if (el.dataset.sortId === drag.id) continue
-            const rect = el.getBoundingClientRect()
-            if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
-              over = el.dataset.sortId
-              break
+          if (drag.touch) {
+            drag.holdTimer = setTimeout(() => lift({ clientX: drag.x, clientY: drag.y }), 280)
+          }
+          const move = (ev) => {
+            if (ev.pointerId !== drag.pointerId || drag.settling) return
+            drag.lastX = ev.clientX
+            drag.lastY = ev.clientY
+            const moved = Math.hypot(ev.clientX - drag.x, ev.clientY - drag.y)
+            if (!drag.active) {
+              if (drag.touch) {
+                if (moved > 8) {
+                  clearTimeout(drag.holdTimer)
+                  unbindDrag(drag)
+                  dragRef.current = null
+                }
+                return
+              }
+              if (moved < 6) return
+              lift(ev)
             }
+            moveDragFloat(drag.float, ev)
+            if (drag.active) ev.preventDefault()
+            placeAt(drag, ev.clientX, ev.clientY)
           }
-          if (!over) return
-          const domIds = cards.map(el => el.dataset.sortId)
-          const from = domIds.indexOf(drag.id)
-          const to = domIds.indexOf(over)
-          if (from < 0 || to < 0 || from === to) return
-          previewFrom(reorderList(domIds, from, to))
+          const up = (ev) => finish(ev)
+          const touch = (ev) => {
+            if (!drag.active || drag.settling) return
+            ev.preventDefault()
+          }
+          drag.handlers = { move, up, touch }
+          window.addEventListener('pointermove', move)
+          window.addEventListener('pointerup', up)
+          window.addEventListener('pointercancel', up)
+          window.addEventListener('touchmove', touch, { passive: false })
+          dragRef.current = drag
         },
         onPointerUp: finish,
         onPointerCancel: finish,
@@ -245,8 +425,8 @@ export function SortableGrid({ items, className, renderItem, onPreview, onCommit
           if (from < 0 || to < 0 || to >= list.length) return
           const next = reorderList(list, from, to)
           itemsRef.current = next
-          onPreview?.(next)
-          onCommit?.(next)
+          onPreviewRef.current?.(next)
+          onCommitRef.current?.(next)
         },
       },
     }

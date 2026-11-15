@@ -1621,7 +1621,9 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
 }
 .machine.is-sorting {
   box-shadow: none;
-  background: color-mix(in srgb, var(--color-ink) 5%, var(--color-surface));
+  background: color-mix(in srgb, var(--color-ink) 4%, var(--color-surface));
+  outline: 1px dashed color-mix(in srgb, var(--color-ink) 32%, var(--color-line));
+  outline-offset: -7px;
 }
 .machine.is-sorting > * {
   visibility: hidden;
@@ -1629,6 +1631,7 @@ a.alert-row:hover { color: var(--color-ink); border-color: var(--color-ink-mut);
 .machine-grid.is-sorting .machine,
 .machine-grid.is-sorting .machine:hover {
   transform: none;
+  transition: transform 280ms cubic-bezier(0.22, 1.15, 0.36, 1);
 }
 
 .machine {
@@ -1704,7 +1707,7 @@ html.dark.page-aliyun .machine.drag-float:hover {
   user-select: none;
   cursor: grabbing;
   background: var(--color-surface);
-  transform: translateY(-10px) scale(1.03);
+  transform: translateY(-6px) scale(1.06);
   transition: transform 160ms ease, box-shadow 160ms ease;
   box-shadow: 0 18px 32px rgba(16, 24, 40, 0.14), 0 28px 56px rgba(16, 24, 40, 0.16);
 }
