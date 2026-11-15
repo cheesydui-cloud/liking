@@ -338,15 +338,17 @@ export function SortableGrid({ items, className, renderItem, onPreview, onCommit
           if (e.button != null && e.button !== 0) return
           if (interactiveTarget(e.target)) return
           if (dragRef.current?.settling) return
+          const card = e.currentTarget
           if (e.pointerType !== 'touch') {
             e.preventDefault()
-            e.currentTarget.setPointerCapture?.(e.pointerId)
+            card.setPointerCapture?.(e.pointerId)
           }
           const drag = {
             id,
             pointerId: e.pointerId,
             x: e.clientX,
             y: e.clientY,
+            card,
             active: false,
             settling: false,
             touch: e.pointerType === 'touch',
@@ -354,12 +356,11 @@ export function SortableGrid({ items, className, renderItem, onPreview, onCommit
             latest: itemsRef.current,
           }
           const lift = (ev) => {
-            if (drag.active || drag.settling || dragRef.current !== drag) return
+            if (drag.active || drag.settling || dragRef.current !== drag || !card.isConnected) return
             drag.active = true
-            drag.card = e.currentTarget
-            drag.card.style.touchAction = 'none'
-            drag.card.setPointerCapture?.(drag.pointerId)
-            drag.float = mountDragFloat(drag.card, ev)
+            card.style.touchAction = 'none'
+            card.setPointerCapture?.(drag.pointerId)
+            drag.float = mountDragFloat(card, ev)
             setDragId(id)
             drag.scrollRaf = requestAnimationFrame(function tick() {
               const current = dragRef.current
