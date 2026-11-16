@@ -369,7 +369,7 @@ func (s *Server) prepareInbound(in *db.Inbound) error {
 	} else {
 		in.ExitInboundID = nil
 	}
-	used, err := db.UsedPortsOnServer(s.DB, in.ServerID, in.ID)
+	used, err := db.ListenPortsUsed(s.DB, in.ServerID, in.ID, 0)
 	if err != nil {
 		return err
 	}
@@ -518,6 +518,9 @@ func applyTargets(s *Server, in *db.Inbound) []int64 {
 		return nil
 	}
 	ids := append([]int64{in.ServerID}, chainPeerServerIDs(s, in)...)
+	if touch, err := db.ForwardTouchServers(s.DB, in.ServerID); err == nil {
+		ids = append(ids, touch...)
+	}
 	if id := corecfg.WGExitServerID(in); id != 0 {
 		ids = append(ids, id)
 	}

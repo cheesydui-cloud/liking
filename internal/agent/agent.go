@@ -40,6 +40,7 @@ type Config struct {
 type Agent struct {
 	cfg     Config
 	cores   *Cores
+	fwd     *Forwarder
 	lastRev string
 	revMu   sync.Mutex
 	writeMu sync.Mutex
@@ -55,8 +56,9 @@ func Run(ctx context.Context, cfg Config) error {
 	} else if n > 0 {
 		log.Printf("agent: 已恢复 %d 个放行端口", n)
 	}
-	a := &Agent{cfg: cfg, cores: NewCores(cfg.Dir), exit: os.Exit}
+	a := &Agent{cfg: cfg, cores: NewCores(cfg.Dir), fwd: NewForwarder(), exit: os.Exit}
 	defer a.cores.Close()
+	defer a.fwd.Close()
 	backoff := time.Second
 	for {
 		err := a.session(ctx)
@@ -123,7 +125,7 @@ func (a *Agent) session(ctx context.Context) error {
 		Arch:         runtime.GOARCH,
 		LastRev:      lastRev,
 		Cores:        detectedCores(),
-		Caps:         []string{wsproto.CapCores, wsproto.CapProbe, wsproto.CapKick, wsproto.CapNFT, wsproto.CapWG, wsproto.CapAllowPort},
+		Caps:         []string{wsproto.CapCores, wsproto.CapProbe, wsproto.CapKick, wsproto.CapNFT, wsproto.CapWG, wsproto.CapAllowPort, wsproto.CapForward},
 	})
 	if err := a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeHello, ID: "hello", Payload: hello}); err != nil {
 		return err
@@ -300,6 +302,9 @@ func (a *Agent) handleUninstall(ctx context.Context, ws *websocket.Conn, env wsp
 	if err := a.ackUninstall(ctx, ws, env.ID, true, ""); err != nil {
 		return err
 	}
+	if a.fwd != nil {
+		a.fwd.Close()
+	}
 	if err := a.uninstall(); err != nil {
 		log.Printf("agent uninstall: %v", err)
 	}
@@ -475,6 +480,12 @@ func (a *Agent) handleApply(ctx context.Context, ws *websocket.Conn, env wsproto
 	cores := detectedCores()
 	if err != nil {
 		return a.ackApply(ctx, ws, env.ID, cfg.Rev, false, err.Error(), cores)
+	}
+	// A missing field is an old panel. Do not clear relays it never knew about.
+	if cfg.Forwards != nil && a.fwd != nil {
+		if err := a.fwd.Apply(cfg.Forwards); err != nil {
+			return a.ackApply(ctx, ws, env.ID, cfg.Rev, false, err.Error(), cores)
+		}
 	}
 	a.revMu.Lock()
 	a.lastRev = cfg.Rev

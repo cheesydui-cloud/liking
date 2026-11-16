@@ -144,6 +144,7 @@ func (s *Server) Router() http.Handler {
 			r.Delete("/api/servers/{id}", s.handleDeleteServer)
 			r.Post("/api/servers/{id}/sync", s.handleSyncServer)
 			r.Get("/api/servers/{id}/install", s.handleServerInstall)
+			r.Post("/api/servers/upgrade-agents", s.handleUpgradeAgents)
 			r.Post("/api/servers/{id}/upgrade-agent", s.handleUpgradeAgent)
 			r.Post("/api/servers/{id}/uninstall-agent", s.handleUninstallAgent)
 			r.Post("/api/servers/{id}/push-core", s.handlePushCore)
@@ -155,6 +156,11 @@ func (s *Server) Router() http.Handler {
 			r.Post("/api/servers/{id}/dest-probe", s.handleDestProbe)
 			r.Get("/api/servers/{id}/cf-domains", s.handleServerCFDomains)
 			r.Get("/api/cf-domains", s.handleCFDomains)
+
+			r.Get("/api/traffic-forwards", s.handleListTrafficForwards)
+			r.Post("/api/traffic-forwards", s.handleCreateTrafficForward)
+			r.Put("/api/traffic-forwards/{id}", s.handleUpdateTrafficForward)
+			r.Delete("/api/traffic-forwards/{id}", s.handleDeleteTrafficForward)
 
 			r.Get("/api/inbounds", s.handleListInbounds)
 			r.Post("/api/inbounds", s.handleCreateInbound)

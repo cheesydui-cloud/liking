@@ -30,6 +30,9 @@ var backupTables = []string{
 	"clients",
 	"package_inbounds",
 	"package_servers",
+	"traffic_forwards",
+	"traffic_forward_hops",
+	"package_forwards",
 	"user_packages",
 	"traffic_daily",
 	"settings",
@@ -44,6 +47,9 @@ var wipeOrder = []string{
 	"clients",
 	"package_inbounds",
 	"package_servers",
+	"package_forwards",
+	"traffic_forward_hops",
+	"traffic_forwards",
 	"user_packages",
 	"sessions",
 	"audit",
@@ -67,6 +73,9 @@ var insertOrder = []string{
 	"clients",
 	"package_inbounds",
 	"package_servers",
+	"traffic_forwards",
+	"traffic_forward_hops",
+	"package_forwards",
 	"user_packages",
 	"traffic_daily",
 	"settings",
@@ -76,7 +85,7 @@ var insertOrder = []string{
 }
 
 var autoincTables = []string{
-	"users", "servers", "certificates", "packages", "inbounds", "clients", "audit",
+	"users", "servers", "certificates", "packages", "inbounds", "clients", "audit", "traffic_forwards",
 }
 
 // Snapshot is a versioned panel backup. Sessions are never included.

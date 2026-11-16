@@ -37,6 +37,7 @@ const (
 	CapNFT       = "nft"
 	CapWG        = "wireguard"
 	CapAllowPort = "allow_port"
+	CapForward   = "forward"
 )
 
 type Envelope struct {
@@ -79,6 +80,16 @@ type AcctMark struct {
 	Email string `json:"email"`
 }
 
+// ForwardRule is one listen port on this machine. TCP is relayed in
+// userspace. UDP is DNATed by nftables. Old agents ignore the field.
+type ForwardRule struct {
+	ID       int64  `json:"id"`
+	Port     int    `json:"port"`
+	DestHost string `json:"dest_host"`
+	DestPort int    `json:"dest_port"`
+	Proto    string `json:"proto"`
+}
+
 type ApplyConfig struct {
 	Rev         string          `json:"rev"`
 	Xray        json.RawMessage `json:"xray,omitempty"`
@@ -91,6 +102,10 @@ type ApplyConfig struct {
 	AcctMarks   []AcctMark      `json:"acct_marks,omitempty"`
 	DisableIPv6 bool            `json:"disable_ipv6"`
 	RejectCN    RejectCN        `json:"reject_cn"`
+	// Forwards is always sent by a panel that knows traffic forwards, including
+	// an empty list, so the agent can clear stale relays. omitempty would hide
+	// that clear. A missing field (old panel) must not be treated as empty.
+	Forwards []ForwardRule `json:"forwards"`
 }
 
 type WireGuardPeer struct {

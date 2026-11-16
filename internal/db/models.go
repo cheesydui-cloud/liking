@@ -76,6 +76,7 @@ type Server struct {
 	CanPushNft      bool   `json:"can_push_nft,omitempty"`
 	CanPushWG       bool   `json:"can_push_wg,omitempty"`
 	CanAllowPort    bool   `json:"can_allow_port,omitempty"`
+	CanForward      bool   `json:"can_forward,omitempty"`
 }
 
 type Certificate struct {
@@ -105,6 +106,7 @@ type Package struct {
 	InboundIDs         []int64   `json:"inbound_ids,omitempty"`
 	Multipliers        []float64 `json:"multipliers,omitempty"`
 	TransitIDs         []int64   `json:"transit_ids,omitempty"`
+	ForwardIDs         []int64   `json:"forward_ids,omitempty"`
 	ServerIDs          []int64   `json:"server_ids"`
 	SpeedLimit         int64     `json:"speed_limit"` // KB/s; 0 = unlimited; 1 Mbps = 125
 	SubRulePreset      string    `json:"sub_rule_preset"`

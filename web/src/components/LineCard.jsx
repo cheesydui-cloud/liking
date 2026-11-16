@@ -28,6 +28,7 @@ export function NodeCard({ n, starBusy, onStar, onCopy, extra }) {
           <div className="machine-title">
             <span className="machine-name truncate">{n.name}</span>
             {n.line_kind === 'chain' ? <span className="line-tag">中转</span> : null}
+            {n.line_kind === 'traffic' ? <span className="line-tag">流量</span> : null}
             <LineStatus status={online ? '在线' : '离线'} />
           </div>
           <div className="machine-host">

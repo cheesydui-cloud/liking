@@ -1114,7 +1114,18 @@ func GetPackage(d *sql.DB, id int64) (*Package, error) {
 		}
 		p.ServerIDs = append(p.ServerIDs, sid)
 	}
-	return p, srows.Err()
+	if err := srows.Err(); err != nil {
+		return nil, err
+	}
+	fids, err := PackageForwardIDs(d, id)
+	if err != nil {
+		return nil, err
+	}
+	if fids == nil {
+		fids = []int64{}
+	}
+	p.ForwardIDs = fids
+	return p, nil
 }
 
 func ListPackages(d *sql.DB) ([]*Package, error) {
@@ -1181,6 +1192,9 @@ func CopyPackagePolicy(dst *User, p *Package) {
 }
 
 func DeletePackage(d *sql.DB, id int64) error {
+	if _, err := d.Exec(`DELETE FROM package_forwards WHERE package_id=?`, id); err != nil {
+		return err
+	}
 	if _, err := d.Exec(`DELETE FROM user_packages WHERE package_id=?`, id); err != nil {
 		return err
 	}

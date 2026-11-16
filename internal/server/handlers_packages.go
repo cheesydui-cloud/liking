@@ -132,6 +132,7 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		Multipliers  []float64 `json:"multipliers"`
 		TransitIDs   []int64   `json:"transit_ids"`
 		ServerIDs    []int64   `json:"server_ids"`
+		ForwardIDs   []int64   `json:"forward_ids"`
 		packagePolicyReq
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -163,8 +164,8 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "计费方向无效")
 		return
 	}
-	if !hasPositiveID(req.ServerIDs) && !hasPositiveID(req.InboundIDs) {
-		jsonErr(w, http.StatusBadRequest, "请选择实例或节点")
+	if !hasPositiveID(req.ServerIDs) && !hasPositiveID(req.InboundIDs) && !hasPositiveID(req.ForwardIDs) {
+		jsonErr(w, http.StatusBadRequest, "请选择节点或流量中转")
 		return
 	}
 	pol := &db.Package{}
@@ -182,21 +183,29 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 	relation := db.PackageRelationsServer
 	ids := req.ServerIDs
 	if req.InboundIDs != nil {
-		if !hasPositiveID(req.InboundIDs) {
-			jsonErr(w, http.StatusBadRequest, "请选择实例或节点")
+		if !hasPositiveID(req.InboundIDs) && !hasPositiveID(req.ForwardIDs) {
+			jsonErr(w, http.StatusBadRequest, "请选择节点或流量中转")
 			return
 		}
 		relation = db.PackageRelationsInbound
 		ids = req.InboundIDs
-		if err := db.ValidatePackageNodes(s.DB, req.InboundIDs, req.TransitIDs); err != nil {
-			jsonErr(w, http.StatusBadRequest, err.Error())
-			return
+		if hasPositiveID(req.InboundIDs) {
+			if err := db.ValidatePackageNodes(s.DB, req.InboundIDs, req.TransitIDs); err != nil {
+				jsonErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
 		}
 	}
 	p, err = db.CreatePackageConfigured(s.DB, p, relation, ids, req.Multipliers, req.TransitIDs)
 	if err != nil {
 		jsonErr(w, http.StatusBadRequest, "节点或套餐参数无效："+err.Error())
 		return
+	}
+	if req.ForwardIDs != nil {
+		if err := db.SetPackageForwards(s.DB, p.ID, req.ForwardIDs); err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	if _, err := corecfg.ProvisionAll(s.DB); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
@@ -229,6 +238,7 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 		Multipliers  []float64 `json:"multipliers"`
 		TransitIDs   []int64   `json:"transit_ids"`
 		ServerIDs    []int64   `json:"server_ids"`
+		ForwardIDs   []int64   `json:"forward_ids"`
 		packagePolicyReq
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -281,15 +291,17 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 	relation := db.PackageRelationsNone
 	var ids []int64
 	if req.InboundIDs != nil {
-		if !hasPositiveID(req.InboundIDs) {
-			jsonErr(w, http.StatusBadRequest, "请选择实例或节点")
+		if !hasPositiveID(req.InboundIDs) && !hasPositiveID(req.ForwardIDs) {
+			jsonErr(w, http.StatusBadRequest, "请选择节点或流量中转")
 			return
 		}
 		relation = db.PackageRelationsInbound
 		ids = req.InboundIDs
-		if err := db.ValidatePackageNodes(s.DB, req.InboundIDs, req.TransitIDs); err != nil {
-			jsonErr(w, http.StatusBadRequest, err.Error())
-			return
+		if hasPositiveID(req.InboundIDs) {
+			if err := db.ValidatePackageNodes(s.DB, req.InboundIDs, req.TransitIDs); err != nil {
+				jsonErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
 		}
 	} else if req.ServerIDs != nil {
 		if !hasPositiveID(req.ServerIDs) {
@@ -302,6 +314,12 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 	if err := db.UpdatePackageConfigured(s.DB, p, relation, ids, req.Multipliers, req.TransitIDs); err != nil {
 		jsonErr(w, http.StatusBadRequest, "节点或套餐参数无效："+err.Error())
 		return
+	}
+	if req.ForwardIDs != nil {
+		if err := db.SetPackageForwards(s.DB, p.ID, req.ForwardIDs); err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	if err := s.syncPackageForwards(id); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())

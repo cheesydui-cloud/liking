@@ -23,6 +23,7 @@ export function forwardKind(inb) {
 export function kindLabel(k) {
   if (k === 'chain') return '链式'
   if (k === 'port') return '端口'
+  if (k === 'traffic') return '流量中转'
   return ''
 }
 

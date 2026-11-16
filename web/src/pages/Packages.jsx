@@ -12,7 +12,7 @@ import { SpeedField } from '../components/SpeedField'
 import { formatSpeedLimit, kbpsFromForm, speedFormFromKbps } from '../lib/speed'
 
 const emptyForm = {
-  name: '', gb: '', direction: 'oneway', reset_mode: 'anniversary', inbound_ids: [], transit_ids: [], multipliers: {},
+  name: '', gb: '', direction: 'oneway', reset_mode: 'anniversary', inbound_ids: [], transit_ids: [], forward_ids: [], multipliers: {},
   speed_value: '', speed_unit: 'mbps', sub_rule_preset: '', sub_rule_categories: [],
   site_filter_mode: '', site_deny_categories: [], site_deny_domains: '',
 }
@@ -142,13 +142,28 @@ function trafficLabel(bytes) {
   return `${n} G`
 }
 
-function Metric({ label, value, plain }) {
+function Metric({ label, value, plain, onClick, title }) {
+  if (onClick) {
+    return (
+      <button type="button" className="metric metric-btn" onClick={onClick} title={title || label} aria-label={title || label}>
+        <span className="metric-k">{label}</span>
+        <span className={`metric-v${plain ? ' is-plain' : ''}`}>
+          {value}
+          <span className="metric-affordance">查看</span>
+        </span>
+      </button>
+    )
+  }
   return (
     <div className="metric">
       <span className="metric-k">{label}</span>
       <span className={`metric-v${plain ? ' is-plain' : ''}`}>{value}</span>
     </div>
   )
+}
+
+function packageUserList(users, packageId) {
+  return (users || []).filter(u => u.role !== 'admin' && Number(u.package_id) === Number(packageId))
 }
 
 export default function Packages() {
@@ -158,6 +173,8 @@ export default function Packages() {
   const [servers, setServers] = useState(() => asArray(peekList('servers')))
   const [ins, setIns] = useState(() => asArray(peekList('inbounds')))
   const [users, setUsers] = useState(() => asArray(peekList('users')))
+  const [forwards, setForwards] = useState([])
+  const [userPkg, setUserPkg] = useState(null)
   const [ready, setReady] = useState(() => peekList('packages') !== undefined)
   const [f, setF] = useState(emptyForm)
   const [editId, setEditId] = useState(0)
@@ -179,11 +196,12 @@ export default function Packages() {
     const started = order.generation()
     try {
       const g = cacheGen()
-      const [a, b, c, d] = await Promise.all([api.get('/packages'), api.get('/servers'), api.get('/inbounds'), api.get('/users')])
+      const [a, b, c, d, e] = await Promise.all([api.get('/packages'), api.get('/servers'), api.get('/inbounds'), api.get('/users'), api.get('/traffic-forwards')])
       setList(prev => putList('packages', order.applyIncoming(prev, asArray(a.packages), started), g))
       setServers(putList('servers', asArray(b.servers), g))
       setIns(putList('inbounds', asArray(c.inbounds), g))
       setUsers(putList('users', asArray(d.users), g))
+      setForwards(asArray(e.forwards))
       setLoadErr('')
       setReady(true)
     } catch (e) {
@@ -203,6 +221,15 @@ export default function Packages() {
       setDenyCatalog(Array.isArray(d.site_deny_catalog) ? d.site_deny_catalog : [])
     }).catch(() => {})
   }, [])
+
+  const toggleForward = (id) => {
+    const n = Number(id)
+    setF(prev => {
+      const cur = (prev.forward_ids || []).map(Number)
+      const has = cur.includes(n)
+      return { ...prev, forward_ids: has ? cur.filter(x => x !== n) : [...cur, n] }
+    })
+  }
 
   const toggleNode = (id) => {
     const n = Number(id)
@@ -260,6 +287,7 @@ export default function Packages() {
       direction: p.direction || 'oneway',
       inbound_ids: selectedInboundIds(p, ins),
       transit_ids: Array.isArray(p.transit_ids) ? p.transit_ids.map(Number).filter(Boolean) : [],
+      forward_ids: Array.isArray(p.forward_ids) ? p.forward_ids.map(Number).filter(Boolean) : [],
       multipliers: Object.fromEntries((selectedInboundIds(p, ins) || []).map((id, i) => [id, p.multipliers?.[i] ?? 1])),
       speed_value: speed.value,
       speed_unit: speed.unit,
@@ -282,8 +310,8 @@ export default function Packages() {
     e.preventDefault()
     const name = f.name.trim()
     if (!name) { toast('请填写名称', 'error'); return }
-    if (!f.inbound_ids.length) {
-      toast('请勾选实例上的节点', 'error')
+    if (!f.inbound_ids.length && !(f.forward_ids || []).length) {
+      toast('请勾选节点或流量中转', 'error')
       return
     }
     const gbRaw = String(f.gb).trim()
@@ -306,6 +334,7 @@ export default function Packages() {
       direction: f.direction,
       reset_mode: f.reset_mode === 'anniversary' ? 'anniversary' : 'none',
       inbound_ids: f.inbound_ids,
+      forward_ids: (f.forward_ids || []).map(Number).filter(Boolean),
       transit_ids: f.inbound_ids.filter(id => (f.transit_ids || []).map(Number).includes(Number(id))),
       multipliers: f.inbound_ids.map(id => {
         const n = Number(f.multipliers?.[id])
@@ -419,8 +448,10 @@ export default function Packages() {
           }}
           onCommit={(next) => order.commit(next)}
           renderItem={(p, drag) => {
-            const n = users.filter(u => u.role !== 'admin' && u.package_id === p.id).length
+            const pkgUsers = packageUserList(users, p.id)
+            const n = pkgUsers.length
             const meta = packageNodes(p, ins, servers)
+            const fwLines = (p.forward_ids || []).map(id => forwards.find(x => Number(x.id) === Number(id))).filter(Boolean)
             const nodeTip = meta.names.length ? meta.names.join('、') : (meta.servers.join(' · ') || undefined)
             return (
               <div key={p.id} className={`machine is-pkg${drag.dragging ? ' is-sorting' : ''}`} {...drag.itemProps}>
@@ -451,14 +482,14 @@ export default function Packages() {
                   <Metric label={p.reset_mode === 'anniversary' ? '每月' : '流量'} value={trafficLabel(p.traffic_bytes)} />
                   <Metric label="计费" value={p.direction === 'twoway' ? '双向' : '单向'} />
                   <Metric label="节点" value={meta.all ? '0' : String(meta.count)} />
-                  <Metric label="用户" value={String(n)} />
+                  <Metric label="用户" value={String(n)} title="查看用这个套餐的用户" onClick={(e) => { e.stopPropagation(); setUserPkg(p) }} />
                   <Metric label="清零" value={p.reset_mode === 'anniversary' ? '按开通日' : '不清零'} plain />
                   <Metric label="限速" value={speedLine(p)} plain />
                   <Metric label="分流" value={ruleLine(p.sub_rule_preset)} plain />
                   <Metric label="访问" value={accessLine(p)} plain />
                 </div>
                 <div className="pkg-card-nodes" title={nodeTip}>
-                  {meta.all ? (
+                  {meta.all && fwLines.length === 0 ? (
                     <div className="pkg-card-more">还没选节点，订阅里不会有线路</div>
                   ) : meta.lines.slice(0, 4).map(line => (
                     <div key={line.id} className="pkg-card-node">
@@ -470,6 +501,12 @@ export default function Packages() {
                   {!meta.all && meta.lines.length > 4 ? (
                     <div className="pkg-card-more">还有 {meta.lines.length - 4} 个</div>
                   ) : null}
+                  {fwLines.slice(0, 3).map(fw => (
+                    <div key={`fw-${fw.id}`} className="pkg-card-node">
+                      <span className="pkg-card-node-proto">流量</span>
+                      <span className="pkg-card-node-name">{fw.name || '流量中转'}</span>
+                    </div>
+                  ))}
                 </div>
                 <div className="machine-foot">
                   <button type="button" className="machine-ports" onClick={() => openPreview(p)}>预览</button>
@@ -631,6 +668,43 @@ export default function Packages() {
             )}
           </div>
           <div>
+            <div className="pkg-section-head">
+              <div>
+                <div className="text-[12px] font-medium text-ink-soft">流量中转</div>
+                <div className="text-[12px] text-ink-mut mt-0.5">
+                  {(f.forward_ids || []).length ? `已选 ${(f.forward_ids || []).length} / ${forwards.length}` : '可选。勾选后订阅地址换成入口，协议和账号仍是落地节点的。'}
+                </div>
+              </div>
+            </div>
+            {forwards.length === 0 ? (
+              <div className="text-[13px] text-ink-mut py-3">还没有流量中转。先到「中转」新建。</div>
+            ) : (
+              <div className="pkg-pick-list">
+                {forwards.map(fw => {
+                  const on = (f.forward_ids || []).map(Number).includes(Number(fw.id))
+                  const path = [fw.entry_server_name, ...(fw.hops || []).map(h => h.server_name), fw.landing_name].filter(Boolean).join(' → ')
+                  return (
+                    <div key={fw.id} className={`pkg-node${on ? ' is-on' : ''}`}>
+                      <button type="button" className="pkg-node-hit" onClick={() => toggleForward(fw.id)} aria-pressed={on}>
+                        <span className={`node-check${on ? ' is-on' : ''}`} aria-hidden>{on ? <Icon name="check" size={12} /> : null}</span>
+                        <span className="pkg-node-copy">
+                          <span className="pkg-node-title">
+                            <span className="pkg-node-name truncate">{fw.name || '流量中转'}</span>
+                            {fw.enabled === false ? <Badge tone="muted">停用</Badge> : null}
+                          </span>
+                          <span className="pkg-node-meta">
+                            <span>{path || '流量中转'}</span>
+                            {fw.entry_port ? <span className="pkg-node-port">:{fw.entry_port}</span> : null}
+                          </span>
+                        </span>
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+          <div>
             <div className="text-[12px] font-medium text-ink-soft">开户默认</div>
             <p className="text-[12px] text-ink-mut mt-0.5 mb-3">只对之后开户或换套餐生效，不会改已经开好的用户。</p>
             <div className="space-y-4">
@@ -721,6 +795,25 @@ export default function Packages() {
       }>
         <p className="text-[12px] text-ink-mut mb-3">只读预览这个套餐进订阅的节点，不是管理员自己的订阅。</p>
         <NodePreviewList data={previewData} error={previewErr} loading={previewLoading} />
+      </Modal>
+      <Modal open={!!userPkg} title={userPkg ? `${userPkg.name} 的用户` : '用户'} onClose={() => setUserPkg(null)} footer={
+        <button type="button" className="btn-ghost" onClick={() => setUserPkg(null)}>关闭</button>
+      }>
+        {userPkg ? (() => {
+          const rows = packageUserList(users, userPkg.id)
+          if (!rows.length) return <div className="text-[13px] text-ink-mut py-2">还没有用户用这个套餐。</div>
+          return (
+            <div className="pkg-user-list">
+              {rows.map(u => (
+                <div key={u.id} className="pkg-user-row">
+                  <span className="pkg-user-name">{u.username}</span>
+                  {u.remark ? <span className="pkg-user-remark">{u.remark}</span> : null}
+                  {u.enabled === false ? <Badge tone="muted">停用</Badge> : null}
+                </div>
+              ))}
+            </div>
+          )
+        })() : null}
       </Modal>
     </div>
   )

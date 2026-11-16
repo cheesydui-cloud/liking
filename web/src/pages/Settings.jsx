@@ -874,7 +874,7 @@ function PanelUpgradeCard() {
       <div>
         <div className="text-[15px] font-medium">升级面板</div>
         <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
-          下载 GitHub 上的发布版并重启本机面板。同机 Agent 会一起重启。其它实例不会自动升，仍在实例页点一键升级。页面会断开几十秒。
+          下载 GitHub 上的发布版并重启本机面板。同机 Agent 会一起重启。其它实例不会自动升，到实例页点「升级全部」。页面会断开几十秒。
         </p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

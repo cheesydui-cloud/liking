@@ -1,156 +1,160 @@
 package server
 
 import (
-	"database/sql"
 	"net/http"
-	"strconv"
-	"time"
+	"strings"
 
+	"liking/internal/corecfg"
 	"liking/internal/db"
 )
 
-func queryDays(r *http.Request) int {
-	n, _ := strconv.Atoi(r.URL.Query().Get("days"))
-	if n < 1 {
-		n = 14
-	}
-	if n > 90 {
-		n = 90
-	}
-	return n
+type trafficHopReq struct {
+	ServerID   int64  `json:"server_id"`
+	ListenPort int    `json:"listen_port"`
+	DialHost   string `json:"dial_host"`
 }
 
-func dayRange(n int) (from, to string) {
-	return dayRangeAt(time.Now(), n)
+type trafficForwardReq struct {
+	Name             string          `json:"name"`
+	Enabled          *bool           `json:"enabled"`
+	EntryServerID    int64           `json:"entry_server_id"`
+	EntryPort        int             `json:"entry_port"`
+	LandingInboundID int64           `json:"landing_inbound_id"`
+	LandingDialHost  string          `json:"landing_dial_host"`
+	Hops             []trafficHopReq `json:"hops"`
 }
 
-func dayRangeAt(now time.Time, n int) (from, to string) {
-	if n < 1 {
-		n = 14
+func trafficFromReq(req trafficForwardReq, prev *db.TrafficForward) *db.TrafficForward {
+	fw := &db.TrafficForward{
+		Name:             strings.TrimSpace(req.Name),
+		Enabled:          true,
+		EntryServerID:    req.EntryServerID,
+		EntryPort:        req.EntryPort,
+		LandingInboundID: req.LandingInboundID,
+		LandingDialHost:  req.LandingDialHost,
+		Hops:             make([]db.TrafficHop, 0, len(req.Hops)),
 	}
-	if n > 90 {
-		n = 90
+	if prev != nil {
+		fw.ID = prev.ID
+		fw.Enabled = prev.Enabled
+		fw.CreatedAt = prev.CreatedAt
 	}
-	to = now.Format("2006-01-02")
-	from = now.AddDate(0, 0, -(n - 1)).Format("2006-01-02")
-	return from, to
+	if req.Enabled != nil {
+		fw.Enabled = *req.Enabled
+	}
+	for _, h := range req.Hops {
+		fw.Hops = append(fw.Hops, db.TrafficHop{
+			ServerID:   h.ServerID,
+			ListenPort: h.ListenPort,
+			DialHost:   h.DialHost,
+		})
+	}
+	return fw
 }
 
-func dayRangeDB(d *sql.DB, n int) (from, to string) {
-	return dayRangeAt(db.ClockNow(d), n)
-}
-
-func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
-	n := queryDays(r)
-	from, to := dayRangeDB(s.DB, n)
-	days, err := db.TrafficSeries(s.DB, from, to, 0, 0)
+func (s *Server) handleListTrafficForwards(w http.ResponseWriter, r *http.Request) {
+	list, err := db.ListTrafficForwards(s.DB)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	users, err := db.TrafficByUser(s.DB, from, to)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, err.Error())
-		return
+	if list == nil {
+		list = []*db.TrafficForward{}
 	}
-	ins, err := db.TrafficByInbound(s.DB, from, to, 0)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	all, _ := db.ListUsers(s.DB)
-	var billed, rawUsed int64
-	for _, u := range all {
-		if u != nil && u.Role != "admin" {
-			billed += u.BilledBytes
-			rawUsed += u.UsedUp + u.UsedDown
-		}
-	}
-	var nicUp, nicDown int64
-	srvs, _ := db.ListServers(s.DB)
-	for _, x := range srvs {
-		if up, down, ok := s.Hub.Live(x.ID); ok {
-			nicUp += up
-			nicDown += down
-		}
-	}
-	now := db.ClockNow(s.DB)
-	monthFrom := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Format("2006-01-02")
-	monthDays, _ := db.TrafficSeries(s.DB, monthFrom, to, 0, 0)
-	var monthRaw int64
-	for _, p := range monthDays {
-		monthRaw += p.Up + p.Down
-	}
-	jsonOK(w, map[string]any{
-		"from":         from,
-		"to":           to,
-		"days":         db.FillTrafficDays(from, to, days),
-		"users":        users,
-		"inbounds":     ins,
-		"billed_bytes": billed,
-		"raw_bytes":    rawUsed,
-		"nic_up_bps":   nicUp,
-		"nic_down_bps": nicDown,
-		"month":        db.ClockMonth(s.DB),
-		"month_bytes":  monthRaw,
-		"timezone":     db.Timezone(s.DB),
-	})
+	jsonOK(w, map[string]any{"forwards": list})
 }
 
-func (s *Server) handleUserTraffic(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreateTrafficForward(w http.ResponseWriter, r *http.Request) {
+	var req trafficForwardReq
+	if err := decodeJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效请求")
+		return
+	}
+	fw := trafficFromReq(req, nil)
+	if err := corecfg.PrepareTrafficForward(s.DB, fw); err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := db.InsertTrafficForward(s.DB, fw); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if _, err := corecfg.ProvisionAll(s.DB); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	fresh, _ := db.GetTrafficForward(s.DB, fw.ID)
+	if fresh == nil {
+		fresh = fw
+	}
+	if u := userFromCtx(r.Context()); u != nil {
+		db.AddAudit(s.DB, &u.ID, "forward.create", fresh.Name)
+	}
+	s.respondAfterApply(w, map[string]any{"forward": fresh}, db.ServerIDsForTrafficForward(fresh)...)
+}
+
+func (s *Server) handleUpdateTrafficForward(w http.ResponseWriter, r *http.Request) {
 	id, err := chiID(r, "id")
-	if err != nil || id <= 0 {
-		jsonErr(w, http.StatusBadRequest, "无效用户")
-		return
-	}
-	if _, err := db.GetUser(s.DB, id); err != nil {
-		jsonErr(w, http.StatusNotFound, "用户不存在")
-		return
-	}
-	s.writeUserTraffic(w, r, id)
-}
-
-func (s *Server) handleMeTraffic(w http.ResponseWriter, r *http.Request) {
-	u := userFromCtx(r.Context())
-	if u == nil {
-		jsonErr(w, http.StatusUnauthorized, "未登录")
-		return
-	}
-	s.writeUserTraffic(w, r, u.ID)
-}
-
-func (s *Server) writeUserTraffic(w http.ResponseWriter, r *http.Request, userID int64) {
-	n := queryDays(r)
-	from, to := dayRangeDB(s.DB, n)
-	days, err := db.TrafficSeries(s.DB, from, to, userID, 0)
 	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	prev, err := db.GetTrafficForward(s.DB, id)
+	if err != nil {
+		jsonErr(w, http.StatusNotFound, "流量中转不存在")
+		return
+	}
+	var req trafficForwardReq
+	if err := decodeJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效请求")
+		return
+	}
+	fw := trafficFromReq(req, prev)
+	if err := corecfg.PrepareTrafficForward(s.DB, fw); err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := db.UpdateTrafficForward(s.DB, fw); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ins, err := db.TrafficByInbound(s.DB, from, to, userID)
-	if err != nil {
+	if _, err := corecfg.ProvisionAll(s.DB); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	var billed, cap, usedUp, usedDown int64
-	if u, err := db.GetUser(s.DB, userID); err == nil && u != nil {
-		var pkg *db.Package
-		if u.PackageID != nil {
-			pkg, _ = db.GetPackage(s.DB, *u.PackageID)
-		}
-		billed = db.UserBilledBytes(u, pkg)
-		cap = db.UserLimitBytes(u, pkg)
-		usedUp = u.UsedUp
-		usedDown = u.UsedDown
+	fresh, _ := db.GetTrafficForward(s.DB, fw.ID)
+	if fresh == nil {
+		fresh = fw
 	}
-	jsonOK(w, map[string]any{
-		"from":         from,
-		"to":           to,
-		"days":         db.FillTrafficDays(from, to, days),
-		"inbounds":     ins,
-		"billed_bytes": billed,
-		"traffic_cap":  cap,
-		"used_up":      usedUp,
-		"used_down":    usedDown,
-	})
+	if u := userFromCtx(r.Context()); u != nil {
+		db.AddAudit(s.DB, &u.ID, "forward.update", fresh.Name)
+	}
+	ids := append(db.ServerIDsForTrafficForward(prev), db.ServerIDsForTrafficForward(fresh)...)
+	s.respondAfterApply(w, map[string]any{"forward": fresh}, ids...)
+}
+
+func (s *Server) handleDeleteTrafficForward(w http.ResponseWriter, r *http.Request) {
+	id, err := chiID(r, "id")
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	prev, err := db.GetTrafficForward(s.DB, id)
+	if err != nil {
+		jsonErr(w, http.StatusNotFound, "流量中转不存在")
+		return
+	}
+	ids := db.ServerIDsForTrafficForward(prev)
+	if err := db.DeleteTrafficForward(s.DB, id); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if _, err := corecfg.ProvisionAll(s.DB); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if u := userFromCtx(r.Context()); u != nil {
+		db.AddAudit(s.DB, &u.ID, "forward.delete", prev.Name)
+	}
+	s.respondAfterApply(w, map[string]any{"ok": true}, ids...)
 }

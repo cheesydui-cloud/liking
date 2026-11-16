@@ -52,6 +52,7 @@ func (s *Server) decorateServers(list []*db.Server) {
 		x.CanPushNft = s.Hub.HasCap(x.ID, wsproto.CapNFT)
 		x.CanPushWG = s.Hub.HasCap(x.ID, wsproto.CapWG)
 		x.CanAllowPort = s.Hub.HasCap(x.ID, wsproto.CapAllowPort)
+		x.CanForward = s.Hub.HasCap(x.ID, wsproto.CapForward)
 		if up, down, ok := s.Hub.Live(x.ID); ok {
 			x.NetUpBps = up
 			x.NetDownBps = down
@@ -240,7 +241,8 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.syncServers(id)
+	touch, _ := db.ForwardTouchServers(s.DB, id)
+	s.syncServers(append([]int64{id}, touch...)...)
 	jsonOK(w, map[string]any{"server": srv})
 }
 

@@ -89,6 +89,12 @@ func InboundInUse(d *sql.DB, id int64) error {
 	if err != nil {
 		return err
 	}
+	if msg, err := trafficForwardInboundUse(d, id); err != nil || msg != "" {
+		if err != nil {
+			return err
+		}
+		return inUse(msg)
+	}
 	h, ok := protected[id]
 	if !ok {
 		return nil
@@ -112,6 +118,12 @@ func ServerInUse(d *sql.DB, id int64) error {
 	if err != nil {
 		return err
 	}
+	if msg, err := trafficForwardServerUse(d, id, srv.Name); err != nil || msg != "" {
+		if err != nil {
+			return err
+		}
+		return inUse(msg)
+	}
 	if h := busiestOnServer(protected, id); h != nil {
 		return inUse(fmt.Sprintf("实例「%s」上的节点「%s」还在套餐「%s」里，还有 %d 个客户在用，不能删除", srv.Name, h.InboundName, h.PackageName, h.Customers))
 	}
@@ -133,6 +145,56 @@ func ServerInUse(d *sql.DB, id int64) error {
 		return inUse(fmt.Sprintf("实例「%s」是节点「%s」的家宽出口，还有 %d 个客户在用，不能删除", srv.Name, h.InboundName, h.Customers))
 	}
 	return nil
+}
+
+func trafficForwardInboundUse(d *sql.DB, inboundID int64) (string, error) {
+	var name string
+	err := d.QueryRow(`SELECT name FROM traffic_forwards WHERE landing_inbound_id=? ORDER BY id LIMIT 1`, inboundID).Scan(&name)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(name) == "" {
+		name = "流量中转"
+	}
+	return fmt.Sprintf("节点是流量中转「%s」的落地，不能删除", name), nil
+}
+
+func trafficForwardServerUse(d *sql.DB, serverID int64, serverName string) (string, error) {
+	var name string
+	err := d.QueryRow(`SELECT name FROM traffic_forwards WHERE entry_server_id=? ORDER BY id LIMIT 1`, serverID).Scan(&name)
+	if err != nil && err != sql.ErrNoRows {
+		return "", err
+	}
+	if err == nil {
+		if strings.TrimSpace(name) == "" {
+			name = "流量中转"
+		}
+		return fmt.Sprintf("实例「%s」是流量中转「%s」的入口，不能删除", serverName, name), nil
+	}
+	err = d.QueryRow(`SELECT f.name FROM traffic_forward_hops h JOIN traffic_forwards f ON f.id=h.forward_id WHERE h.server_id=? ORDER BY f.id LIMIT 1`, serverID).Scan(&name)
+	if err != nil && err != sql.ErrNoRows {
+		return "", err
+	}
+	if err == nil {
+		if strings.TrimSpace(name) == "" {
+			name = "流量中转"
+		}
+		return fmt.Sprintf("实例「%s」在流量中转「%s」的路径上，不能删除", serverName, name), nil
+	}
+	err = d.QueryRow(`SELECT f.name FROM traffic_forwards f JOIN inbounds i ON i.id=f.landing_inbound_id WHERE i.server_id=? ORDER BY f.id LIMIT 1`, serverID).Scan(&name)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(name) == "" {
+		name = "流量中转"
+	}
+	return fmt.Sprintf("实例「%s」是流量中转「%s」的落地，不能删除", serverName, name), nil
 }
 
 func packageCustomers(d *sql.DB, packageID int64) (int, error) {

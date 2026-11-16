@@ -11,7 +11,7 @@ export function NodePreviewList({ data, error, loading }) {
   const nodes = asArray(data?.nodes)
   const hidden = asArray(data?.hidden)
   if (!nodes.length && !hidden.length) {
-    return <Empty title="没有节点" hint="套餐还没勾选节点，或节点都不在订阅里。" />
+    return <Empty title="没有节点" hint="套餐还没勾选节点或流量中转，或它们都不在订阅里。" />
   }
   return (
     <div>
@@ -32,6 +32,7 @@ export function NodePreviewList({ data, error, loading }) {
                   <td className="font-medium">
                     {n.name}
                     {n.line_kind === 'chain' ? <span className="line-tag">中转</span> : null}
+                    {n.line_kind === 'traffic' ? <span className="line-tag">流量</span> : null}
                   </td>
                   <td>{n.server_name || '—'}</td>
                   <td className="copy-text">{n.host ? `${n.host}:${n.port}` : '—'}</td>

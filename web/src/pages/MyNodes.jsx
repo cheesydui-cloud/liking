@@ -93,8 +93,9 @@ export default function MyNodes() {
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase()
     return nodes.filter(n => {
-      if (kind === 'direct' && n.line_kind === 'chain') return false
-      if (kind === 'chain' && n.line_kind !== 'chain') return false
+      const forwarded = n.line_kind === 'chain' || n.line_kind === 'traffic'
+      if (kind === 'direct' && forwarded) return false
+      if (kind === 'chain' && !forwarded) return false
       if (!needle) return true
       const hay = [n.name, n.host, n.port, n.profile, n.server_name]
       return hay.some(x => String(x || '').toLowerCase().includes(needle))

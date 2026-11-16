@@ -170,6 +170,9 @@ func (s *Server) handleMeNodes(w http.ResponseWriter, r *http.Request) {
 		starred = loadStarredIDs(s.DB, u.ID)
 	}
 	nodes, hidden := s.listFacingNodes(ids, u, true, starred)
+	extra, extraHidden := s.trafficNodesForUser(u, true)
+	nodes = append(nodes, extra...)
+	hidden = append(hidden, extraHidden...)
 	announce, _ := db.GetSetting(s.DB, "announce")
 	jsonOK(w, map[string]any{
 		"nodes":    nodes,
@@ -245,6 +248,9 @@ func (s *Server) handleUserNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nodes, hidden := s.listFacingNodes(ids, nil, false, nil)
+	extra, extraHidden := s.trafficNodesForUser(u, false)
+	nodes = append(nodes, extra...)
+	hidden = append(hidden, extraHidden...)
 	jsonOK(w, map[string]any{"nodes": nodes, "hidden": hidden})
 }
 
@@ -265,6 +271,9 @@ func (s *Server) handlePackageNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nodes, hidden := s.listFacingNodes(ids, nil, false, nil)
+	extra, extraHidden := s.trafficNodesForPackage(p.ID)
+	nodes = append(nodes, extra...)
+	hidden = append(hidden, extraHidden...)
 	jsonOK(w, map[string]any{"nodes": nodes, "hidden": hidden})
 }
 

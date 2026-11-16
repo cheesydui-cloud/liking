@@ -35,6 +35,31 @@ const emptyForm = {
   network: 'tcp',
   hops: [emptyHop()],
   enabled: true,
+  tf_landing_id: '',
+  tf_landing_dial: '',
+  tf_hops: [],
+}
+
+function emptyTrafficHop() {
+  return { server_id: '', listen_port: '', dial_host: '' }
+}
+
+function trafficPath(fw) {
+  if (!fw) return ''
+  const parts = [`${fw.entry_server_name || '入口'}${fw.entry_port ? `:${fw.entry_port}` : ''}`]
+  for (const h of fw.hops || []) {
+    parts.push(`${h.server_name || '经过'}${h.listen_port ? `:${h.listen_port}` : ''}`)
+  }
+  parts.push(fw.landing_name || '落地')
+  return parts.join(' → ')
+}
+
+function trafficNeedsAgent(fw, serversByID) {
+  const ids = [fw?.entry_server_id, ...(fw?.hops || []).map(h => h.server_id)]
+  return ids.some(id => {
+    const s = serversByID.get(Number(id))
+    return s && s.online && !s.can_forward
+  })
 }
 
 function cloneEntrySettings(inb) {
@@ -194,6 +219,8 @@ function ForwardsPanel() {
   const dialog = useDialog()
   const [servers, setServers] = useState(() => asArray(peekList('servers')))
   const [list, setList] = useState(() => asArray(peekList('inbounds')))
+  const [traffic, setTraffic] = useState([])
+  const [trafficEditId, setTrafficEditId] = useState(0)
   const [certs, setCerts] = useState(() => asArray(peekList('certs')))
   const [profiles, setProfiles] = useState(() => asArray(peekList('profiles')))
   const [ready, setReady] = useState(() => peekList('inbounds') !== undefined)
@@ -210,13 +237,14 @@ function ForwardsPanel() {
   const load = async () => {
     try {
       const g = cacheGen()
-      const [a, b, c, d] = await Promise.all([
-        api.get('/servers'), api.get('/inbounds'), api.get('/certs'), api.get('/profiles'),
+      const [a, b, c, d, e] = await Promise.all([
+        api.get('/servers'), api.get('/inbounds'), api.get('/certs'), api.get('/profiles'), api.get('/traffic-forwards'),
       ])
       setServers(putList('servers', asArray(a.servers), g))
       setList(putList('inbounds', asArray(b.inbounds), g))
       setCerts(putList('certs', asArray(c.certs), g))
       setProfiles(putList('profiles', asArray(d.profiles), g))
+      setTraffic(asArray(e.forwards))
     } catch (e) { toast(e.message, 'error') }
     finally { setReady(true) }
   }
@@ -225,12 +253,14 @@ function ForwardsPanel() {
     return startPoll(async (signal) => {
       const g = cacheGen()
       try {
-        const [a, b] = await Promise.all([
+        const [a, b, e] = await Promise.all([
           api.get('/servers', signal),
           api.get('/inbounds', signal),
+          api.get('/traffic-forwards', signal),
         ])
         setServers(putList('servers', asArray(a.servers), g))
         setList(putList('inbounds', asArray(b.inbounds), g))
+        setTraffic(asArray(e.forwards))
         setPollErr('')
       } catch (e) {
         if (isAbort(e)) return
@@ -257,6 +287,19 @@ function ForwardsPanel() {
     () => list.filter(x => isDirectNode(x) && LAND_PROFILES.includes(x.profile) && Number(x.id) !== Number(editId)),
     [list, editId],
   )
+  const trafficLandings = useMemo(
+    () => list.filter(x => x.profile !== 'port-forward' && x.user_facing !== false && !Number(x.owner_user_id)),
+    [list],
+  )
+  const trafficRows = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return traffic.filter(fw => {
+      if (kindFilter && kindFilter !== 'traffic') return false
+      if (!needle) return true
+      const hay = [fw.name, fw.entry_server_name, fw.entry_host, fw.landing_name, fw.landing_profile, trafficPath(fw)]
+      return hay.some(x => String(x || '').toLowerCase().includes(needle))
+    })
+  }, [traffic, kindFilter, q])
   const protoList = (profiles.length ? profiles : [{ id: f.profile, title: f.profile, desc: '' }]).filter(p => p.id !== 'wireguard' && p.id !== 'port-forward')
 
   const rows = useMemo(() => {
@@ -273,6 +316,7 @@ function ForwardsPanel() {
 
   const reset = () => {
     setEditId(0)
+    setTrafficEditId(0)
     setF(emptyForm)
   }
   const openCreate = () => {
@@ -289,8 +333,29 @@ function ForwardsPanel() {
     setOpen(true)
   }
   const startEdit = (inb) => {
+    setTrafficEditId(0)
     setEditId(inb.id)
     setF(formFromInbound(inb))
+    setOpen(true)
+  }
+  const startEditTraffic = (fw) => {
+    setEditId(0)
+    setTrafficEditId(fw.id)
+    setF({
+      ...emptyForm,
+      kind: 'traffic',
+      name: fw.name || '',
+      server_id: fw.entry_server_id || '',
+      port: fw.entry_port || '',
+      tf_landing_id: fw.landing_inbound_id || '',
+      tf_landing_dial: fw.landing_dial_host || '',
+      tf_hops: (fw.hops || []).map(h => ({
+        server_id: h.server_id || '',
+        listen_port: h.listen_port || '',
+        dial_host: h.dial_host || '',
+      })),
+      enabled: fw.enabled !== false,
+    })
     setOpen(true)
   }
   const closeForm = () => {
@@ -392,8 +457,61 @@ function ForwardsPanel() {
     return body
   }
 
+  const setTfHop = (i, patch) => {
+    const hops = (f.tf_hops || []).map((h, idx) => idx === i ? { ...h, ...patch } : h)
+    setF({ ...f, tf_hops: hops })
+  }
+  const saveTraffic = async () => {
+    if (!Number(f.server_id)) { toast('请选择入口实例', 'error'); return }
+    if (!Number(f.tf_landing_id)) { toast('请选择落地节点', 'error'); return }
+    const checkPort = (raw, label) => {
+      const text = String(raw ?? '').trim()
+      if (text === '') return 0
+      const port = Number(text)
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        toast(`${label}范围 1–65535，或不填则随机`, 'error')
+        return -1
+      }
+      return port
+    }
+    const entryPort = checkPort(f.port, '监听端口')
+    if (entryPort < 0) return
+    const hops = []
+    for (let i = 0; i < (f.tf_hops || []).length; i++) {
+      const h = f.tf_hops[i]
+      if (!Number(h.server_id)) { toast('请选择中间机器', 'error'); return }
+      const port = checkPort(h.listen_port, '中间端口')
+      if (port < 0) return
+      hops.push({ server_id: Number(h.server_id), listen_port: port, dial_host: String(h.dial_host || '').trim() })
+    }
+    const body = {
+      name: String(f.name || '').trim(),
+      enabled: f.enabled !== false,
+      entry_server_id: Number(f.server_id),
+      entry_port: entryPort,
+      landing_inbound_id: Number(f.tf_landing_id),
+      landing_dial_host: String(f.tf_landing_dial || '').trim(),
+      hops,
+    }
+    setBusy(true)
+    try {
+      const d = trafficEditId
+        ? await api.put(`/traffic-forwards/${trafficEditId}`, body)
+        : await api.post('/traffic-forwards', body)
+      if (d.apply_error) toast(d.apply_error, 'error')
+      else toast(trafficEditId ? '已保存。到套餐里勾选这条流量中转，订阅才会带上。' : '已创建。到套餐里勾选这条流量中转，订阅才会带上。')
+      closeForm()
+      load()
+    } catch (err) { toast(err.message, 'error') }
+    finally { setBusy(false) }
+  }
+
   const save = async (e) => {
     e.preventDefault()
+    if (f.kind === 'traffic') {
+      await saveTraffic()
+      return
+    }
     if (cloning) {
       if (!templateId) { toast('请选择要沿用的节点', 'error'); return }
     } else if (!Number(f.server_id)) {
@@ -522,6 +640,47 @@ function ForwardsPanel() {
     })
   }
 
+  const delTraffic = async (fw) => {
+    if (!(await dialog.confirm({ title: '删除流量中转', message: '只停掉转发。落地节点还在。', danger: true }))) return
+    await ops.current.run(`del-tf-${fw.id}`, async () => {
+      try {
+        await api.del(`/traffic-forwards/${fw.id}`)
+        if (trafficEditId === fw.id) closeForm()
+        await load()
+      } catch (err) { toast(err.message, 'error') }
+    })
+  }
+  const toggleTraffic = async (fw) => {
+    const next = !fw.enabled
+    if (!next) {
+      if (!(await dialog.confirm({
+        title: '停用流量中转',
+        message: `将停掉「${fw.name || fw.entry_port}」的转发，在线用户会立刻断开。落地节点不受影响。`,
+        danger: true,
+        okText: '停用',
+      }))) return
+    }
+    await ops.current.run(`tog-tf-${fw.id}`, async () => {
+      try {
+        const d = await api.put(`/traffic-forwards/${fw.id}`, {
+          name: fw.name,
+          enabled: next,
+          entry_server_id: fw.entry_server_id,
+          entry_port: fw.entry_port,
+          landing_inbound_id: fw.landing_inbound_id,
+          landing_dial_host: fw.landing_dial_host || '',
+          hops: (fw.hops || []).map(h => ({
+            server_id: h.server_id,
+            listen_port: h.listen_port,
+            dial_host: h.dial_host || '',
+          })),
+        })
+        if (d.apply_error) toast(d.apply_error, 'error')
+        await load()
+      } catch (err) { toast(err.message, 'error') }
+    })
+  }
+
   const del = async (inb) => {
     if (!(await dialog.confirm({ title: '删除中转', message: '入口会立刻停掉。链式入口会从订阅里消失。原来的节点不受影响。', danger: true }))) return
     await ops.current.run(`del-${inb.id}`, async () => {
@@ -560,7 +719,7 @@ function ForwardsPanel() {
     <div>
       <PageHead
         title="中转"
-        desc="入口加一跳落地。需要时再加跳，最多 5 跳。保存后到套餐里勾选这条入口。"
+        desc="链式和端口中转在入口建节点。流量中转只转发，不在火山和中间机器上建节点。保存后到套餐里勾选。"
         actions={
           <button type="button" className="btn-primary" onClick={openCreate}>
             <Icon name="plus" size={15} /> 新建中转
@@ -568,20 +727,21 @@ function ForwardsPanel() {
         }
       />
       {pollErr ? <div className="alert-row is-warn mb-4">{pollErr}</div> : null}
-      {forwards.length > 0 ? (
+      {forwards.length > 0 || traffic.length > 0 ? (
         <div className="flex flex-col sm:flex-row gap-2 mb-3">
           <SearchInput value={q} onChange={e => setQ(e.target.value)} placeholder="搜索入口 / 落地 / 实例" />
           <select className="input-field toolbar-select" value={kindFilter} onChange={e => setKindFilter(e.target.value)}>
             <option value="">全部类型</option>
             <option value="chain">链式</option>
             <option value="port">端口中转</option>
+            <option value="traffic">流量中转</option>
           </select>
         </div>
       ) : null}
 
       {!ready ? (
         <div className="card overflow-hidden"><SkeletonRows /></div>
-      ) : forwards.length === 0 ? (
+      ) : forwards.length === 0 && traffic.length === 0 ? (
         <div className="card overflow-hidden">
           <Empty title="还没有中转" hint="默认入口加一跳落地。需要时再加跳。端口中转只把本机端口转到别人的 IP。" action={
             <button type="button" className="btn-primary" onClick={openCreate}>
@@ -589,12 +749,58 @@ function ForwardsPanel() {
             </button>
           } />
         </div>
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && trafficRows.length === 0 ? (
         <div className="card overflow-hidden">
           <Empty title="没有匹配的中转" hint="换个关键词或类型。" />
         </div>
       ) : (
         <div className="machine-grid">
+          {trafficRows.map(fw => {
+            const path = trafficPath(fw)
+            const stale = trafficNeedsAgent(fw, serversByID)
+            const title = fw.name || '流量中转'
+            return (
+              <div key={`tf-${fw.id}`} className="machine is-static">
+                <div className="machine-head">
+                  <div className="min-w-0 flex-1">
+                    <div className="machine-title">
+                      <span className="machine-name truncate">{title}</span>
+                      <LineStatus status={fw.enabled === false ? '停用' : '正常'} />
+                    </div>
+                    <div className="machine-host">
+                      <span className="machine-host-addr">{fw.entry_server_name || '—'}{fw.entry_host ? ` · ${fw.entry_host}:${fw.entry_port || ''}` : ''}</span>
+                    </div>
+                  </div>
+                  <div className="machine-toolbar">
+                    <button type="button" className="icon-btn" onClick={() => startEditTraffic(fw)} aria-label="编辑流量中转" title="编辑">
+                      <Icon name="pencil" size={14} />
+                    </button>
+                    <MoreMenu iconOnly items={[
+                      { label: '编辑', onSelect: () => startEditTraffic(fw) },
+                      { label: fw.enabled ? '停用' : '启用', onSelect: () => toggleTraffic(fw) },
+                      { sep: true },
+                      { label: '删除', danger: true, onSelect: () => delTraffic(fw) },
+                    ]} />
+                  </div>
+                </div>
+                <div className="fwd-path">
+                  <div className="path-line">{path}</div>
+                  <div className="text-[11px] text-ink-mut mt-0.5">{protoShort(fw.landing_profile) || '落地'} · 流量在落地节点计费</div>
+                </div>
+                <div className="machine-metrics">
+                  <Metric label="类型" value="流量中转" plain />
+                  <Metric label="经过" value={String((fw.hops || []).length)} />
+                  <Metric label="落地" value={fw.landing_name || '—'} plain />
+                  <Metric label="入口" value={fw.entry_server_name || '—'} plain />
+                </div>
+                <div className="machine-foot">
+                  <span className="fwd-probe-note" title={stale ? '入口或中间机器的 Agent 还不能转发' : '订阅地址是入口，协议和账号用落地节点的'}>
+                    {stale ? 'Agent 还不能转发，升级后再用' : '订阅地址是入口'}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
           {rows.map(inb => {
             const k = forwardKind(inb)
             const n = k === 'chain' ? pathHops(inb).length : 0
@@ -670,11 +876,11 @@ function ForwardsPanel() {
         )}
       >
         <form id="fwd-form" onSubmit={save} className="space-y-3">
-          <Field label="类型" hint={editId ? '创建后不能改类型' : '链式：用户连入口，再按跳走。端口中转没有用户。'}>
+          <Field label="类型" hint={editId || trafficEditId ? '创建后不能改类型' : f.kind === 'traffic' ? '入口和中间机器只转发，不建节点。订阅地址是入口，协议和账号用落地节点的。' : '链式：用户连入口，再按跳走。端口中转没有用户。'}>
             <select
               className="input-field"
               value={f.kind}
-              disabled={!!editId}
+              disabled={!!editId || !!trafficEditId}
               onChange={e => {
                 const kind = e.target.value
                 setF({ ...f, kind, hops: kind === 'chain' && (!f.hops || !f.hops.length) ? [emptyHop()] : f.hops })
@@ -682,8 +888,80 @@ function ForwardsPanel() {
             >
               <option value="chain">链式中转</option>
               <option value="port">端口中转</option>
+              <option value="traffic">流量中转</option>
             </select>
           </Field>
+          {f.kind === 'traffic' ? (
+            <>
+              <Field label="名称" hint="可留空，按路径命名">
+                <input className="input-field" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="上海火山 → 沪日 IX → 美国家宽" />
+              </Field>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <Field label="入口实例" hint="订阅用这台机器的公网地址。">
+                  <select className="input-field" value={f.server_id} onChange={e => setF({ ...f, server_id: e.target.value })} required>
+                    <option value="">选择实例</option>
+                    {servers.map(s => <option key={s.id} value={s.id}>{s.name}{s.public_host ? ` · ${s.public_host}` : ''}</option>)}
+                  </select>
+                </Field>
+                <Field label="监听端口" hint="留空则在这台机器的端口区间里随机。">
+                  <input className="input-field font-mono tabular-nums" value={f.port} onChange={e => setF({ ...f, port: e.target.value })} placeholder={selectedServer ? `随机 ${formatPortRange(selectedServer)}` : '随机'} inputMode="numeric" />
+                </Field>
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-[12px] font-medium text-ink-soft">经过</div>
+                    <div className="text-[12px] text-ink-mut mt-0.5">可以不加。上一台连过来时，默认用公网地址。专线地址填在「给上一台连的地址」。</div>
+                  </div>
+                </div>
+                {(f.tf_hops || []).map((h, i) => (
+                  <div key={i} className="space-y-3 pt-3" style={{ borderTop: '1px solid var(--color-line-soft)' }}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-[12px] font-medium text-ink-soft">第 {i + 1} 台</div>
+                      <button type="button" className="btn-ghost px-2 text-[12px]" onClick={() => setF({ ...f, tf_hops: f.tf_hops.filter((_, idx) => idx !== i) })}>去掉</button>
+                    </div>
+                    <Field label="实例">
+                      <select className="input-field" value={h.server_id} onChange={e => setTfHop(i, { server_id: e.target.value })}>
+                        <option value="">选择实例</option>
+                        {servers.map(s => <option key={s.id} value={s.id}>{s.name}{s.public_host ? ` · ${s.public_host}` : ''}</option>)}
+                      </select>
+                    </Field>
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <Field label="监听端口" hint="留空则随机">
+                        <input className="input-field font-mono tabular-nums" value={h.listen_port} onChange={e => setTfHop(i, { listen_port: e.target.value })} inputMode="numeric" />
+                      </Field>
+                      <Field label="给上一台连的地址" hint="留空用这台的公网地址">
+                        <input className="input-field font-mono" value={h.dial_host} onChange={e => setTfHop(i, { dial_host: e.target.value })} placeholder="专线 IP 或域名" />
+                      </Field>
+                    </div>
+                  </div>
+                ))}
+                {(f.tf_hops || []).length < 4 ? (
+                  <button type="button" className="btn-ghost" onClick={() => setF({ ...f, tf_hops: [...(f.tf_hops || []), emptyTrafficHop()] })}>
+                    <Icon name="plus" size={15} /> 增加一台
+                  </button>
+                ) : (
+                  <div className="text-[11.5px] text-ink-mut">最多 4 台中间机器</div>
+                )}
+              </div>
+              <Field label="落地节点" hint="协议、账号和证书都在这个节点上。Hysteria2 和 WireGuard 也可以。">
+                <select className="input-field" value={f.tf_landing_id} onChange={e => setF({ ...f, tf_landing_id: e.target.value })} required>
+                  <option value="">选择节点</option>
+                  {trafficLandings.map(x => (
+                    <option key={x.id} value={x.id}>{x.server_name} / {x.name} · {protoShort(x.profile)} :{x.port}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="给上一台连的地址" hint="留空用落地机器的公网地址。家宽只能从专线连时，填专线地址。">
+                <input className="input-field font-mono" value={f.tf_landing_dial} onChange={e => setF({ ...f, tf_landing_dial: e.target.value })} placeholder="专线 IP 或域名" />
+              </Field>
+              {trafficLandings.length === 0 ? (
+                <div className="notice">还没有落地节点。先到「节点」在家宽机器上建一条。</div>
+              ) : null}
+              <div className="notice">保存后到套餐里勾选这条流量中转，订阅才会把地址改成入口。不会自动勾选。落地节点本身要另外勾选，才会单独出现在订阅里。</div>
+            </>
+          ) : null}
+          {f.kind !== 'traffic' ? (<>
           {!editId && f.kind === 'chain' ? (
             <div>
               <div className="text-[12px] font-medium text-ink-soft mb-1.5">入口</div>
@@ -901,6 +1179,7 @@ function ForwardsPanel() {
           {f.kind === 'chain' ? (
             <div className="notice">保存后到套餐里勾选这条入口，订阅才会带上。不会自动勾选。</div>
           ) : null}
+          </>) : null}
         </form>
       </Modal>
     </div>

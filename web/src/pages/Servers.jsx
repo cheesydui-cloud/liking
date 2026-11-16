@@ -118,6 +118,8 @@ export default function Servers() {
   const [allowPort, setAllowPort] = useState('')
   const [allowProto, setAllowProto] = useState('both')
   const [loadErr, setLoadErr] = useState('')
+  const [upgradeBusy, setUpgradeBusy] = useState(false)
+  const [upgradeReport, setUpgradeReport] = useState(null)
   const listSeq = useRef(0)
   const loadRef = useRef(() => {})
   const order = useCardOrder('servers', () => loadRef.current())
@@ -523,6 +525,36 @@ export default function Servers() {
     } catch (e) { toast(e.message, 'error') }
   }
 
+  const upgradeTargets = useMemo(
+    () => list.filter(s => s.online && s.needs_upgrade && !s.needs_reinstall),
+    [list],
+  )
+
+  const upgradeAll = async () => {
+    if (upgradeBusy) return
+    if (!upgradeTargets.length) {
+      toast('没有可升级的实例。离线、未安装和版本太旧的需要单独处理。')
+      return
+    }
+    if (!(await dialog.confirm({
+      title: '升级全部实例',
+      message: `将 ${upgradeTargets.length} 台在线实例的 Agent 升到面板版本。已是当前版本、离线、未安装和版本太旧的会跳过。几台一起升，升级后 Agent 会自动重启，线路会断几十秒。`,
+      okText: '升级',
+    }))) return
+    setUpgradeBusy(true)
+    setUpgradeReport(null)
+    try {
+      const d = await api.post('/servers/upgrade-agents')
+      setUpgradeReport(d)
+      if (reloadTimer.current) clearTimeout(reloadTimer.current)
+      reloadTimer.current = setTimeout(load, 2500)
+    } catch (e) {
+      toast(e.message, 'error')
+    } finally {
+      setUpgradeBusy(false)
+    }
+  }
+
   const upgradeAgent = async (s) => {
     if (s.needs_reinstall) {
       toast('该 Agent 版本太旧，不支持远程升级。请用安装命令重装一次', 'error')
@@ -603,9 +635,16 @@ export default function Servers() {
       <PageHead
         title="实例"
         actions={
-          <button type="button" className="btn-primary" onClick={openCreate}>
-            <Icon name="plus" size={15} /> 添加实例
-          </button>
+          <>
+            {list.length > 0 ? (
+              <button type="button" className="btn-ghost" disabled={upgradeBusy || busyId !== 0} onClick={upgradeAll}>
+                {upgradeBusy ? '升级中…' : (upgradeTargets.length ? `升级全部 ${upgradeTargets.length}` : '升级全部')}
+              </button>
+            ) : null}
+            <button type="button" className="btn-primary" onClick={openCreate}>
+              <Icon name="plus" size={15} /> 添加实例
+            </button>
+          </>
         }
       />
       {pollErr ? <div className="alert-row is-warn mb-4">{pollErr}</div> : null}
@@ -658,6 +697,7 @@ export default function Servers() {
             const expired = isExpired(s.expires_at)
             const expSoon = !expired && s.expires_at && Number(s.expires_at) * 1000 < Date.now() + 7 * 86400 * 1000
             const quotaPct = s.traffic_limit ? Math.min(100, Math.floor(used * 100 / Number(s.traffic_limit))) : 0
+            const cardBusy = busyId === s.id || upgradeBusy
             return (
               <div key={s.id} className={`machine ${machineTone(s)}${drag.dragging ? ' is-sorting' : ''}`} {...drag.itemProps}>
                 <div className="machine-head">
@@ -681,7 +721,7 @@ export default function Servers() {
                   <div className="machine-toolbar">
                     <DragHandle drag={drag} />
                     {s.online && !fresh ? (
-                      <button type="button" className="row-act" disabled={busyId === s.id} onClick={() => sync(s.id)}>同步</button>
+                      <button type="button" className="row-act" disabled={cardBusy} onClick={() => sync(s.id)}>同步</button>
                     ) : null}
                     <MoreMenu iconOnly items={[
                       { label: '安装命令', onSelect: () => showInstall(s.id) },
@@ -691,20 +731,20 @@ export default function Servers() {
                       {
                         label: '放行端口',
                         hint: s.can_allow_port ? '放行这台机器自己的防火墙' : (s.online ? '需先升级 Agent' : '需在线'),
-                        disabled: !s.online || busyId === s.id,
+                        disabled: !s.online || cardBusy,
                         onSelect: () => openAllow(s),
                       },
                       { label: '推送核心', hint: s.can_push_cores ? '安装或卸载 Xray / sing-box / Mita' : (s.online ? '需先升级 Agent' : '需在线'), onSelect: () => openCores(s) },
                       {
                         label: '安装 WireGuard',
                         hint: s.can_push_wg ? '安装 wg 和 wg-quick。已装则跳过' : (s.online ? '需先升级 Agent' : '需在线'),
-                        disabled: !s.online || busyId === s.id,
+                        disabled: !s.online || cardBusy,
                         onSelect: () => pushWG(s),
                       },
                       {
                         label: '安装 nftables',
                         hint: s.can_push_nft ? '拒绝中国 IP 需要。已装则跳过' : (s.online ? '需先升级 Agent' : '需在线'),
-                        disabled: !s.online || busyId === s.id,
+                        disabled: !s.online || cardBusy,
                         onSelect: () => pushNft(s),
                       },
                       { label: '流量上限', onSelect: () => saveLimit(s) },
@@ -717,12 +757,12 @@ export default function Servers() {
                       {
                         label: '一键升级',
                         hint: s.needs_reinstall ? '版本太旧，将打开安装命令' : (s.online ? '升到面板版本并重启' : '需在线'),
-                        disabled: !s.online || busyId === s.id,
+                        disabled: !s.online || cardBusy,
                         onSelect: () => upgradeAgent(s),
                       },
                       { label: '轮换令牌', onSelect: () => rotateToken(s) },
                       { sep: true },
-                      { label: '一键卸载', danger: true, disabled: !s.online || busyId === s.id, hint: s.needs_reinstall ? '版本太旧，无法远程卸载' : '同机不删面板', onSelect: () => uninstallAgent(s) },
+                      { label: '一键卸载', danger: true, disabled: !s.online || cardBusy, hint: s.needs_reinstall ? '版本太旧，无法远程卸载' : '同机不删面板', onSelect: () => uninstallAgent(s) },
                       { label: '删除实例', danger: true, onSelect: () => del(s.id) },
                     ]} />
                   </div>
@@ -755,14 +795,14 @@ export default function Servers() {
                     <div className="machine-fault">{s.last_error}</div>
                     {/nftables/i.test(s.last_error) ? (
                       <div className="px-3 pb-2">
-                        <button type="button" className="btn-primary h-8 w-full" disabled={busyId === s.id} onClick={() => nftCta(s)}>
+                        <button type="button" className="btn-primary h-8 w-full" disabled={cardBusy} onClick={() => nftCta(s)}>
                           {busyId === s.id ? '处理中…' : (s.can_push_nft ? '安装 nftables' : '先升级 Agent')}
                         </button>
                       </div>
                     ) : null}
                     {/wireguard-tools/i.test(s.last_error) ? (
                       <div className="px-3 pb-2">
-                        <button type="button" className="btn-primary h-8 w-full" disabled={busyId === s.id} onClick={() => wgCta(s)}>
+                        <button type="button" className="btn-primary h-8 w-full" disabled={cardBusy} onClick={() => wgCta(s)}>
                           {busyId === s.id ? '处理中…' : (s.can_push_wg ? '安装 WireGuard' : '先升级 Agent')}
                         </button>
                       </div>
@@ -778,7 +818,7 @@ export default function Servers() {
                 ) : null}
                 {!fresh && s.online && s.needs_upgrade && !s.needs_reinstall && !(/nftables|wireguard-tools/i.test(s.last_error || '')) ? (
                   <div className="px-3 pb-2">
-                    <button type="button" className="btn-primary h-8 w-full" disabled={busyId === s.id} onClick={() => upgradeAgent(s)}>
+                    <button type="button" className="btn-primary h-8 w-full" disabled={cardBusy} onClick={() => upgradeAgent(s)}>
                       {busyId === s.id ? '升级中…' : '一键升级'}
                     </button>
                   </div>
@@ -1057,6 +1097,42 @@ export default function Servers() {
           </>
         )}
       </Modal>
+      <Modal
+        open={upgradeBusy || !!upgradeReport}
+        title={upgradeReport ? '升级结果' : '正在升级'}
+        onClose={() => { if (!upgradeBusy) setUpgradeReport(null) }}
+        footer={upgradeReport ? <button type="button" className="btn-ghost" onClick={() => setUpgradeReport(null)}>关闭</button> : null}
+      >
+        {upgradeReport ? (
+          <>
+            <p className="text-[13px] mb-3">
+              已升级 {upgradeReport.upgraded || 0} 台
+              {upgradeReport.failed ? `，失败 ${upgradeReport.failed} 台` : ''}
+              {upgradeReport.skipped ? `，跳过 ${upgradeReport.skipped} 台` : ''}。
+            </p>
+            <UpgradeReportList report={upgradeReport} />
+          </>
+        ) : (
+          <p className="text-[13px] text-ink-mut leading-relaxed">正在把在线实例升到面板版本。请不要关闭页面。升级后 Agent 会自动重启，线路会断几十秒。</p>
+        )}
+      </Modal>
+    </div>
+  )
+}
+
+function UpgradeReportList({ report }) {
+  const rows = (report?.results || []).filter(row => row.status !== 'skipped' || row.code === 'agent_too_old' || row.code === 'offline')
+  if (!rows.length) return null
+  return (
+    <div className="max-h-[360px] overflow-auto">
+      {rows.map(row => (
+        <div key={row.id} className="flex items-baseline gap-2 py-2 border-b border-[var(--color-line-soft)] min-w-0">
+          <span className="text-[13px] font-medium shrink-0">{row.name}</span>
+          <span className={`text-[12px] truncate ${row.status === 'failed' ? 'text-[var(--color-danger)]' : 'text-ink-mut'}`}>
+            {row.status === 'upgraded' ? '已升级，正在重启' : (row.error || row.status)}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }

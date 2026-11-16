@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"liking/internal/corecfg"
@@ -13,6 +15,37 @@ import (
 	"liking/internal/version"
 	"liking/internal/wsproto"
 )
+
+// upgradeAllParallel keeps a few agents downloading at once. Unbounded
+// parallel downloads share the panel uplink and can all hit the RPC timeout.
+const upgradeAllParallel = 4
+
+// locateAgentBinary is replaced in tests so a batch upgrade can run without
+// a real release binary beside the test process.
+var locateAgentBinary = findAgentBinary
+
+type agentUpgradeError struct {
+	status int
+	msg    string
+	code   string
+}
+
+func (e *agentUpgradeError) Error() string { return e.msg }
+
+func failUpgrade(status int, msg, code string) error {
+	if status == 0 {
+		status = http.StatusBadRequest
+	}
+	return &agentUpgradeError{status: status, msg: msg, code: code}
+}
+
+type agentUpgradeRow struct {
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+	Code   string `json:"code,omitempty"`
+}
 
 func (s *Server) handleUpgradeAgent(w http.ResponseWriter, r *http.Request) {
 	id, err := chiID(r, "id")
@@ -25,14 +58,36 @@ func (s *Server) handleUpgradeAgent(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "服务器不存在")
 		return
 	}
-	osName, arch, ok := s.Hub.ConnMeta(id)
-	if !ok {
-		jsonErr(w, http.StatusBadRequest, "Agent 不在线，无法远程升级")
+	u := userFromCtx(r.Context())
+	if err := s.upgradeOnlineAgent(&u.ID, srv); err != nil {
+		writeUpgradeErr(w, err)
 		return
 	}
-	if !version.CanRemoteUpgrade(srv.AgentVer) {
-		jsonErrExtra(w, http.StatusBadRequest, "该 Agent 版本太旧，不支持远程升级。请复制安装命令在机器上执行一次", map[string]any{"code": "agent_too_old"})
+	jsonOK(w, map[string]any{"ok": true, "version": version.Version})
+}
+
+func writeUpgradeErr(w http.ResponseWriter, err error) {
+	op, ok := err.(*agentUpgradeError)
+	if !ok {
+		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if op.code != "" {
+		jsonErrExtra(w, op.status, op.msg, map[string]any{"code": op.code})
+		return
+	}
+	jsonErr(w, op.status, op.msg)
+}
+
+// upgradeOnlineAgent pushes the panel's agent binary and waits for the ack.
+// It audits a successful upgrade. Callers decide which machines are eligible.
+func (s *Server) upgradeOnlineAgent(actorID *int64, srv *db.Server) error {
+	osName, arch, ok := s.Hub.ConnMeta(srv.ID)
+	if !ok {
+		return failUpgrade(http.StatusBadRequest, "Agent 不在线，无法远程升级", "offline")
+	}
+	if !version.CanRemoteUpgrade(srv.AgentVer) {
+		return failUpgrade(http.StatusBadRequest, "该 Agent 版本太旧，不支持远程升级。请复制安装命令在机器上执行一次", "agent_too_old")
 	}
 	if osName == "" {
 		osName = srv.OS
@@ -44,34 +99,28 @@ func (s *Server) handleUpgradeAgent(w http.ResponseWriter, r *http.Request) {
 		osName = "linux"
 	}
 	arch = normalizeArch(arch)
-	p := findAgentBinary(osName, arch)
+	p := locateAgentBinary(osName, arch)
 	if p == "" {
-		jsonErr(w, http.StatusBadRequest, "面板没有对应架构的 agent 二进制。请在面板机再执行 liking-upgrade，确认有 sha256: OK (liking-agent-linux-"+arch+")")
-		return
+		return failUpgrade(http.StatusBadRequest, "面板没有对应架构的 agent 二进制。请在面板机再执行 liking-upgrade，确认有 sha256: OK (liking-agent-linux-"+arch+")", "")
 	}
 	match, err := agentBinaryHasVersion(p, version.Version)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "读取 agent 失败")
-		return
+		return failUpgrade(http.StatusInternalServerError, "读取 agent 失败", "")
 	}
 	if !match {
-		jsonErr(w, http.StatusBadRequest, "面板旁边的 agent 文件不是 "+version.Version+"。请在面板机再执行 liking-upgrade，确认有 sha256: OK (liking-agent-linux-"+arch+") 后再点一键升级")
-		return
+		return failUpgrade(http.StatusBadRequest, "面板旁边的 agent 文件不是 "+version.Version+"。请在面板机再执行 liking-upgrade，确认有 sha256: OK (liking-agent-linux-"+arch+") 后再点一键升级", "")
 	}
 	sum, err := sha256Path(p)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "计算校验失败")
-		return
+		return failUpgrade(http.StatusInternalServerError, "计算校验失败", "")
 	}
-	dl := agentBinDownloadURL(osName, arch)
-	raw, err := s.Hub.SendRPC(id, wsproto.TypeUpgrade, wsproto.Upgrade{
+	raw, err := s.Hub.SendRPC(srv.ID, wsproto.TypeUpgrade, wsproto.Upgrade{
 		Version: version.Version,
 		SHA256:  sum,
-		URL:     dl,
+		URL:     agentBinDownloadURL(osName, arch),
 	}, 3*time.Minute)
 	if err != nil {
-		jsonErr(w, http.StatusBadRequest, err.Error())
-		return
+		return failUpgrade(http.StatusBadRequest, err.Error(), "")
 	}
 	var ack wsproto.UpgradeAck
 	_ = json.Unmarshal(raw, &ack)
@@ -80,12 +129,79 @@ func (s *Server) handleUpgradeAgent(w http.ResponseWriter, r *http.Request) {
 		if msg == "" {
 			msg = "升级被拒绝"
 		}
-		jsonErr(w, http.StatusBadRequest, msg)
+		return failUpgrade(http.StatusBadRequest, msg, "")
+	}
+	db.AddAudit(s.DB, actorID, "agent.upgrade", srv.Name+" -> "+version.Version)
+	return nil
+}
+
+func (s *Server) handleUpgradeAgents(w http.ResponseWriter, r *http.Request) {
+	list, err := db.ListServers(s.DB)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.reconcileOnline(list)
+	rows := make([]agentUpgradeRow, len(list))
+	var jobs []int
+	for i, srv := range list {
+		rows[i] = agentUpgradeRow{ID: srv.ID, Name: srv.Name, Status: "skipped"}
+		switch {
+		case srv.Online != 1:
+			rows[i].Error = "离线"
+			rows[i].Code = "offline"
+		case !version.CanRemoteUpgrade(srv.AgentVer):
+			rows[i].Error = "版本太旧，请用安装命令重装"
+			rows[i].Code = "agent_too_old"
+		case srv.AgentVer == version.Version:
+			rows[i].Error = "已是当前版本"
+			rows[i].Code = "current"
+		default:
+			jobs = append(jobs, i)
+		}
+	}
 	u := userFromCtx(r.Context())
-	db.AddAudit(s.DB, &u.ID, "agent.upgrade", srv.Name+" -> "+version.Version)
-	jsonOK(w, map[string]any{"ok": true, "version": version.Version})
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, upgradeAllParallel)
+	for _, i := range jobs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			srv := list[i]
+			row := agentUpgradeRow{ID: srv.ID, Name: srv.Name, Status: "upgraded"}
+			if err := s.upgradeOnlineAgent(&u.ID, srv); err != nil {
+				row.Status = "failed"
+				row.Error = err.Error()
+				if op, ok := err.(*agentUpgradeError); ok {
+					row.Code = op.code
+				}
+			}
+			rows[i] = row
+		}(i)
+	}
+	wg.Wait()
+	upgraded, failed, skipped := 0, 0, 0
+	for _, row := range rows {
+		switch row.Status {
+		case "upgraded":
+			upgraded++
+		case "failed":
+			failed++
+		default:
+			skipped++
+		}
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+	jsonOK(w, map[string]any{
+		"ok":       true,
+		"version":  version.Version,
+		"upgraded": upgraded,
+		"failed":   failed,
+		"skipped":  skipped,
+		"results":  rows,
+	})
 }
 
 func (s *Server) handleUninstallAgent(w http.ResponseWriter, r *http.Request) {

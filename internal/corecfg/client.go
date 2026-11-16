@@ -21,6 +21,11 @@ func ProvisionUser(d *sql.DB, u *db.User) ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
+	landings, err := db.AllLandingIDsForUser(d, u)
+	if err != nil {
+		return nil, err
+	}
+	ids = mergeIDs(ids, landings)
 	existing, err := db.ListClientsByUser(d, u.ID)
 	if err != nil {
 		return nil, err
@@ -224,4 +229,20 @@ func ProvisionAll(d *sql.DB) ([]int64, error) {
 
 func IsRelayEmail(email string) bool {
 	return strings.HasPrefix(email, "relay.")
+}
+
+func mergeIDs(a, b []int64) []int64 {
+	seen := map[int64]struct{}{}
+	out := make([]int64, 0, len(a)+len(b))
+	for _, id := range append(append([]int64{}, a...), b...) {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }

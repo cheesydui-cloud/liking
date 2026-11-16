@@ -148,6 +148,17 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 	if raw, err := json.Marshal(b.Apply.RejectCN); err == nil {
 		sum.Write(raw)
 	}
+	rules, err := trafficRules(d, serverID)
+	if err != nil {
+		return nil, err
+	}
+	if rules == nil {
+		rules = []wsproto.ForwardRule{}
+	}
+	b.Apply.Forwards = rules
+	if raw, err := json.Marshal(rules); err == nil {
+		sum.Write(raw)
+	}
 	b.Rev = hex.EncodeToString(sum.Sum(nil))[:16]
 	b.Apply.Rev = b.Rev
 	return b, nil

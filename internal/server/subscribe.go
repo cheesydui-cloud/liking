@@ -65,7 +65,7 @@ func (s *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body)
 	default:
-		body, err := buildURIList(s.DB, clients, over)
+		body, err := buildURIList(s.DB, u, clients, over)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -197,20 +197,14 @@ func detectSubFormat(ua string) string {
 	}
 }
 
-func buildURIList(d *sql.DB, clients []*db.Client, over map[int64]bool) (string, error) {
+func buildURIList(d *sql.DB, u *db.User, clients []*db.Client, over map[int64]bool) (string, error) {
+	items, err := collectSubItems(d, u, clients, over)
+	if err != nil {
+		return "", err
+	}
 	var lines []string
-	for _, c := range clients {
-		if c == nil || !c.Enabled {
-			continue
-		}
-		in, err := db.GetInbound(d, c.InboundID)
-		if err != nil {
-			continue
-		}
-		if !inboundLive(d, in, over) {
-			continue
-		}
-		uri, err := corecfg.ShareURI(in, c)
+	for _, item := range items {
+		uri, err := corecfg.ShareURI(item.in, item.c)
 		if err != nil {
 			continue
 		}
@@ -220,20 +214,14 @@ func buildURIList(d *sql.DB, clients []*db.Client, over map[int64]bool) (string,
 }
 
 func buildClash(d *sql.DB, u *db.User, clients []*db.Client, over map[int64]bool) (string, error) {
+	items, err := collectSubItems(d, u, clients, over)
+	if err != nil {
+		return "", err
+	}
 	var names []string
 	var b strings.Builder
-	for _, c := range clients {
-		if c == nil || !c.Enabled {
-			continue
-		}
-		in, err := db.GetInbound(d, c.InboundID)
-		if err != nil {
-			continue
-		}
-		if !inboundLive(d, in, over) {
-			continue
-		}
-		name, yaml, err := corecfg.ClashProxyYAML(in, c)
+	for _, item := range items {
+		name, yaml, err := corecfg.ClashProxyYAML(item.in, item.c)
 		if err != nil {
 			continue
 		}
@@ -263,20 +251,15 @@ func subRuleNames(d *sql.DB, u *db.User) []string {
 }
 
 func buildSingboxSub(d *sql.DB, u *db.User, clients []*db.Client, over map[int64]bool) ([]byte, error) {
+	items, err := collectSubItems(d, u, clients, over)
+	if err != nil {
+		return nil, err
+	}
 	var tags []string
 	var outs []any
 	var endpoints []any
-	for _, c := range clients {
-		if c == nil || !c.Enabled {
-			continue
-		}
-		in, err := db.GetInbound(d, c.InboundID)
-		if err != nil {
-			continue
-		}
-		if !inboundLive(d, in, over) {
-			continue
-		}
+	for _, item := range items {
+		in, c := item.in, item.c
 		ob, err := corecfg.SingboxOutbound(in, c)
 		if err != nil {
 			if errors.Is(err, corecfg.ErrSkip) {
