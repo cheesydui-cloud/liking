@@ -1,6 +1,7 @@
 package corecfg
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -91,6 +92,30 @@ func TestChainPathTags(t *testing.T) {
 	}
 	if p2[0].Share == nil || p2[0].Share.Scheme != "socks5" {
 		t.Fatalf("share %+v", p2[0].Share)
+	}
+}
+
+func TestRelayUsersSortedByInboundID(t *testing.T) {
+	landID := int64(1)
+	land := &db.Inbound{ID: landID, Enabled: true, Profile: ProfileVLESSReality}
+	byID := map[int64]*db.Inbound{
+		landID: land,
+		30:     {ID: 30, Enabled: true, ExitInboundID: &landID, Settings: `{"relay_uuid":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"}`},
+		4:      {ID: 4, Enabled: true, ExitInboundID: &landID, Settings: `{"relay_uuid":"11111111-1111-4111-8111-111111111111"}`},
+		12:     {ID: 12, Enabled: true, Settings: `{"hops":[{"inbound_id":1,"relay_uuid":"22222222-2222-4222-8222-222222222222"}]}`},
+		7:      {ID: 7, Enabled: false, ExitInboundID: &landID, Settings: `{"relay_uuid":"33333333-3333-4333-8333-333333333333"}`},
+	}
+	for i := 0; i < 40; i++ {
+		users := relayUsers(land, byID)
+		var emails []string
+		for _, u := range users {
+			m, _ := u.(map[string]any)
+			emails = append(emails, fmt.Sprint(m["email"]))
+		}
+		got := strings.Join(emails, ",")
+		if got != "relay.i4,relay.i12.h0,relay.i30" {
+			t.Fatalf("try %d: %s", i, got)
+		}
 	}
 }
 

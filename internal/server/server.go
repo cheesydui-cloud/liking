@@ -25,6 +25,7 @@ type Server struct {
 	stop         chan struct{}
 	stopOnce     sync.Once
 	pushMu       sync.Map // int64 -> *sync.Mutex
+	pushForce    sync.Map // int64 -> struct{}{}, reconnect must push even if rev matches
 	kickMu       sync.Mutex
 	kickWant     map[int64]bool
 	kickRun      map[int64]bool
@@ -67,7 +68,15 @@ func New(d *sql.DB) (*Server, error) {
 		}
 		s.provisionAndSyncUser(u)
 	}
-	hub.Redispatch = func(ids []int64) { s.syncServers(ids...) }
+	hub.Redispatch = func(ids []int64) {
+		for _, id := range ids {
+			if id == 0 {
+				continue
+			}
+			s.pushForce.Store(id, struct{}{})
+		}
+		s.syncServers(ids...)
+	}
 	go s.enforceLoop()
 	go s.certRenewLoop()
 	go s.backupLoop()

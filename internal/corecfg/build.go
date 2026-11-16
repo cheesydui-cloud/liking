@@ -59,6 +59,11 @@ func Build(d *sql.DB, serverID int64) (*Bundle, error) {
 	// landing server we must see every chain entry pointing here — ListInbounds
 	// already loaded them.
 
+	for _, in := range ins {
+		if err := persistSocksHold(d, in); err != nil {
+			return nil, err
+		}
+	}
 	speeds := loadUserSpeeds(d, clients)
 	denies := loadUserSiteDenies(d, clients)
 	apiPort := pickAPIPort(ins, XrayAPIPort)

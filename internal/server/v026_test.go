@@ -177,6 +177,27 @@ func TestLoginLimiterPrunesEmpty(t *testing.T) {
 	}
 }
 
+func TestSkipUnchangedApply(t *testing.T) {
+	if !skipUnchangedApply(false, true, "abc", "abc", "") {
+		t.Fatal("matching rev should skip")
+	}
+	if skipUnchangedApply(true, true, "abc", "abc", "") {
+		t.Fatal("reconnect must push")
+	}
+	if skipUnchangedApply(false, false, "abc", "abc", "") {
+		t.Fatal("offline must not skip the rev write")
+	}
+	if skipUnchangedApply(false, true, "abc", "abc", "boom") {
+		t.Fatal("failed apply must retry")
+	}
+	if skipUnchangedApply(false, true, "", "abc", "") {
+		t.Fatal("empty stored rev must push")
+	}
+	if skipUnchangedApply(false, true, "old", "new", "") {
+		t.Fatal("changed rev must push")
+	}
+}
+
 func TestReconcileOnConnectPushesMatchingRev(t *testing.T) {
 	d, err := db.Open(":memory:")
 	if err != nil {

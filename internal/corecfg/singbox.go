@@ -1,6 +1,7 @@
 package corecfg
 
 import (
+	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -310,6 +311,44 @@ func singSocksInbound(in *db.Inbound, clients []*db.Client, byID map[int64]*db.I
 		"listen_port": in.Port,
 		"users":       users,
 	}, nil
+}
+
+func socksHoldReady(st Settings) bool {
+	u := strings.TrimSpace(st.String("hold_user"))
+	p := strings.TrimSpace(st.String("hold_pass"))
+	return u != "" && p != "" && !(u == "hold" && p == "hold")
+}
+
+// persistSocksHold writes a one-time hold account. Generating it inside Build
+// would change sing-box JSON on every sync and restart the process.
+func persistSocksHold(d *sql.DB, in *db.Inbound) error {
+	if d == nil || in == nil || in.ID == 0 || !in.Enabled || in.Profile != ProfileSOCKS5 {
+		return nil
+	}
+	st := ParseSettings(in.Settings)
+	if socksHoldReady(st) {
+		return nil
+	}
+	if strings.TrimSpace(st.String("hold_user")) == "" || st.String("hold_user") == "hold" {
+		id, err := RandomHex(8)
+		if err != nil {
+			return err
+		}
+		st["hold_user"] = "hold." + id
+	}
+	if strings.TrimSpace(st.String("hold_pass")) == "" || st.String("hold_pass") == "hold" {
+		pw, err := RandomHex(16)
+		if err != nil {
+			return err
+		}
+		st["hold_pass"] = pw
+	}
+	raw, err := st.Marshal()
+	if err != nil {
+		return err
+	}
+	in.Settings = raw
+	return db.UpdateInbound(d, in)
 }
 
 func appendSocksHold(users []any, st Settings) ([]any, error) {

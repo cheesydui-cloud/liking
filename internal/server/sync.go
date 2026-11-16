@@ -27,6 +27,16 @@ func (s *Server) pushServer(id int64) error {
 		_ = db.SetServerApplyError(s.DB, id, err)
 		return err
 	}
+	storedRev, lastErr := "", ""
+	if srv, gerr := db.GetServer(s.DB, id); gerr == nil && srv != nil {
+		storedRev, lastErr = srv.ConfigRev, srv.LastError
+	}
+	_, force := s.pushForce.LoadAndDelete(id)
+	// Unchanged config must not be pushed. Apply still rewrites nftables, and
+	// a flapping core JSON restarts xray and drops every connection.
+	if skipUnchangedApply(force, s.Hub.IsOnline(id), storedRev, b.Rev, lastErr) {
+		return nil
+	}
 	if !s.Hub.IsOnline(id) {
 		_ = db.SetServerRev(s.DB, id, b.Rev)
 		return nil
@@ -48,6 +58,13 @@ func (s *Server) pushServer(id int64) error {
 	}
 	_ = db.SetServerApplyError(s.DB, id, nil)
 	return db.SetServerRev(s.DB, id, b.Rev)
+}
+
+func skipUnchangedApply(force, online bool, storedRev, builtRev, lastErr string) bool {
+	if force || !online || lastErr != "" || storedRev == "" {
+		return false
+	}
+	return storedRev == builtRev
 }
 
 func transientApplyErr(err error) bool {

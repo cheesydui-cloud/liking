@@ -192,9 +192,9 @@ func (h *Hub) reconcileOnConnect(serverID int64, _ string) {
 	if h.Redispatch == nil {
 		return
 	}
-	// Always rebuild. ConfigRev is only updated after a successful apply, so
-	// a matching rev can still be stale (user site filter / speed saved while
-	// the client row was unchanged). Agent skips the reload if JSON is identical.
+	// Always rebuild on connect. The 30s loop skips a push when ConfigRev
+	// already matches, so a reconnect must force one apply: the agent may
+	// have started empty. Redispatch sets that force flag.
 	go h.Redispatch([]int64{serverID})
 }
 

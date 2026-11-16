@@ -3,6 +3,7 @@ package corecfg
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -269,10 +270,18 @@ func forEachRelayTo(landingID int64, byID map[int64]*db.Inbound, fn func(email s
 	if landingID == 0 || fn == nil {
 		return
 	}
+	// Map iteration order is random. These users are written into the core
+	// JSON, and a byte change makes the agent restart the process. That drops
+	// every connection on the landing node.
+	list := make([]*db.Inbound, 0, len(byID))
 	for _, in := range byID {
 		if in == nil || !in.Enabled {
 			continue
 		}
+		list = append(list, in)
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
+	for _, in := range list {
 		if in.ExitInboundID != nil && *in.ExitInboundID == landingID {
 			fn(fmt.Sprintf("relay.i%d", in.ID), ParseSettings(in.Settings))
 		}

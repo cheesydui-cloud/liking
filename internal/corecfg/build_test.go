@@ -950,3 +950,108 @@ func keysOf(m map[string]map[string]any) []string {
 	}
 	return out
 }
+
+func TestBuildRelayJSONStable(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	landSrv, err := db.CreateServer(d, "out", "203.0.113.10", "tok-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entrySrv, err := db.CreateServer(d, "in", "203.0.113.11", "tok-in")
+	if err != nil {
+		t.Fatal(err)
+	}
+	land := &db.Inbound{
+		ServerID: landSrv.ID, Name: "land", Profile: ProfileVLESSReality,
+		Listen: "0.0.0.0", Port: 443, Enabled: true, LineKind: "direct", Settings: "{}",
+	}
+	if err := Normalize(land, nil); err != nil {
+		t.Fatal(err)
+	}
+	createdLand, err := db.CreateInbound(d, land)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exit := createdLand.ID
+	for i, uuid := range []string{
+		"11111111-1111-4111-8111-111111111111",
+		"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+	} {
+		in := &db.Inbound{
+			ServerID: entrySrv.ID, Name: fmt.Sprintf("c%d", i), Profile: ProfileVLESSReality,
+			Listen: "0.0.0.0", Port: 2000 + i, Enabled: true, LineKind: "chain",
+			ExitInboundID: &exit,
+			Settings:      fmt.Sprintf(`{"relay_uuid":"%s"}`, uuid),
+		}
+		if _, err := db.CreateInbound(d, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b1, err := Build(d, landSrv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := Build(d, landSrv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b1.Rev != b2.Rev || string(b1.Apply.Xray) != string(b2.Apply.Xray) {
+		t.Fatalf("rev %s %s\n%s\n%s", b1.Rev, b2.Rev, b1.Apply.Xray, b2.Apply.Xray)
+	}
+	var xray map[string]any
+	if err := json.Unmarshal(b1.Apply.Xray, &xray); err != nil {
+		t.Fatal(err)
+	}
+	var emails []string
+	for _, raw := range xray["inbounds"].([]any) {
+		obj, _ := raw.(map[string]any)
+		if obj["protocol"] != "vless" {
+			continue
+		}
+		st, _ := obj["settings"].(map[string]any)
+		for _, uraw := range st["clients"].([]any) {
+			uu, _ := uraw.(map[string]any)
+			emails = append(emails, fmt.Sprint(uu["email"]))
+		}
+	}
+	if len(emails) < 2 || emails[0] >= emails[1] {
+		t.Fatalf("relay emails not sorted: %v", emails)
+	}
+}
+
+func TestBuildSocksHoldStable(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	srv, err := db.CreateServer(d, "sk", "203.0.113.12", "tok-sk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &db.Inbound{
+		ServerID: srv.ID, Name: "sk", Profile: ProfileSOCKS5, Core: CoreSingbox,
+		Listen: "0.0.0.0", Port: 1080, Enabled: true, LineKind: "direct", Settings: "{}",
+	}
+	if _, err := db.CreateInbound(d, in); err != nil {
+		t.Fatal(err)
+	}
+	b1, err := Build(d, srv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := Build(d, srv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b1.Rev == "" || b1.Rev != b2.Rev || string(b1.Apply.Singbox) != string(b2.Apply.Singbox) {
+		t.Fatalf("singbox flap %s %s", b1.Rev, b2.Rev)
+	}
+	if !strings.Contains(string(b1.Apply.Singbox), "hold.") {
+		t.Fatalf("missing hold user: %s", b1.Apply.Singbox)
+	}
+}
