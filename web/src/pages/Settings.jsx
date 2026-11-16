@@ -232,14 +232,27 @@ function TelegramBindBox() {
   }, [code, exp, bound])
 
   const issue = async () => {
+    const popup = window.open('about:blank', '_blank')
     setBusy(true)
     try {
       const d = await api.post('/me/telegram/bind', {})
       setCode(d.code || '')
       setExp(Number(d.expires_at) || 0)
       if (d.bot_username) setBot(d.bot_username)
-      toast('已生成绑定码')
-    } catch (e) { toast(e.message, 'error') }
+      if (d.url && popup) {
+        popup.opener = null
+        popup.location = d.url
+        toast('在 Telegram 里按开始')
+      } else if (d.url) {
+        window.location.href = d.url
+      } else {
+        if (popup) popup.close()
+        toast(d.code ? '打不开链接，请把页面上的绑定码发给机器人' : '打开失败', 'error')
+      }
+    } catch (e) {
+      if (popup) popup.close()
+      toast(e.message, 'error')
+    }
     finally { setBusy(false) }
   }
 
@@ -263,19 +276,19 @@ function TelegramBindBox() {
         <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
           {bound
             ? '已绑定。可以在私聊里查流量、到期和订阅链接。'
-            : `私聊 ${who}，发送 /bind 和下面的绑定码。10 分钟有效，错 5 次作废。只在私聊里用，不要发到群里。`}
+            : `点「用 Telegram 打开」，在私聊 ${who} 里按开始就绑定好了。10 分钟内有效。`}
         </p>
       </div>
       {code && !bound ? (
         <div>
-          <div className="font-mono text-[20px] tracking-widest">{code}</div>
+          <div className="text-[12px] text-ink-mut">打不开时，私聊机器人发送 /bind {code}</div>
           <div className="text-[12px] text-ink-mut mt-1">{exp ? `${fmtDate(exp)} 前有效` : '10 分钟内有效'}</div>
         </div>
       ) : null}
       {bound ? (
         <button type="button" className="btn-danger" disabled={busy} onClick={unbind}>{busy ? '解除中…' : '解除绑定'}</button>
       ) : (
-        <button type="button" className="btn-primary" disabled={busy} onClick={issue}>{busy ? '生成中…' : (code ? '重新生成' : '生成绑定码')}</button>
+        <button type="button" className="btn-primary" disabled={busy} onClick={issue}>{busy ? '打开中…' : '用 Telegram 打开'}</button>
       )}
     </div>
   )
@@ -296,8 +309,11 @@ function TelegramCard() {
   })
   const [tokenSet, setTokenSet] = useState(false)
   const [bot, setBot] = useState('')
+  const [chatID, setChatID] = useState('')
+  const [lastError, setLastError] = useState('')
   const [busy, setBusy] = useState(false)
   const [testing, setTesting] = useState(false)
+  const [linking, setLinking] = useState(false)
 
   const load = () => api.get('/settings').then(d => {
     setF({
@@ -313,9 +329,23 @@ function TelegramCard() {
     })
     setTokenSet(!!d.tg_bot_token_set)
     setBot(d.tg_bot_username || '')
+    setChatID(d.tg_admin_chat || '')
+    setLastError(d.tg_last_error || '')
   }).catch(e => toast(e.message, 'error'))
 
   useEffect(() => { load() }, [])
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      api.get('/settings').then(d => {
+        setChatID(d.tg_admin_chat || '')
+        setLastError(d.tg_last_error || '')
+        setBot(d.tg_bot_username || '')
+        setTokenSet(!!d.tg_bot_token_set)
+      }).catch(() => {})
+    }, 15000)
+    return () => clearInterval(t)
+  }, [])
 
   const save = async (e) => {
     e.preventDefault()
@@ -323,7 +353,6 @@ function TelegramCard() {
     try {
       const body = {
         tg_enabled: f.tg_enabled,
-        tg_admin_chat: f.tg_admin_chat.trim(),
         tg_api_base: f.tg_api_base.trim(),
         tg_alert_server: f.tg_alert_server,
         tg_alert_cert: f.tg_alert_cert,
@@ -350,6 +379,28 @@ function TelegramCard() {
     finally { setTesting(false) }
   }
 
+  const openTG = async () => {
+    const popup = window.open('about:blank', '_blank')
+    setLinking(true)
+    try {
+      const d = await api.post('/settings/telegram/link', {})
+      if (d.url && popup) {
+        popup.opener = null
+        popup.location = d.url
+        toast('在 Telegram 里按开始')
+      } else if (d.url) {
+        window.location.href = d.url
+        toast('在 Telegram 里按开始')
+      } else if (popup) {
+        popup.close()
+        toast('打开失败', 'error')
+      }
+    } catch (e) {
+      if (popup) popup.close()
+      toast(e.message, 'error')
+    } finally { setLinking(false) }
+  }
+
   const checks = [
     ['tg_alert_server', '机器离线或恢复'],
     ['tg_alert_cert', '证书即将到期'],
@@ -363,7 +414,7 @@ function TelegramCard() {
       <div>
         <div className="text-[15px] font-medium">Telegram</div>
         <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
-          只做告警和查询。不在群里说话，也不能在 Telegram 里改密码、重置订阅或删用户。私聊 Bot 发送 /start，它会回复 Chat ID。
+          只做告警和查询。不在群里说话，也不能在 Telegram 里改密码、重置订阅或删用户。保存 Token 后，点「用 Telegram 打开」，在私聊里按开始。
           {bot ? ` 当前 Bot：@${bot}。` : ''}
         </p>
       </div>
@@ -371,12 +422,13 @@ function TelegramCard() {
         <input type="checkbox" className="mt-1" checked={f.tg_enabled} onChange={e => setF({ ...f, tg_enabled: e.target.checked })} />
         <span>启用</span>
       </label>
+      <div className="text-[13px] leading-relaxed">
+        {chatID ? `已连接 ${chatID}` : '还没有连接。保存后点「用 Telegram 打开」，在 Telegram 里按开始。'}
+      </div>
+      {lastError ? <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--color-danger)' }}>{lastError}</p> : null}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Bot Token" hint={tokenSet ? '已填写。留空表示不改。' : '向 @BotFather 申请。只写不回显。'}>
+        <Field label="Bot Token" hint={tokenSet ? '已填写。留空表示不改。前面多了 bot 会自动去掉。' : '向 @BotFather 复制 123456:ABC... 这一串。只写不回显。'}>
           <input className="input-field font-mono" type="password" autoComplete="new-password" value={f.tg_bot_token} onChange={e => setF({ ...f, tg_bot_token: e.target.value })} placeholder={tokenSet ? '••••••••' : ''} />
-        </Field>
-        <Field label="管理员 Chat ID" hint="私聊的正数 ID。群 ID 是负数，这里不收。">
-          <input className="input-field font-mono" value={f.tg_admin_chat} onChange={e => setF({ ...f, tg_admin_chat: e.target.value })} placeholder="123456789" />
         </Field>
         <Field label="API 根地址" hint="留空使用 https://api.telegram.org。连不上时填自己的反代，不要带末尾斜杠。">
           <input className="input-field font-mono" value={f.tg_api_base} onChange={e => setF({ ...f, tg_api_base: e.target.value })} placeholder="https://api.telegram.org" />
@@ -390,8 +442,9 @@ function TelegramCard() {
           </label>
         ))}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
+        <button type="button" className="btn-ghost" disabled={linking || busy || testing || !tokenSet || !f.tg_enabled || !!f.tg_bot_token.trim()} onClick={openTG}>{linking ? '打开中…' : '用 Telegram 打开'}</button>
         <button type="button" className="btn-ghost" disabled={testing || busy} onClick={testSend}>{testing ? '发送中…' : '发送测试'}</button>
       </div>
     </form>

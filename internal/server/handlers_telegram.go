@@ -47,17 +47,42 @@ func (s *Server) handleTGBindCode(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "管理员还没有配置 Telegram")
 		return
 	}
-	code, exp, err := s.issueTGCode(u.ID)
+	code, exp, err := s.issueTGCode(u.ID, db.TGKindBind)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "生成绑定码失败")
 		return
 	}
-	name, _ := db.GetSetting(s.DB, "tg_bot_username")
+	name := s.tgBotName()
+	link, _ := s.tgOpenURL(r.Context(), code)
 	jsonOK(w, map[string]any{
 		"code":         code,
 		"expires_at":   exp.Unix(),
 		"bot_username": name,
+		"url":          link,
 	})
+}
+
+func (s *Server) handleTGAdminLink(w http.ResponseWriter, r *http.Request) {
+	u := userFromCtx(r.Context())
+	if u == nil {
+		jsonErr(w, http.StatusUnauthorized, "未登录")
+		return
+	}
+	if !s.tgEnabled() {
+		jsonErr(w, http.StatusBadRequest, "请先保存 Bot Token，并勾选启用")
+		return
+	}
+	code, exp, err := s.issueTGCode(u.ID, db.TGKindAdmin)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "生成连接失败")
+		return
+	}
+	link, err := s.tgOpenURL(r.Context(), code)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	jsonOK(w, map[string]any{"url": link, "expires_at": exp.Unix()})
 }
 
 func (s *Server) handleTGUnbind(w http.ResponseWriter, r *http.Request) {

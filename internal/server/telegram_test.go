@@ -145,20 +145,20 @@ func TestTelegramCommandsAndAlerts(t *testing.T) {
 		t.Fatalf("admin user text %s", cap.joined())
 	}
 
-	code, exp, err := srv.issueTGCode(alice.ID)
+	code, exp, err := srv.issueTGCode(alice.ID, db.TGKindBind)
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv.tgMu.Lock()
-	srv.tgCodes[alice.ID].exp = time.Now().Add(-time.Minute)
-	srv.tgMu.Unlock()
+	if _, err := srv.DB.Exec(`UPDATE tg_codes SET expires_at=? WHERE code=?`, time.Now().Add(-time.Minute).Unix(), code); err != nil {
+		t.Fatal(err)
+	}
 	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "/bind " + code, Chat: tgChat{ID: 200, Type: "private"}}})
 	if !strings.Contains(cap.joined(), "已过期") {
 		t.Fatalf("expiry %s", cap.joined())
 	}
 	_ = exp
 
-	code, _, err = srv.issueTGCode(alice.ID)
+	code, _, err = srv.issueTGCode(alice.ID, db.TGKindBind)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestTelegramCommandsAndAlerts(t *testing.T) {
 		t.Fatal("voided code still bound")
 	}
 
-	code, _, err = srv.issueTGCode(alice.ID)
+	code, _, err = srv.issueTGCode(alice.ID, db.TGKindBind)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,4 +302,87 @@ func TestTelegramCommandsAndAlerts(t *testing.T) {
 
 func bytesReader(b []byte) *strings.Reader {
 	return strings.NewReader(string(b))
+}
+
+func TestTelegramConnectAndToken(t *testing.T) {
+	if got := normalizeTGToken("  bot123456:ABC"); got != "123456:ABC" {
+		t.Fatalf("strip prefix %q", got)
+	}
+	if _, err := validateTGToken("https://api.telegram.org/bot123:ABC/getMe"); err == nil {
+		t.Fatal("url token accepted")
+	}
+	if got := tgFriendly("Not Found"); !strings.Contains(got, "Bot Token") {
+		t.Fatalf("friendly %q", got)
+	}
+
+	srv, cap, _ := newTGPanel(t)
+	if err := db.SetSetting(srv.DB, "tg_admin_chat", ""); err != nil {
+		t.Fatal(err)
+	}
+	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "/start", Chat: tgChat{ID: 300, Type: "private"}}})
+	if !strings.Contains(cap.joined(), "用 Telegram 打开") || strings.Contains(cap.joined(), "生成绑定码") {
+		t.Fatalf("help %s", cap.joined())
+	}
+	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "/status", Chat: tgChat{ID: 300, Type: "private"}}})
+	if !strings.Contains(cap.joined(), "还不是管理员") {
+		t.Fatalf("status deny %s", cap.joined())
+	}
+
+	admin, err := db.GetUserByName(srv.DB, "admin")
+	if err != nil || admin == nil {
+		t.Fatal(err)
+	}
+	code, _, err := srv.issueTGCode(admin.ID, db.TGKindAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored int
+	if err := srv.DB.QueryRow(`SELECT COUNT(*) FROM tg_codes WHERE code=?`, code).Scan(&stored); err != nil || stored != 1 {
+		t.Fatalf("code not stored %d %v", stored, err)
+	}
+	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "/start " + code, Chat: tgChat{ID: 4242, Type: "private"}}})
+	got, _ := db.GetSetting(srv.DB, "tg_admin_chat")
+	if got != "4242" {
+		t.Fatalf("admin chat %s", got)
+	}
+	if !strings.Contains(cap.joined(), "已连接") || !strings.Contains(cap.joined(), "/status") {
+		t.Fatalf("claim reply %s", cap.joined())
+	}
+
+	alice, err := db.CreateUser(srv.DB, "bob", "x", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _, err = srv.issueTGCode(alice.ID, db.TGKindBind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: code, Chat: tgChat{ID: 200, Type: "private"}}})
+	if _, ok := srv.tgBoundUser(200); !ok {
+		t.Fatal("bare digits did not bind")
+	}
+
+	if err := db.SetSetting(srv.DB, "tg_update_offset", "99"); err != nil {
+		t.Fatal(err)
+	}
+	next := "999001:NEWTOKEN"
+	if err := srv.saveTelegramSettings(nil, &next, nil, nil, nil, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := db.GetSetting(srv.DB, "tg_bot_token")
+	if raw != next {
+		t.Fatalf("stored token %q", raw)
+	}
+	off, _ := db.GetSetting(srv.DB, "tg_update_offset")
+	if off != "0" {
+		t.Fatalf("offset %q", off)
+	}
+	prefixed := "bot888001:OTHER"
+	if err := srv.saveTelegramSettings(nil, &prefixed, nil, nil, nil, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = db.GetSetting(srv.DB, "tg_bot_token")
+	if raw != "888001:OTHER" {
+		t.Fatalf("stripped token %q", raw)
+	}
 }

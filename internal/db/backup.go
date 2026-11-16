@@ -49,6 +49,7 @@ var wipeOrder = []string{
 	"audit",
 	"tg_binds",
 	"tg_notify_state",
+	"tg_codes",
 	"inbounds",
 	"packages",
 	"certificates",

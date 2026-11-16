@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -26,15 +27,10 @@ const (
 	tgPollSleep     = 15 * time.Second
 	tgCertSoon      = 30 * 24 * time.Hour
 	tgExpireSoonDay = 3
+	tgLastErrorKey  = "tg_last_error"
 )
 
-type tgCode struct {
-	code   string
-	userID int64
-	exp    time.Time
-	issued time.Time
-	fails  int
-}
+const tgOpenHint = "回到面板，点「用 Telegram 打开」。"
 
 type tgUpdate struct {
 	UpdateID int64       `json:"update_id"`
@@ -75,15 +71,22 @@ func (s *Server) telegramPollLoop() {
 		<-s.stop
 		cancel()
 	}()
+	dropped := ""
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 		if !s.tgEnabled() {
+			dropped = ""
 			if !sleepCtx(ctx, tgPollSleep) {
 				return
 			}
 			continue
+		}
+		token := s.tgToken()
+		if dropped != token {
+			s.tgDropWebhook()
+			dropped = token
 		}
 		s.tgPoll(ctx)
 	}
@@ -119,7 +122,7 @@ func (s *Server) tgEnabled() bool {
 
 func (s *Server) tgToken() string {
 	v, _ := db.GetSetting(s.DB, "tg_bot_token")
-	return strings.TrimSpace(v)
+	return normalizeTGToken(v)
 }
 
 func (s *Server) tgBase() string {
@@ -152,6 +155,7 @@ func (s *Server) tgPoll(ctx context.Context) {
 	if raw, _ := db.GetSetting(s.DB, "tg_update_offset"); raw != "" {
 		offset, _ = strconv.ParseInt(raw, 10, 64)
 	}
+	tokenAtStart := s.tgToken()
 	callCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
 	started := time.Now()
 	var updates []tgUpdate
@@ -163,10 +167,15 @@ func (s *Server) tgPoll(ctx context.Context) {
 	cancel()
 	if err != nil {
 		if ctx.Err() == nil {
+			if tgWebhookConflict(err) {
+				s.tgDropWebhook()
+			}
+			s.tgNoteErr(err)
 			sleepCtx(ctx, tgPollSleep)
 		}
 		return
 	}
+	s.tgNoteErr(nil)
 	if len(updates) == 0 {
 		// A proxy that ignores the long-poll timeout would otherwise spin.
 		if time.Since(started) < time.Second {
@@ -181,7 +190,7 @@ func (s *Server) tgPoll(ctx context.Context) {
 		}
 		s.tgHandleUpdate(up)
 	}
-	if last > 0 {
+	if last > 0 && s.tgToken() == tokenAtStart {
 		_ = db.SetSetting(s.DB, "tg_update_offset", strconv.FormatInt(last+1, 10))
 	}
 }
@@ -210,13 +219,21 @@ func (s *Server) tgHandleUpdate(up tgUpdate) {
 	}
 	switch cmd {
 	case "/start", "/help":
+		if cmd == "/start" && arg != "" {
+			s.tgApplyCode(msg.Chat.ID, arg)
+			return
+		}
 		s.tgReply(msg.Chat.ID, s.tgHelp(msg.Chat.ID))
 	case "/status":
 		s.tgCmdStatus(msg.Chat.ID)
 	case "/user":
 		s.tgCmdUser(msg.Chat.ID, arg)
 	case "/bind":
-		s.tgCmdBind(msg.Chat.ID, arg)
+		if arg == "" {
+			s.tgReply(msg.Chat.ID, tgOpenHint+"打不开时发送 /bind 和 6 位绑定码。")
+			return
+		}
+		s.tgApplyCode(msg.Chat.ID, arg)
 	case "/me":
 		s.tgCmdMe(msg.Chat.ID)
 	case "/sub":
@@ -224,6 +241,10 @@ func (s *Server) tgHandleUpdate(up tgUpdate) {
 	case "/unbind":
 		s.tgCmdUnbind(msg.Chat.ID)
 	default:
+		if tgDigits(text) {
+			s.tgApplyCode(msg.Chat.ID, text)
+			return
+		}
 		if strings.HasPrefix(cmd, "/") {
 			s.tgReply(msg.Chat.ID, "不认识这个命令。发送 /help 查看可用命令。")
 		}
@@ -272,12 +293,21 @@ func tgPrivate(c tgChat) bool {
 }
 
 func (s *Server) tgHelp(chatID int64) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "你的 Chat ID：%d\n", chatID)
-	if s.tgIsAdmin(chatID) {
-		b.WriteString("\n管理员：\n/status  在线机器\n/user 用户名  查看账号\n")
+	admin := s.tgIsAdmin(chatID)
+	_, bound := s.tgBoundUser(chatID)
+	if !admin && !bound {
+		return tgOpenHint
 	}
-	b.WriteString("\n已绑定的用户：\n/me  流量和到期\n/sub  订阅链接\n/unbind  解除绑定\n\n绑定：在面板设置里生成绑定码，然后发送 /bind 123456")
+	var b strings.Builder
+	if admin {
+		b.WriteString("管理员\n/status  在线机器\n/user 用户名  查看账号")
+	}
+	if bound {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("/me  流量和到期\n/sub  订阅链接\n/unbind  解除绑定")
+	}
 	return b.String()
 }
 
@@ -288,7 +318,7 @@ func (s *Server) tgIsAdmin(chatID int64) bool {
 
 func (s *Server) tgCmdStatus(chatID int64) {
 	if !s.tgIsAdmin(chatID) {
-		s.tgReply(chatID, "没有权限")
+		s.tgReply(chatID, "这个对话还不是管理员。"+tgOpenHint)
 		return
 	}
 	list, err := db.ListServers(s.DB)
@@ -333,7 +363,7 @@ func (s *Server) tgCmdStatus(chatID int64) {
 
 func (s *Server) tgCmdUser(chatID int64, name string) {
 	if !s.tgIsAdmin(chatID) {
-		s.tgReply(chatID, "没有权限")
+		s.tgReply(chatID, "这个对话还不是管理员。"+tgOpenHint)
 		return
 	}
 	name = strings.TrimSpace(name)
@@ -368,17 +398,44 @@ func (s *Server) tgCmdSub(chatID int64) {
 	})
 }
 
-func (s *Server) tgCmdBind(chatID int64, code string) {
+func (s *Server) tgApplyCode(chatID int64, code string) {
 	code = strings.TrimSpace(code)
 	if code == "" {
-		s.tgReply(chatID, "用法：/bind 123456")
+		s.tgReply(chatID, tgOpenHint)
 		return
 	}
-	userID, msg := s.takeTGCode(code)
+	userID, kind, msg, err := db.TakeTGCode(s.DB, code, time.Now().Unix(), tgBindMaxFail)
+	if err != nil {
+		s.tgReply(chatID, "绑定失败")
+		return
+	}
 	if userID == 0 {
 		s.tgReply(chatID, msg)
 		return
 	}
+	if kind == db.TGKindAdmin {
+		s.tgClaimAdmin(chatID, userID)
+		return
+	}
+	s.tgFinishBind(chatID, userID)
+}
+
+func (s *Server) tgClaimAdmin(chatID, userID int64) {
+	prev, had := s.tgAdminChat()
+	if err := db.SetSetting(s.DB, "tg_admin_chat", strconv.FormatInt(chatID, 10)); err != nil {
+		s.tgReply(chatID, "连接失败")
+		return
+	}
+	if had && prev != chatID {
+		s.tgReply(prev, "管理员已改到别的 Telegram。")
+	}
+	if userID > 0 {
+		db.AddAudit(s.DB, &userID, "tg.admin", strconv.FormatInt(chatID, 10))
+	}
+	s.tgReply(chatID, "已连接。\n"+s.tgHelp(chatID))
+}
+
+func (s *Server) tgFinishBind(chatID, userID int64) {
 	prev, had, _ := db.TGChatByUser(s.DB, userID)
 	if err := db.TGBind(s.DB, userID, chatID); err != nil {
 		if err == db.ErrTGChatTaken {
@@ -470,63 +527,39 @@ func (s *Server) tgSubLink(u *db.User) (string, error) {
 	return base + "/api/sub/" + u.SubToken, nil
 }
 
-func (s *Server) issueTGCode(userID int64) (string, time.Time, error) {
+func (s *Server) issueTGCode(userID int64, kind string) (string, time.Time, error) {
+	exp := time.Now().Add(tgBindTTL)
+	issued := time.Now()
+	var last error
+	for i := 0; i < 5; i++ {
+		code, err := randomTGCode()
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		err = db.IssueTGCode(s.DB, userID, kind, code, exp.Unix(), issued.Unix())
+		if err == nil {
+			return code, exp, nil
+		}
+		if !errors.Is(err, db.ErrTGCodeTaken) {
+			return "", time.Time{}, err
+		}
+		last = err
+	}
+	if last == nil {
+		last = fmt.Errorf("生成绑定码失败")
+	}
+	return "", time.Time{}, last
+}
+
+func randomTGCode() (string, error) {
 	raw := make([]byte, 6)
 	if _, err := rand.Read(raw); err != nil {
-		return "", time.Time{}, err
+		return "", err
 	}
 	for i := range raw {
 		raw[i] = '0' + raw[i]%10
 	}
-	code := string(raw)
-	exp := time.Now().Add(tgBindTTL)
-	s.tgMu.Lock()
-	defer s.tgMu.Unlock()
-	if s.tgCodes == nil {
-		s.tgCodes = map[int64]*tgCode{}
-	}
-	s.tgCodes[userID] = &tgCode{code: code, userID: userID, exp: exp, issued: time.Now()}
-	return code, exp, nil
-}
-
-func (s *Server) takeTGCode(code string) (int64, string) {
-	s.tgMu.Lock()
-	defer s.tgMu.Unlock()
-	if s.tgCodes == nil {
-		return 0, "绑定码不对"
-	}
-	var match *tgCode
-	for _, c := range s.tgCodes {
-		if c != nil && c.code == code {
-			match = c
-			break
-		}
-	}
-	if match == nil {
-		var newest *tgCode
-		for _, c := range s.tgCodes {
-			if c == nil {
-				continue
-			}
-			if newest == nil || c.issued.After(newest.issued) {
-				newest = c
-			}
-		}
-		if newest != nil {
-			newest.fails++
-			if newest.fails >= tgBindMaxFail {
-				delete(s.tgCodes, newest.userID)
-				return 0, "绑定码已作废，请在面板里重新生成"
-			}
-		}
-		return 0, "绑定码不对"
-	}
-	if time.Now().After(match.exp) {
-		delete(s.tgCodes, match.userID)
-		return 0, "绑定码已过期，请在面板里重新生成"
-	}
-	delete(s.tgCodes, match.userID)
-	return match.userID, ""
+	return string(raw), nil
 }
 
 func (s *Server) tgScan() {
@@ -737,7 +770,7 @@ func (s *Server) tgAdminAndUser(u *db.User, text string) bool {
 func (s *Server) tgAdmin(text string) error {
 	chat, ok := s.tgAdminChat()
 	if !ok {
-		return fmt.Errorf("请填写管理员 Chat ID")
+		return fmt.Errorf("请先点「用 Telegram 打开」连接你的 Telegram")
 	}
 	return s.tgSend(chat, text, nil)
 }
@@ -827,11 +860,8 @@ func (s *Server) tgCall(ctx context.Context, method string, payload any, dest an
 		Result      json.RawMessage `json:"result"`
 	}
 	if err := json.Unmarshal(buf, &wrap); err != nil || !wrap.OK {
-		msg := strings.TrimSpace(wrap.Description)
-		if msg == "" {
-			msg = "Telegram 没有接受这次请求"
-		}
-		return fmt.Errorf("%s", msg)
+		desc := strings.TrimSpace(wrap.Description)
+		return &tgAPIError{Description: desc, friendly: tgFriendly(desc)}
 	}
 	if dest != nil && len(wrap.Result) > 0 && string(wrap.Result) != "null" {
 		if err := json.Unmarshal(wrap.Result, dest); err != nil {
@@ -839,6 +869,138 @@ func (s *Server) tgCall(ctx context.Context, method string, payload any, dest an
 		}
 	}
 	return nil
+}
+
+type tgAPIError struct {
+	Description string
+	friendly    string
+}
+
+func (e *tgAPIError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.friendly != "" {
+		return e.friendly
+	}
+	if strings.TrimSpace(e.Description) == "" {
+		return "Telegram 没有接受这次请求"
+	}
+	return e.Description
+}
+
+func tgFriendly(desc string) string {
+	d := strings.TrimSpace(desc)
+	low := strings.ToLower(d)
+	switch {
+	case d == "":
+		return "Telegram 没有接受这次请求"
+	case strings.EqualFold(d, "Not Found") || low == "not found":
+		return "Bot Token 不对。向 @BotFather 复制 123456:ABC... 这一串，不要带 bot 前缀或网址"
+	case strings.Contains(low, "unauthorized"):
+		return "Bot Token 已失效。向 @BotFather 重新申请后再保存"
+	case strings.Contains(low, "webhook") || strings.Contains(low, "conflict"):
+		return "这个机器人还挂着别的接收地址。再保存一次，或等一会儿再发命令"
+	default:
+		return d
+	}
+}
+
+func tgWebhookConflict(err error) bool {
+	var apiErr *tgAPIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	low := strings.ToLower(apiErr.Description)
+	return strings.Contains(low, "webhook") || strings.Contains(low, "conflict")
+}
+
+func (s *Server) tgNoteErr(err error) {
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+		if token := s.tgToken(); token != "" {
+			msg = strings.ReplaceAll(msg, token, "…")
+		}
+		msg = strings.TrimSpace(msg)
+		if len(msg) > 180 {
+			msg = msg[:180]
+		}
+	}
+	prev, _ := db.GetSetting(s.DB, tgLastErrorKey)
+	if strings.TrimSpace(prev) == msg {
+		return
+	}
+	_ = db.SetSetting(s.DB, tgLastErrorKey, msg)
+	if msg != "" {
+		log.Printf("telegram: %s", msg)
+	}
+}
+
+func (s *Server) tgDropWebhook() {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	if err := s.tgDeleteWebhook(ctx); err != nil {
+		s.tgNoteErr(err)
+	}
+}
+
+func (s *Server) tgDeleteWebhook(ctx context.Context) error {
+	return s.tgCall(ctx, "deleteWebhook", map[string]any{"drop_pending_updates": false}, nil)
+}
+
+func (s *Server) tgBotName() string {
+	name, _ := db.GetSetting(s.DB, "tg_bot_username")
+	return strings.TrimPrefix(strings.TrimSpace(name), "@")
+}
+
+func (s *Server) tgOpenURL(ctx context.Context, code string) (string, error) {
+	name := s.tgBotName()
+	if name == "" {
+		s.tgRememberBot(ctx)
+		name = s.tgBotName()
+	}
+	if name == "" || strings.ContainsAny(name, "/?# \t") {
+		return "", fmt.Errorf("还没有连上这个机器人。检查 Bot Token 后再试")
+	}
+	return "https://t.me/" + name + "?start=" + url.QueryEscape(code), nil
+}
+
+func normalizeTGToken(raw string) string {
+	next := strings.TrimSpace(raw)
+	if len(next) >= 4 && strings.EqualFold(next[:3], "bot") && next[3] >= '0' && next[3] <= '9' {
+		next = next[3:]
+	}
+	return next
+}
+
+func validateTGToken(raw string) (string, error) {
+	next := normalizeTGToken(raw)
+	if next == "" || strings.ContainsAny(next, " /\r\n\t?#") {
+		return "", fmt.Errorf("Bot Token 无效。向 @BotFather 复制 123456:ABC... 这一串，不要带网址")
+	}
+	id, secret, ok := strings.Cut(next, ":")
+	if !ok || id == "" || secret == "" {
+		return "", fmt.Errorf("Bot Token 无效。向 @BotFather 复制 123456:ABC... 这一串")
+	}
+	for _, r := range id {
+		if r < '0' || r > '9' {
+			return "", fmt.Errorf("Bot Token 无效。向 @BotFather 复制 123456:ABC... 这一串")
+		}
+	}
+	return next, nil
+}
+
+func tgDigits(text string) bool {
+	if len(text) != 6 {
+		return false
+	}
+	for _, r := range text {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func parseTGChat(raw string) (int64, error) {
@@ -902,9 +1064,9 @@ func (s *Server) saveTelegramSettings(enabled *bool, token, chat, base *string, 
 	}
 	curToken := s.tgToken()
 	if token != nil && strings.TrimSpace(*token) != "" {
-		next := strings.TrimSpace(*token)
-		if strings.ContainsAny(next, " /\r\n\t?#") {
-			return fmt.Errorf("Bot Token 无效")
+		next, err := validateTGToken(*token)
+		if err != nil {
+			return err
 		}
 		curToken = next
 	}
@@ -928,17 +1090,18 @@ func (s *Server) saveTelegramSettings(enabled *bool, token, chat, base *string, 
 		}
 		curBase = next
 	}
-	if curEnabled {
-		if curToken == "" {
-			return fmt.Errorf("请先填写 Bot Token")
-		}
-		if curChat == "" {
-			return fmt.Errorf("请填写管理员 Chat ID")
-		}
+	if curEnabled && curToken == "" {
+		return fmt.Errorf("请先填写 Bot Token")
 	}
+	rawStored, _ := db.GetSetting(s.DB, "tg_bot_token")
+	tokenChanged := curToken != "" && curToken != normalizeTGToken(rawStored)
 	_ = db.SetSetting(s.DB, "tg_enabled", boolSetting(curEnabled))
-	if token != nil && strings.TrimSpace(*token) != "" {
+	rewritten := curToken != "" && curToken != strings.TrimSpace(rawStored)
+	if rewritten {
 		_ = db.SetSetting(s.DB, "tg_bot_token", curToken)
+	}
+	if tokenChanged {
+		_ = db.SetSetting(s.DB, "tg_update_offset", "0")
 	}
 	if chat != nil {
 		_ = db.SetSetting(s.DB, "tg_admin_chat", curChat)
@@ -957,10 +1120,11 @@ func (s *Server) saveTelegramSettings(enabled *bool, token, chat, base *string, 
 	writeBool("tg_alert_backup", backup)
 	writeBool("tg_alert_expire", expire)
 	writeBool("tg_alert_traffic", traffic)
-	if curToken != "" {
+	if curToken != "" && (rewritten || token != nil || enabled != nil || base != nil) {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer cancel()
+			_ = s.tgDeleteWebhook(ctx)
 			s.tgRememberBot(ctx)
 		}()
 	}
@@ -978,12 +1142,14 @@ func (s *Server) tgPublicSettings() map[string]any {
 	chat, _ := db.GetSetting(s.DB, "tg_admin_chat")
 	base, _ := db.GetSetting(s.DB, "tg_api_base")
 	name, _ := db.GetSetting(s.DB, "tg_bot_username")
+	last, _ := db.GetSetting(s.DB, tgLastErrorKey)
 	return map[string]any{
 		"tg_enabled":       db.SettingOn(s.DB, "tg_enabled", false),
 		"tg_admin_chat":    strings.TrimSpace(chat),
 		"tg_api_base":      strings.TrimSpace(base),
 		"tg_bot_token_set": s.tgToken() != "",
 		"tg_bot_username":  strings.TrimPrefix(strings.TrimSpace(name), "@"),
+		"tg_last_error":    strings.TrimSpace(last),
 		"tg_alert_server":  db.SettingOn(s.DB, "tg_alert_server", true),
 		"tg_alert_cert":    db.SettingOn(s.DB, "tg_alert_cert", true),
 		"tg_alert_backup":  db.SettingOn(s.DB, "tg_alert_backup", true),

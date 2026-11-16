@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS tg_codes (
+  code TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  fails INTEGER NOT NULL DEFAULT 0,
+  issued_at INTEGER NOT NULL
+);

@@ -31,8 +31,6 @@ type Server struct {
 	kickRun      map[int64]bool
 	acmeMu       sync.Mutex
 	backupMu     sync.Mutex
-	tgMu         sync.Mutex
-	tgCodes      map[int64]*tgCode
 	certCache    panelCertCache
 	CFAPI        string // test override for Cloudflare API base URL
 }
@@ -50,7 +48,6 @@ func New(d *sql.DB) (*Server, error) {
 		stop:         make(chan struct{}),
 		kickWant:     map[int64]bool{},
 		kickRun:      map[int64]bool{},
-		tgCodes:      map[int64]*tgCode{},
 	}
 	if tz, _ := db.GetSetting(d, "timezone"); strings.TrimSpace(tz) == "" {
 		_ = db.SetSetting(d, "timezone", db.DefaultTimezone)
@@ -205,6 +202,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/api/settings", s.handleGetSettings)
 			r.Put("/api/settings", s.handlePutSettings)
 			r.Post("/api/settings/telegram/test", s.handleTGTest)
+			r.Post("/api/settings/telegram/link", s.handleTGAdminLink)
 			r.Get("/api/panel/upgrade", s.handlePanelUpgradeInfo)
 			r.Post("/api/panel/upgrade", s.handlePanelUpgrade)
 			r.Post("/api/backup", s.handleBackupDownload)
