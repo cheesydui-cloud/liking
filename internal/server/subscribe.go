@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -208,9 +209,51 @@ func buildURIList(d *sql.DB, u *db.User, clients []*db.Client, over map[int64]bo
 		if err != nil {
 			continue
 		}
-		lines = append(lines, uri)
+		lines = append(lines, rewriteSubURI(uri, item.in))
 	}
 	return strings.Join(lines, "\n"), nil
+}
+
+// rewriteSubURI 把订阅链接的备注改成展示名。小火箭的 Mieru 列表用 profile 当节点名，
+// 写死 default 时看到的就是 default。mita 不校验这个字段。复制链接仍保持 profile=default。
+func rewriteSubURI(uri string, in *db.Inbound) string {
+	if in == nil {
+		return uri
+	}
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return uri
+	}
+	if in.Profile == corecfg.ProfileMieru {
+		uri = replaceMieruProfile(uri, name)
+	}
+	return replaceFragment(uri, name)
+}
+
+func replaceMieruProfile(uri, name string) string {
+	hash := strings.LastIndex(uri, "#")
+	head, tail := uri, ""
+	if hash >= 0 {
+		head, tail = uri[:hash], uri[hash:]
+	}
+	const key = "profile=default"
+	if !strings.Contains(head, key) {
+		return uri
+	}
+	return strings.Replace(head, key, "profile="+subEscape(name), 1) + tail
+}
+
+func replaceFragment(uri, name string) string {
+	esc := subEscape(name)
+	i := strings.LastIndex(uri, "#")
+	if i < 0 {
+		return uri + "#" + esc
+	}
+	return uri[:i+1] + esc
+}
+
+func subEscape(s string) string {
+	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
 }
 
 func buildClash(d *sql.DB, u *db.User, clients []*db.Client, over map[int64]bool) (string, error) {

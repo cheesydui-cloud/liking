@@ -550,6 +550,23 @@ table.data tbody tr.is-off td:first-child { border-left-color: #c8c8c8; }
 
 .path-line { font-size: 13px; font-weight: 500; line-height: 1.55; }
 .path-arrow { color: var(--color-ink-mut); font-weight: 400; }
+.reach-mark {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 2px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  border-radius: 4px;
+  vertical-align: 1px;
+}
+.reach-mark.is-up { color: var(--color-ok); background: color-mix(in srgb, var(--color-ok) 14%, transparent); }
+.reach-mark.is-down { color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 14%, transparent); }
+.reach-mark.is-udp, .reach-mark.is-skip { color: var(--color-ink-mut); background: var(--color-fill); }
+.fwd-foot-acts { display: flex; align-items: center; gap: 6px; flex: none; }
+.row-act.is-up { color: var(--color-ok); }
+.row-act.is-down { color: var(--color-danger); }
 .fwd-path {
   padding: 0 10px 8px;
   min-width: 0;

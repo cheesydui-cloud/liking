@@ -3,6 +3,7 @@ package server
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"liking/internal/corecfg"
 	"liking/internal/db"
@@ -46,7 +47,43 @@ func collectSubItems(d *sql.DB, u *db.User, clients []*db.Client, over map[int64
 	for _, ex := range extras {
 		add(ex.in, ex.c)
 	}
+	applyUserSubNames(u, out)
 	return out, nil
+}
+
+// applyUserSubNames 让订阅里的节点名显示用户名。只有一条时就是用户名；
+// 多条时加上原来的节点名，避免客户端把两条收成同一个名字。
+func applyUserSubNames(u *db.User, items []subItem) {
+	if u == nil || len(items) == 0 {
+		return
+	}
+	user := strings.TrimSpace(u.Username)
+	if user == "" {
+		return
+	}
+	multi := len(items) > 1
+	used := map[string]struct{}{}
+	for i := range items {
+		if items[i].in == nil {
+			continue
+		}
+		items[i].in = withSubName(items[i].in, uniqueSubName(subDisplayName(user, items[i].in.Name, multi), used))
+	}
+}
+
+func subDisplayName(user, node string, multi bool) string {
+	user = strings.TrimSpace(user)
+	node = strings.TrimSpace(node)
+	if user == "" {
+		if node == "" {
+			return "线路"
+		}
+		return node
+	}
+	if !multi || node == "" || node == user {
+		return user
+	}
+	return user + " · " + node
 }
 
 func trafficSubExtras(d *sql.DB, u *db.User, clients []*db.Client, over map[int64]bool) (map[int64]struct{}, []subItem, error) {

@@ -46,12 +46,81 @@ function emptyTrafficHop() {
 
 function trafficPath(fw) {
   if (!fw) return ''
+  return trafficParts(fw).join(' → ')
+}
+
+function trafficParts(fw) {
+  if (!fw) return []
   const parts = [`${fw.entry_server_name || '入口'}${fw.entry_port ? `:${fw.entry_port}` : ''}`]
   for (const h of fw.hops || []) {
     parts.push(`${h.server_name || '经过'}${h.listen_port ? `:${h.listen_port}` : ''}`)
   }
   parts.push(fw.landing_name || '落地')
-  return parts.join(' → ')
+  return parts
+}
+
+function reachWord(status) {
+  if (status === 'up') return '通'
+  if (status === 'down') return '断'
+  if (status === 'udp') return 'UDP'
+  if (status === 'skip') return '无法测'
+  return ''
+}
+
+function reachTone(status) {
+  if (status === 'up') return 'is-up'
+  if (status === 'down') return 'is-down'
+  if (status === 'udp') return 'is-udp'
+  return 'is-skip'
+}
+
+function ReachMark({ seg }) {
+  if (!seg || !seg.status) return null
+  const title = [seg.from_name && seg.to_name ? `${seg.from_name} → ${seg.to_name}` : '', seg.host && seg.port ? `${seg.host}:${seg.port}` : '', seg.error, seg.note].filter(Boolean).join(' · ')
+  return <span className={`reach-mark ${reachTone(seg.status)}`} title={title}>{reachWord(seg.status)}</span>
+}
+
+function reachFoot(hops) {
+  const list = asArray(hops)
+  if (!list.length) return '没有可测的段'
+  return list.map(h => {
+    const n = (Number(h.index) || 0) + 1
+    const word = reachWord(h.status) || '无法测'
+    return `第${n}跳${word}`
+  }).join(' · ')
+}
+
+function formReachLabel(row, host, port) {
+  if (!row) return '测试'
+  const same = row.host === host && Number(row.port) === Number(port)
+  if (!same) return '测试'
+  if (row.state === 'busy') return '测试中…'
+  return reachWord(row.status) || '测试'
+}
+
+function ReachTestButton({ row, host, port, title, onClick }) {
+  const label = formReachLabel(row, host, port)
+  const tone = label === '通' ? ' is-up' : label === '断' ? ' is-down' : ''
+  const tip = [title, row && row.host === host && Number(row.port) === Number(port) ? (row.error || row.note) : ''].filter(Boolean).join(' · ')
+  return (
+    <button type="button" className={`row-act${tone}`} title={tip || undefined} disabled={row?.state === 'busy' && row.host === host && Number(row.port) === Number(port)} onClick={onClick}>
+      {label}
+    </button>
+  )
+}
+
+function udpOnlyNode(node) {
+  if (!node) return false
+  if (node.profile === 'hysteria2' || node.profile === 'wireguard') return true
+  if (node.profile === 'mieru') return String(inboundSettings(node).transport || '').toUpperCase() === 'UDP'
+  return false
+}
+
+function mixedNode(node) {
+  if (!node || udpOnlyNode(node)) return false
+  if (node.profile === 'socks5') return true
+  if (node.profile === 'mieru') return String(inboundSettings(node).transport || 'BOTH').toUpperCase() !== 'TCP'
+  return false
 }
 
 function trafficNeedsAgent(fw, serversByID) {
@@ -113,9 +182,16 @@ function pathLine(inb, byID) {
   return [entryText(inb), ...hops.map(h => hopText(h, byID))].join(' → ')
 }
 
-function PathHops({ inb, byID, serversByID }) {
+function PathHops({ inb, byID, serversByID, marks }) {
   if (forwardKind(inb) === 'port') {
-    return <div className="path-line">{pathLine(inb, byID)}</div>
+    return (
+      <div className="path-line">
+        <span>{entryText(inb)}</span>
+        <span className="path-arrow"> → </span>
+        <ReachMark seg={marks?.[0]} />
+        <span>{landingText(inb, byID)}</span>
+      </div>
+    )
   }
   const hops = pathHops(inb)
   const entrySrv = serversByID.get(Number(inb.server_id))
@@ -130,11 +206,31 @@ function PathHops({ inb, byID, serversByID }) {
         return (
           <span key={i}>
             <span className="path-arrow"> → </span>
+            <ReachMark seg={marks?.[i]} />
             <span>{hopText(h, byID)}</span>
             {st ? <>{' '}<LineStatus status={st} /></> : null}
           </span>
         )
       })}
+    </div>
+  )
+}
+
+function TrafficPathLine({ fw, marks }) {
+  const parts = trafficParts(fw)
+  return (
+    <div className="path-line">
+      {parts.map((part, i) => (
+        <span key={i}>
+          {i > 0 ? (
+            <>
+              <span className="path-arrow"> → </span>
+              <ReachMark seg={marks?.[i - 1]} />
+            </>
+          ) : null}
+          <span>{part}</span>
+        </span>
+      ))}
     </div>
   )
 }
@@ -232,6 +328,8 @@ function ForwardsPanel() {
   const [kindFilter, setKindFilter] = useState('')
   const [pollErr, setPollErr] = useState('')
   const [probes, setProbes] = useState({})
+  const [reaches, setReaches] = useState({})
+  const [formReach, setFormReach] = useState({})
   const ops = useRef(createOpLock())
 
   const load = async () => {
@@ -318,6 +416,7 @@ function ForwardsPanel() {
     setEditId(0)
     setTrafficEditId(0)
     setF(emptyForm)
+    setFormReach({})
   }
   const openCreate = () => {
     reset()
@@ -619,6 +718,109 @@ function ForwardsPanel() {
     })
   }
 
+  const probeReach = async (kind, id) => {
+    const key = `${kind}-${id}`
+    await ops.current.run(`reach-${key}`, async () => {
+      setReaches(p => ({ ...p, [key]: { state: 'busy', hops: p[key]?.hops } }))
+      try {
+        const path = kind === 'traffic' ? `/traffic-forwards/${id}/hop-probe` : `/inbounds/${id}/hop-probe`
+        const d = await api.post(path)
+        const hops = asArray(d.hops)
+        setReaches(p => ({ ...p, [key]: { state: 'ok', hops } }))
+        const bad = hops.some(h => h.status === 'down')
+        toast(reachFoot(hops), bad ? 'error' : undefined)
+      } catch (e) {
+        setReaches(p => ({ ...p, [key]: { state: 'err', hops: [], error: e.message } }))
+        toast(e.message, 'error')
+      }
+    })
+  }
+
+  const probeForm = async (key, fromId, target) => {
+    if (!target) return
+    if (target.external) { toast('外部跳，测不到下一段', 'error'); return }
+    if (target.missing) { toast(target.missing, 'error'); return }
+    if (!fromId) { toast('请选择入口实例', 'error'); return }
+    const host = target.host
+    const port = Number(target.port)
+    setFormReach(p => ({ ...p, [key]: { state: 'busy', host, port } }))
+    try {
+      const d = await api.post(`/servers/${fromId}/reach`, { host, port, udp: !!target.udp })
+      const hop = asArray(d.hops)[0] || {}
+      const note = hop.note || (target.mixed ? 'UDP 未测' : '')
+      setFormReach(p => ({ ...p, [key]: { state: 'ok', host, port, status: hop.status, error: hop.error || '', note } }))
+      if (hop.status === 'down' || hop.status === 'skip') toast(hop.error || '无法测', 'error')
+      else if (hop.status === 'udp') toast(note || 'UDP，TCP 通断不能确认')
+      else if (hop.status === 'up') toast(note ? `通，${note}` : '通')
+    } catch (e) {
+      setFormReach(p => ({ ...p, [key]: { state: 'err', host, port, status: 'skip', error: e.message } }))
+      toast(e.message, 'error')
+    }
+  }
+
+  const chainFromId = (i) => {
+    if (i === 0) {
+      if (editId) return byID.get(Number(editId))?.server_id || f.server_id
+      if (f.entry_mode === 'node') return entryTemplate?.server_id || ''
+      return f.server_id
+    }
+    const prev = (f.hops || [])[i - 1]
+    if (!prev || prev.kind !== 'panel') return { external: true }
+    const node = byID.get(Number(prev.inbound_id))
+    if (!node?.server_id) return { missing: '请选择上一跳' }
+    return node.server_id
+  }
+
+  const chainTarget = (h) => {
+    if (h.kind === 'panel') {
+      const node = byID.get(Number(h.inbound_id))
+      if (!node) return { missing: '请选择节点' }
+      const host = String(node.server_host || node.connect_ip || '').trim()
+      const port = Number(node.port) || 0
+      if (!host || !port) return { missing: '没有地址' }
+      return { host, port, udp: udpOnlyNode(node), mixed: mixedNode(node) }
+    }
+    if (h.kind === 'uri') {
+      const t = parseShareURI(h.uri)
+      if (!t.ok || !t.host || !t.port) return { missing: t.error || '没有地址' }
+      return { host: t.host, port: t.port }
+    }
+    const host = String(h.sk5_host || '').trim()
+    const port = Number(h.sk5_port) || 0
+    if (!host || !port) return { missing: '没有地址' }
+    return { host, port, mixed: true }
+  }
+
+  const trafficFromId = (index) => {
+    const hops = f.tf_hops || []
+    if (index === 0) return f.server_id
+    const prev = index === 'land' ? hops[hops.length - 1] : hops[index - 1]
+    if (!hops.length && index === 'land') return f.server_id
+    if (!prev?.server_id) return { missing: '请选择上一台' }
+    return prev.server_id
+  }
+
+  const trafficHopTarget = (h) => {
+    if (!h?.server_id) return { missing: '请选择实例' }
+    const port = Number(h.listen_port) || 0
+    if (!port) return { missing: '先保存' }
+    const srv = serversByID.get(Number(h.server_id))
+    const host = String(h.dial_host || '').trim() || String(srv?.public_host || '').trim()
+    if (!host) return { missing: '没有地址' }
+    return { host, port }
+  }
+
+  const trafficLandTarget = () => {
+    const node = byID.get(Number(f.tf_landing_id))
+    if (!node) return { missing: '请选择落地节点' }
+    const port = Number(node.port) || 0
+    if (!port) return { missing: '先保存' }
+    const srv = serversByID.get(Number(node.server_id))
+    const host = String(f.tf_landing_dial || '').trim() || String(srv?.public_host || node.server_host || '').trim()
+    if (!host) return { missing: '没有地址' }
+    return { host, port, udp: udpOnlyNode(node), mixed: mixedNode(node) }
+  }
+
   const probeLatency = async (inb) => {
     await ops.current.run(`probe-${inb.id}`, async () => {
       setProbes(p => ({ ...p, [inb.id]: { state: 'busy' } }))
@@ -756,9 +958,11 @@ function ForwardsPanel() {
       ) : (
         <div className="machine-grid">
           {trafficRows.map(fw => {
-            const path = trafficPath(fw)
             const stale = trafficNeedsAgent(fw, serversByID)
             const title = fw.name || '流量中转'
+            const reach = reaches[`traffic-${fw.id}`]
+            const reachNote = reach?.state === 'busy' ? '通断测试中…' : reach?.state === 'ok' ? reachFoot(reach.hops) : ''
+            const reachDetail = asArray(reach?.hops).map(h => h.error || h.note).filter(Boolean).join(' · ')
             return (
               <div key={`tf-${fw.id}`} className="machine is-static">
                 <div className="machine-head">
@@ -777,6 +981,7 @@ function ForwardsPanel() {
                     </button>
                     <MoreMenu iconOnly items={[
                       { label: '编辑', onSelect: () => startEditTraffic(fw) },
+                      { label: '测通断', onSelect: () => probeReach('traffic', fw.id) },
                       { label: fw.enabled ? '停用' : '启用', onSelect: () => toggleTraffic(fw) },
                       { sep: true },
                       { label: '删除', danger: true, onSelect: () => delTraffic(fw) },
@@ -784,7 +989,7 @@ function ForwardsPanel() {
                   </div>
                 </div>
                 <div className="fwd-path">
-                  <div className="path-line">{path}</div>
+                  <TrafficPathLine fw={fw} marks={reach?.hops} />
                   <div className="text-[11px] text-ink-mut mt-0.5">{protoShort(fw.landing_profile) || '落地'} · 流量在落地节点计费</div>
                 </div>
                 <div className="machine-metrics">
@@ -794,9 +999,12 @@ function ForwardsPanel() {
                   <Metric label="入口" value={fw.entry_server_name || '—'} plain />
                 </div>
                 <div className="machine-foot">
-                  <span className="fwd-probe-note" title={stale ? '入口或中间机器的 Agent 还不能转发' : '订阅地址是入口，协议和账号用落地节点的'}>
-                    {stale ? 'Agent 还不能转发，升级后再用' : '订阅地址是入口'}
+                  <span className="fwd-probe-note" title={reachDetail || reachNote || (stale ? '入口或中间机器的 Agent 还不能转发' : '从每一跳的上一台测到它真正连的地址')}>
+                    {reachNote || (stale ? 'Agent 还不能转发，升级后再用' : '订阅地址是入口')}
                   </span>
+                  <button type="button" className="row-act" disabled={reach?.state === 'busy'} onClick={() => probeReach('traffic', fw.id)}>
+                    {reach?.state === 'busy' ? '测试中…' : '测通断'}
+                  </button>
                 </div>
               </div>
             )
@@ -808,13 +1016,20 @@ function ForwardsPanel() {
             const title = inb.name || (k === 'port' ? '端口中转' : '链式中转')
             const addr = `${inb.server_host || ''}${inb.port ? `:${inb.port}` : ''}`
             const row = probes[inb.id]
-            const foot = !row
+            const reach = reaches[`in-${inb.id}`]
+            const latencyFoot = !row
               ? (k === 'port' ? '从入口测到目标' : (n > 1 ? '从入口直连最后一跳' : '从入口测到落地'))
               : row.state === 'busy'
                 ? '测量中…'
                 : row.state === 'ok'
                   ? `${row.host}:${row.port}`
                   : (row.error || '探测失败')
+            const foot = reach?.state === 'busy'
+              ? '通断测试中…'
+              : reach?.state === 'ok'
+                ? (row?.state === 'ok' ? `${reachFoot(reach.hops)} · ${row.ms} ms` : reachFoot(reach.hops))
+                : latencyFoot
+            const reachDetail = asArray(reach?.hops).map(h => h.error || h.note).filter(Boolean).join(' · ')
             return (
               <div key={inb.id} className={`machine is-static ${forwardCardTone(st)}`}>
                 <div className="machine-head">
@@ -833,6 +1048,7 @@ function ForwardsPanel() {
                     </button>
                     <MoreMenu iconOnly items={[
                       { label: '编辑', onSelect: () => startEdit(inb) },
+                      { label: '测通断', onSelect: () => probeReach('in', inb.id) },
                       { label: '测延迟', onSelect: () => probeLatency(inb) },
                       { label: inb.enabled ? '停用' : '启用', onSelect: () => toggle(inb) },
                       { sep: true },
@@ -841,7 +1057,7 @@ function ForwardsPanel() {
                   </div>
                 </div>
                 <div className="fwd-path">
-                  <PathHops inb={inb} byID={byID} serversByID={serversByID} />
+                  <PathHops inb={inb} byID={byID} serversByID={serversByID} marks={reach?.hops} />
                   <div className="text-[11px] text-ink-mut mt-0.5">{pathSub(inb, byID)}{n > 1 ? ` · ${n} 跳` : ''}</div>
                 </div>
                 <div className="machine-metrics">
@@ -853,10 +1069,15 @@ function ForwardsPanel() {
                   <Metric label="入口" value={inb.server_name || '—'} plain />
                 </div>
                 <div className="machine-foot">
-                  <span className="fwd-probe-note" title={foot}>{foot}</span>
-                  <button type="button" className="row-act" disabled={row?.state === 'busy'} onClick={() => probeLatency(inb)}>
-                    {row?.state === 'busy' ? '测量中…' : '测延迟'}
-                  </button>
+                  <span className="fwd-probe-note" title={reachDetail || foot}>{foot}</span>
+                  <span className="fwd-foot-acts">
+                    <button type="button" className="row-act" disabled={reach?.state === 'busy'} onClick={() => probeReach('in', inb.id)}>
+                      {reach?.state === 'busy' ? '测试中…' : '测通断'}
+                    </button>
+                    <button type="button" className="row-act" disabled={row?.state === 'busy'} onClick={() => probeLatency(inb)}>
+                      {row?.state === 'busy' ? '测量中…' : '测延迟'}
+                    </button>
+                  </span>
                 </div>
               </div>
             )
@@ -914,11 +1135,28 @@ function ForwardsPanel() {
                     <div className="text-[12px] text-ink-mut mt-0.5">可以不加。上一台连过来时，默认用公网地址。专线地址填在「给上一台连的地址」。</div>
                   </div>
                 </div>
-                {(f.tf_hops || []).map((h, i) => (
+                {(f.tf_hops || []).map((h, i) => {
+                  const target = trafficHopTarget(h)
+                  const land = byID.get(Number(f.tf_landing_id))
+                  if (target && !target.missing) {
+                    target.udp = udpOnlyNode(land)
+                    target.mixed = mixedNode(land)
+                  }
+                  const from = trafficFromId(i)
+                  return (
                   <div key={i} className="space-y-3 pt-3" style={{ borderTop: '1px solid var(--color-line-soft)' }}>
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-[12px] font-medium text-ink-soft">第 {i + 1} 台</div>
-                      <button type="button" className="btn-ghost px-2 text-[12px]" onClick={() => setF({ ...f, tf_hops: f.tf_hops.filter((_, idx) => idx !== i) })}>去掉</button>
+                      <div className="flex items-center gap-1">
+                        <ReachTestButton
+                          row={formReach[`tf-${i}`]}
+                          host={target.host}
+                          port={target.port}
+                          title="从上一台测到这台给它连的地址"
+                          onClick={() => probeForm(`tf-${i}`, from?.missing || from?.external ? 0 : from, from?.missing || from?.external ? from : target)}
+                        />
+                        <button type="button" className="btn-ghost px-2 text-[12px]" onClick={() => setF({ ...f, tf_hops: f.tf_hops.filter((_, idx) => idx !== i) })}>去掉</button>
+                      </div>
                     </div>
                     <Field label="实例">
                       <select className="input-field" value={h.server_id} onChange={e => setTfHop(i, { server_id: e.target.value })}>
@@ -935,7 +1173,8 @@ function ForwardsPanel() {
                       </Field>
                     </div>
                   </div>
-                ))}
+                  )
+                })}
                 {(f.tf_hops || []).length < 4 ? (
                   <button type="button" className="btn-ghost" onClick={() => setF({ ...f, tf_hops: [...(f.tf_hops || []), emptyTrafficHop()] })}>
                     <Icon name="plus" size={15} /> 增加一台
@@ -955,6 +1194,19 @@ function ForwardsPanel() {
               <Field label="给上一台连的地址" hint="留空用落地机器的公网地址。家宽只能从专线连时，填专线地址。">
                 <input className="input-field font-mono" value={f.tf_landing_dial} onChange={e => setF({ ...f, tf_landing_dial: e.target.value })} placeholder="专线 IP 或域名" />
               </Field>
+              <div className="flex justify-end">
+                <ReachTestButton
+                  row={formReach['tf-land']}
+                  host={trafficLandTarget().host}
+                  port={trafficLandTarget().port}
+                  title="从上一台测到落地的专线地址"
+                  onClick={() => {
+                    const target = trafficLandTarget()
+                    const from = trafficFromId('land')
+                    probeForm('tf-land', from?.missing || from?.external ? 0 : from, from?.missing || from?.external ? from : target)
+                  }}
+                />
+              </div>
               {trafficLandings.length === 0 ? (
                 <div className="notice">还没有落地节点。先到「节点」在家宽机器上建一条。</div>
               ) : null}
@@ -1045,9 +1297,22 @@ function ForwardsPanel() {
                       <div className="text-[12px] font-medium text-ink-soft">
                         {hops.length === 1 ? '落地' : (last ? `落地 · 第 ${i + 1} 跳` : `第 ${i + 1} 跳`)}
                       </div>
-                      {hops.length > 1 ? (
-                        <button type="button" className="btn-ghost px-2 text-[12px]" onClick={() => removeHop(i)}>去掉</button>
-                      ) : null}
+                      <div className="flex items-center gap-1">
+                        <ReachTestButton
+                          row={formReach[`hop-${i}`]}
+                          host={chainTarget(h).host}
+                          port={chainTarget(h).port}
+                          title="从上一台测到这一跳"
+                          onClick={() => {
+                            const from = chainFromId(i)
+                            const target = chainTarget(h)
+                            probeForm(`hop-${i}`, from?.missing || from?.external ? 0 : from, from?.missing || from?.external ? from : target)
+                          }}
+                        />
+                        {hops.length > 1 ? (
+                          <button type="button" className="btn-ghost px-2 text-[12px]" onClick={() => removeHop(i)}>去掉</button>
+                        ) : null}
+                      </div>
                     </div>
                     <Field label="这一跳">
                       <select className="input-field" value={h.kind} onChange={e => setHop(i, { kind: e.target.value })}>
@@ -1132,6 +1397,25 @@ function ForwardsPanel() {
                   <option value="tcp,udp">TCP + UDP</option>
                 </select>
               </Field>
+              <div className="flex justify-end">
+                <ReachTestButton
+                  row={formReach.port}
+                  host={String(f.dest_host || '').trim()}
+                  port={Number(f.dest_port) || 0}
+                  title={String(f.network || '').includes('udp') ? 'UDP 未测' : '从入口测到目标'}
+                  onClick={() => {
+                    const host = String(f.dest_host || '').trim()
+                    const port = Number(f.dest_port) || 0
+                    const target = !port ? { missing: '先保存' } : !host ? { missing: '没有地址' } : {
+                      host,
+                      port,
+                      udp: f.network === 'udp',
+                      mixed: String(f.network || '').includes('udp') && f.network !== 'udp',
+                    }
+                    probeForm('port', f.server_id, target)
+                  }}
+                />
+              </div>
             </>
           )}
           {f.kind !== 'port' && showNewEntry && needsTLS(f.profile) && (

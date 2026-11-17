@@ -154,6 +154,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/api/servers/{id}/allow-port", s.handleAllowPort)
 			r.Post("/api/servers/{id}/rotate-token", s.handleRotateToken)
 			r.Post("/api/servers/{id}/dest-probe", s.handleDestProbe)
+			r.Post("/api/servers/{id}/reach", s.handleServerReach)
 			r.Get("/api/servers/{id}/cf-domains", s.handleServerCFDomains)
 			r.Get("/api/cf-domains", s.handleCFDomains)
 
@@ -161,11 +162,13 @@ func (s *Server) Router() http.Handler {
 			r.Post("/api/traffic-forwards", s.handleCreateTrafficForward)
 			r.Put("/api/traffic-forwards/{id}", s.handleUpdateTrafficForward)
 			r.Delete("/api/traffic-forwards/{id}", s.handleDeleteTrafficForward)
+			r.Post("/api/traffic-forwards/{id}/hop-probe", s.handleTrafficHopProbe)
 
 			r.Get("/api/inbounds", s.handleListInbounds)
 			r.Post("/api/inbounds", s.handleCreateInbound)
 			r.Get("/api/inbounds/{id}/share", s.handleInboundShare)
 			r.Post("/api/inbounds/{id}/probe", s.handleInboundProbe)
+			r.Post("/api/inbounds/{id}/hop-probe", s.handleInboundHopProbe)
 			r.Post("/api/inbounds/{id}/listen-probe", s.handleListenProbe)
 			r.Put("/api/inbounds/{id}", s.handleUpdateInbound)
 			r.Delete("/api/inbounds/{id}", s.handleDeleteInbound)
