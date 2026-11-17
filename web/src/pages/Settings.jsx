@@ -275,7 +275,7 @@ function TelegramBindBox() {
         <div className="text-[15px] font-medium">Telegram</div>
         <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
           {bound
-            ? '已绑定。可以在私聊里查流量、到期和订阅链接。'
+            ? '已绑定。私聊里可以查账号、节点、近 7 日和订阅。不能改密码或重置订阅。'
             : `点「用 Telegram 打开」，在私聊 ${who} 里按开始就绑定好了。10 分钟内有效。`}
         </p>
       </div>
@@ -414,7 +414,7 @@ function TelegramCard() {
       <div>
         <div className="text-[15px] font-medium">Telegram</div>
         <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
-          只做告警和查询。不在群里说话，也不能在 Telegram 里改密码、重置订阅或删用户。保存 Token 后，点「用 Telegram 打开」，在私聊里按开始。
+          可以在私聊里查账号、节点、订阅和机器。不在群里说话，也不能在 Telegram 里改密码、重置订阅或删用户。保存 Token 后，点「用 Telegram 打开」，在私聊里按开始。
           {bot ? ` 当前 Bot：@${bot}。` : ''}
         </p>
       </div>

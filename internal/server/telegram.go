@@ -86,6 +86,11 @@ func (s *Server) telegramPollLoop() {
 		token := s.tgToken()
 		if dropped != token {
 			s.tgDropWebhook()
+			if ctx.Err() == nil {
+				menuCtx, menuCancel := context.WithTimeout(ctx, 8*time.Second)
+				s.tgEnsureMenu(menuCtx)
+				menuCancel()
+			}
 			dropped = token
 		}
 		s.tgPoll(ctx)
@@ -217,38 +222,7 @@ func (s *Server) tgHandleUpdate(up tgUpdate) {
 	if len(fields) > 1 {
 		arg = strings.TrimSpace(strings.Join(fields[1:], " "))
 	}
-	switch cmd {
-	case "/start", "/help":
-		if cmd == "/start" && arg != "" {
-			s.tgApplyCode(msg.Chat.ID, arg)
-			return
-		}
-		s.tgReply(msg.Chat.ID, s.tgHelp(msg.Chat.ID))
-	case "/status":
-		s.tgCmdStatus(msg.Chat.ID)
-	case "/user":
-		s.tgCmdUser(msg.Chat.ID, arg)
-	case "/bind":
-		if arg == "" {
-			s.tgReply(msg.Chat.ID, tgOpenHint+"打不开时发送 /bind 和 6 位绑定码。")
-			return
-		}
-		s.tgApplyCode(msg.Chat.ID, arg)
-	case "/me":
-		s.tgCmdMe(msg.Chat.ID)
-	case "/sub":
-		s.tgCmdSub(msg.Chat.ID)
-	case "/unbind":
-		s.tgCmdUnbind(msg.Chat.ID)
-	default:
-		if tgDigits(text) {
-			s.tgApplyCode(msg.Chat.ID, text)
-			return
-		}
-		if strings.HasPrefix(cmd, "/") {
-			s.tgReply(msg.Chat.ID, "不认识这个命令。发送 /help 查看可用命令。")
-		}
-	}
+	s.tgHandleText(msg.Chat.ID, cmd, arg, text)
 }
 
 func (s *Server) tgHandleCallback(cb *tgCallback) {
@@ -267,135 +241,17 @@ func (s *Server) tgHandleCallback(cb *tgCallback) {
 		_ = s.tgAnswer(cb.ID, "只在私聊里使用")
 		return
 	}
-	if cb.Data != "sub" {
-		_ = s.tgAnswer(cb.ID, "不认识这个按钮")
-		return
-	}
-	u, ok := s.tgBoundUser(chatID)
-	if !ok {
-		_ = s.tgAnswer(cb.ID, "还没有绑定")
-		return
-	}
-	link, err := s.tgSubLink(u)
-	if err != nil {
-		_ = s.tgAnswer(cb.ID, err.Error())
-		return
-	}
-	_ = s.tgAnswer(cb.ID, "已显示")
-	if err := s.tgEdit(chatID, msgID, "订阅链接：\n"+link, &tgMarkup{Keyboard: [][]tgButton{}}); err != nil {
-		s.tgReply(chatID, "订阅链接：\n"+link)
-	}
-	db.AddAudit(s.DB, &u.ID, "tg.sub", u.Username)
+	_ = s.tgAnswer(cb.ID, "")
+	s.tgRouteCallback(chatID, msgID, cb.Data)
 }
 
 func tgPrivate(c tgChat) bool {
 	return c.Type == "private" && c.ID > 0
 }
 
-func (s *Server) tgHelp(chatID int64) string {
-	admin := s.tgIsAdmin(chatID)
-	_, bound := s.tgBoundUser(chatID)
-	if !admin && !bound {
-		return tgOpenHint
-	}
-	var b strings.Builder
-	if admin {
-		b.WriteString("管理员\n/status  在线机器\n/user 用户名  查看账号")
-	}
-	if bound {
-		if b.Len() > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString("/me  流量和到期\n/sub  订阅链接\n/unbind  解除绑定")
-	}
-	return b.String()
-}
-
 func (s *Server) tgIsAdmin(chatID int64) bool {
 	id, ok := s.tgAdminChat()
 	return ok && id == chatID
-}
-
-func (s *Server) tgCmdStatus(chatID int64) {
-	if !s.tgIsAdmin(chatID) {
-		s.tgReply(chatID, "这个对话还不是管理员。"+tgOpenHint)
-		return
-	}
-	list, err := db.ListServers(s.DB)
-	if err != nil {
-		s.tgReply(chatID, "查询失败")
-		return
-	}
-	s.reconcileOnline(list)
-	online := 0
-	var off []string
-	for _, x := range list {
-		if x == nil {
-			continue
-		}
-		if x.Online == 1 {
-			online++
-			continue
-		}
-		if x.LastSeen > 0 {
-			off = append(off, x.Name)
-		}
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "在线 %d / 共 %d 台", online, len(list))
-	if len(off) == 0 {
-		b.WriteString("\n没有离线机器")
-	} else {
-		b.WriteString("\n离线：")
-		n := len(off)
-		if n > 30 {
-			off = off[:30]
-		}
-		for _, name := range off {
-			b.WriteString("\n- " + name)
-		}
-		if n > 30 {
-			fmt.Fprintf(&b, "\n还有 %d 台", n-30)
-		}
-	}
-	s.tgReply(chatID, b.String())
-}
-
-func (s *Server) tgCmdUser(chatID int64, name string) {
-	if !s.tgIsAdmin(chatID) {
-		s.tgReply(chatID, "这个对话还不是管理员。"+tgOpenHint)
-		return
-	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		s.tgReply(chatID, "用法：/user 用户名")
-		return
-	}
-	u, err := db.GetUserByName(s.DB, name)
-	if err != nil || u == nil || u.Role == "admin" {
-		s.tgReply(chatID, "没有这个用户")
-		return
-	}
-	s.tgReply(chatID, s.tgUserText(u))
-}
-
-func (s *Server) tgCmdMe(chatID int64) {
-	u, ok := s.tgBoundUser(chatID)
-	if !ok {
-		s.tgReply(chatID, "还没有绑定")
-		return
-	}
-	s.tgReply(chatID, s.tgUserText(u))
-}
-
-func (s *Server) tgCmdSub(chatID int64) {
-	if _, ok := s.tgBoundUser(chatID); !ok {
-		s.tgReply(chatID, "还没有绑定")
-		return
-	}
-	s.tgSend(chatID, "订阅链接已隐藏。点按钮后只在这条私聊里显示。", &tgMarkup{
-		Keyboard: [][]tgButton{{{Text: "显示订阅链接", Data: "sub"}}},
-	})
 }
 
 func (s *Server) tgApplyCode(chatID int64, code string) {
@@ -432,7 +288,7 @@ func (s *Server) tgClaimAdmin(chatID, userID int64) {
 	if userID > 0 {
 		db.AddAudit(s.DB, &userID, "tg.admin", strconv.FormatInt(chatID, 10))
 	}
-	s.tgReply(chatID, "已连接。\n"+s.tgHelp(chatID))
+	_ = s.tgSend(chatID, "已连接\n"+s.tgOverviewText(), s.tgReplyKeyboard(chatID))
 }
 
 func (s *Server) tgFinishBind(chatID, userID int64) {
@@ -446,19 +302,17 @@ func (s *Server) tgFinishBind(chatID, userID int64) {
 		return
 	}
 	u, err := db.GetUser(s.DB, userID)
-	name := ""
 	if err == nil && u != nil {
-		name = u.Username
 		db.AddAudit(s.DB, &u.ID, "tg.bind", u.Username)
 	}
 	if had && prev != chatID {
 		s.tgReply(prev, "这个账号已改绑到别的 Telegram。")
 	}
-	if name == "" {
+	if err != nil || u == nil || u.Role == "admin" {
 		s.tgReply(chatID, "已绑定")
 		return
 	}
-	s.tgReply(chatID, "已绑定 "+name)
+	s.tgOpen(chatID, "home", 0)
 }
 
 func (s *Server) tgCmdUnbind(chatID int64) {
@@ -485,34 +339,6 @@ func (s *Server) tgBoundUser(chatID int64) (*db.User, bool) {
 		return nil, false
 	}
 	return u, true
-}
-
-func (s *Server) tgUserText(u *db.User) string {
-	if u == nil {
-		return "没有这个用户"
-	}
-	name := strings.TrimSpace(u.PackageName)
-	if name == "" {
-		name = "未绑定套餐"
-	}
-	switch u.Direction {
-	case "oneway":
-		name += " · 单向"
-	case "twoway":
-		name += " · 双向"
-	}
-	exp := soonerExpiry(u.ExpiresAt, u.PkgExpires)
-	expText := "不限期"
-	if exp > 0 {
-		now := db.ClockNow(s.DB)
-		expText = time.Unix(exp, 0).In(now.Location()).Format("2006-01-02")
-	}
-	used := tgBytes(u.BilledBytes)
-	traffic := "流量：" + used + "，不限额度"
-	if u.TrafficCap > 0 {
-		traffic = fmt.Sprintf("流量：%s / %s（%d%%）", used, tgBytes(u.TrafficCap), u.QuotaRatio)
-	}
-	return u.Username + "\n套餐：" + name + "\n到期：" + expText + "\n" + traffic
 }
 
 func (s *Server) tgSubLink(u *db.User) (string, error) {
@@ -579,7 +405,7 @@ func (s *Server) tgScanServers() {
 	if err != nil {
 		return
 	}
-	s.reconcileOnline(list)
+	s.decorateServers(list)
 	now := time.Now().Unix()
 	for _, x := range list {
 		if x == nil || x.LastSeen <= 0 {
@@ -595,13 +421,15 @@ func (s *Server) tgScanServers() {
 			if ok && state == "down" && now-last < int64(tgRepeat/time.Second) {
 				continue
 			}
-			if s.tgAdmin(x.Name+" 离线") == nil {
+			text, markup := s.tgServerAlert(x, false)
+			if s.tgAdminCard(text, markup) == nil {
 				_ = db.TGNotifyPut(s.DB, key, now, "down")
 			}
 			continue
 		}
 		if state == "down" {
-			if s.tgAdmin(x.Name+" 已恢复在线") == nil {
+			text, markup := s.tgServerAlert(x, true)
+			if s.tgAdminCard(text, markup) == nil {
 				_ = db.TGNotifyPut(s.DB, key, now, "up")
 			}
 			continue
@@ -636,7 +464,10 @@ func (s *Server) tgScanCerts() {
 		if c.ExpiresAt < now {
 			text = "证书 " + c.Name + " 已过期"
 		}
-		if s.tgAdmin(text) == nil {
+		when := time.Unix(c.ExpiresAt, 0).In(db.ClockNow(s.DB).Location()).Format("2006-01-02")
+		text += "\n到期 " + when
+		markup := &tgMarkup{Keyboard: [][]tgButton{{{Text: "回总览", Data: "overview"}}}}
+		if s.tgAdminCard(text, markup) == nil {
 			_ = db.TGNotifyPut(s.DB, key, now, sig)
 		}
 	}
@@ -671,18 +502,11 @@ func (s *Server) tgScanExpire(u *db.User, nowT time.Time, now int64) {
 	}
 	delta := dayDelta(nowT, exp)
 	kind := ""
-	text := ""
 	switch {
 	case delta < 0:
 		kind = "expired"
-		text = u.Username + " 已到期"
 	case delta <= tgExpireSoonDay:
 		kind = "soon"
-		if delta <= 0 {
-			text = u.Username + " 今天到期"
-		} else {
-			text = u.Username + " 将于 " + strconv.Itoa(delta) + " 天后到期"
-		}
 	default:
 		return
 	}
@@ -692,7 +516,8 @@ func (s *Server) tgScanExpire(u *db.User, nowT time.Time, now int64) {
 	if err != nil || (ok && state == sig) {
 		return
 	}
-	if s.tgAdminAndUser(u, text) {
+	text, markup := s.tgExpireAlert(u, delta)
+	if s.tgAdminAndUserCard(u, text, markup) {
 		_ = db.TGNotifyPut(s.DB, key, now, sig)
 	}
 }
@@ -712,11 +537,13 @@ func (s *Server) tgScanTraffic(u *db.User, now int64) {
 		if ok && state == "over" && now-last < int64(tgRepeat/time.Second) {
 			return
 		}
-		if s.tgAdminAndUser(u, u.Username+" 流量已用尽") {
+		text, markup := s.tgTrafficAlert(u, ratio, false)
+		if s.tgAdminAndUserCard(u, text, markup) {
 			_ = db.TGNotifyPut(s.DB, key, now, "over")
 		}
 	case state == "over":
-		if s.tgAdminAndUser(u, u.Username+" 流量已回到额度内") {
+		text, markup := s.tgTrafficAlert(u, ratio, true)
+		if s.tgAdminAndUserCard(u, text, markup) {
 			next := "ok"
 			if ratio >= 80 {
 				next = "warn"
@@ -727,7 +554,8 @@ func (s *Server) tgScanTraffic(u *db.User, now int64) {
 		if ok && state == "warn" && now-last < int64(tgRepeat/time.Second) {
 			return
 		}
-		if s.tgAdminAndUser(u, u.Username+" 流量已用 "+strconv.Itoa(ratio)+"%") {
+		text, markup := s.tgTrafficAlert(u, ratio, false)
+		if s.tgAdminAndUserCard(u, text, markup) {
 			_ = db.TGNotifyPut(s.DB, key, now, "warn")
 		}
 	default:
@@ -751,38 +579,43 @@ func (s *Server) tgBackupFailed(err error) {
 	if len(msg) > 180 {
 		msg = msg[:180]
 	}
-	if s.tgAdmin("定时备份失败："+msg) == nil {
+	markup := &tgMarkup{Keyboard: [][]tgButton{{{Text: "回总览", Data: "overview"}}}}
+	if s.tgAdminCard("定时备份失败："+msg, markup) == nil {
 		_ = db.TGNotifyPut(s.DB, key, time.Now().Unix(), "fail")
 	}
 }
 
-func (s *Server) tgAdminAndUser(u *db.User, text string) bool {
-	adminOK := s.tgAdmin(text) == nil
+func (s *Server) tgAdminAndUserCard(u *db.User, text string, markup any) bool {
+	adminOK := s.tgAdminCard(text, markup) == nil
 	userOK := false
 	if u != nil {
 		if chat, bound, err := db.TGChatByUser(s.DB, u.ID); err == nil && bound {
-			userOK = s.tgSend(chat, text, nil) == nil
+			userOK = s.tgSend(chat, text, markup) == nil
 		}
 	}
 	return adminOK || userOK
 }
 
 func (s *Server) tgAdmin(text string) error {
+	return s.tgAdminCard(text, nil)
+}
+
+func (s *Server) tgAdminCard(text string, markup any) error {
 	chat, ok := s.tgAdminChat()
 	if !ok {
 		return fmt.Errorf("请先点「用 Telegram 打开」连接你的 Telegram")
 	}
-	return s.tgSend(chat, text, nil)
+	return s.tgSend(chat, text, markup)
 }
 
 func (s *Server) tgReply(chatID int64, text string) {
 	_ = s.tgSend(chatID, text, nil)
 }
 
-func (s *Server) tgSend(chatID int64, text string, markup *tgMarkup) error {
+func (s *Server) tgSend(chatID int64, text string, markup any) error {
 	body := map[string]any{
 		"chat_id":                  chatID,
-		"text":                     text,
+		"text":                     tgClip(text),
 		"disable_web_page_preview": true,
 	}
 	if markup != nil {
@@ -793,11 +626,11 @@ func (s *Server) tgSend(chatID int64, text string, markup *tgMarkup) error {
 	return s.tgCall(ctx, "sendMessage", body, nil)
 }
 
-func (s *Server) tgEdit(chatID, messageID int64, text string, markup *tgMarkup) error {
+func (s *Server) tgEdit(chatID, messageID int64, text string, markup any) error {
 	body := map[string]any{
 		"chat_id":                  chatID,
 		"message_id":               messageID,
-		"text":                     text,
+		"text":                     tgClip(text),
 		"disable_web_page_preview": true,
 	}
 	if markup != nil {
@@ -828,6 +661,24 @@ func (s *Server) tgRememberBot(ctx context.Context) {
 	if name != "" {
 		_ = db.SetSetting(s.DB, "tg_bot_username", name)
 	}
+	s.tgEnsureMenu(ctx)
+}
+
+func (s *Server) tgEnsureMenu(ctx context.Context) {
+	if ctx == nil {
+		return
+	}
+	_ = s.tgCall(ctx, "setMyCommands", map[string]any{
+		"commands": []map[string]string{
+			{"command": "start", "description": "首页"},
+			{"command": "help", "description": "说明"},
+			{"command": "me", "description": "我的账号"},
+			{"command": "sub", "description": "订阅链接"},
+			{"command": "status", "description": "机器状态"},
+			{"command": "user", "description": "查询用户"},
+			{"command": "unbind", "description": "解除绑定"},
+		},
+	}, nil)
 }
 
 func (s *Server) tgCall(ctx context.Context, method string, payload any, dest any) error {
