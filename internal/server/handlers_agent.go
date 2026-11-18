@@ -115,9 +115,10 @@ func (s *Server) upgradeOnlineAgent(actorID *int64, srv *db.Server) error {
 		return failUpgrade(http.StatusInternalServerError, "计算校验失败", "")
 	}
 	raw, err := s.Hub.SendRPC(srv.ID, wsproto.TypeUpgrade, wsproto.Upgrade{
-		Version: version.Version,
-		SHA256:  sum,
-		URL:     agentBinDownloadURL(osName, arch),
+		Version:     version.Version,
+		SHA256:      sum,
+		URL:         agentBinDownloadURL(osName, arch),
+		FallbackURL: agentFallbackURL(arch),
 	}, 3*time.Minute)
 	if err != nil {
 		return failUpgrade(http.StatusBadRequest, err.Error(), "")
@@ -514,7 +515,7 @@ func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 	srv.Token = tok
 	u := userFromCtx(r.Context())
 	db.AddAudit(s.DB, &u.ID, "server.rotate_token", srv.Name)
-	jsonOK(w, map[string]any{"token": tok, "command": s.installCmd(r, srv)})
+	jsonOK(w, s.installFields(r, srv, map[string]any{"token": tok, "command": s.installCmd(r, srv)}))
 }
 
 func sha256Path(path string) (string, error) {

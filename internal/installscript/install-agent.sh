@@ -2,6 +2,7 @@
 # liking 节点 agent 安装脚本（由面板 /v1/install-agent 下发）
 # 用法:
 #   curl -fsSL http://面板:8899/v1/install-agent | bash -s -- --token <hex>
+# 连不上面板时，勾选「国内机器」后的命令会从 GitHub 镜像拉本脚本和 Agent。
 set -euo pipefail
 umask 077
 
@@ -10,10 +11,14 @@ SYSTEMD_DIR="/etc/systemd/system"
 ETC_DIR="/etc/liking"
 DATA_DIR="/var/lib/liking/agent"
 LIKING_PANEL_URL_BAKED=__LIKING_PANEL_URL__
+LIKING_VERSION_BAKED=__LIKING_VERSION__
+REPO="cheesydui-cloud/liking"
+CURL_TLS=()
 
 die() { echo "错误: $*" >&2; exit 1; }
 note() { printf '\033[36m%s\033[0m\n' "$*"; }
 ok()   { printf '\033[32m%s\033[0m\n' "$*"; }
+warn() { printf '\033[33m警告: %s\033[0m\n' "$*" >&2; }
 
 unit_quote() {
   local s=$1
@@ -49,6 +54,139 @@ if [[ "${LIKING_HEADER_TEST:-}" == 1 ]]; then
   exit 0
 fi
 
+fetch_pause() {
+  local n="$1"
+  if [[ "${LIKING_FETCH_DELAY:-1}" == 0 ]]; then
+    return 0
+  fi
+  sleep "$n"
+}
+
+curl_once() {
+  local dest="$1" url="$2" hdr="${3:-}"
+  rm -f "$dest"
+  if [[ -n "$hdr" ]]; then
+    rm -f "$hdr"
+    curl -fL --http1.1 --connect-timeout 20 --max-time 180 --max-filesize 83886080 \
+      ${CURL_TLS[@]+"${CURL_TLS[@]}"} -D "$hdr" -o "$dest" "$url"
+  else
+    curl -fL --http1.1 --connect-timeout 20 --max-time 180 --max-filesize 83886080 \
+      ${CURL_TLS[@]+"${CURL_TLS[@]}"} -o "$dest" "$url"
+  fi
+}
+
+fetch_url() {
+  local dest="$1" url="$2" hdr="${3:-}" attempt
+  for attempt in 1 2 3 4; do
+    if curl_once "$dest" "$url" "$hdr"; then
+      return 0
+    fi
+    rm -f "$dest"
+    if [[ "$attempt" -lt 4 ]]; then
+      fetch_pause $((attempt * 2))
+    fi
+  done
+  return 1
+}
+
+is_agent_file() {
+  local f="$1" sig size
+  [[ -f "$f" ]] || return 1
+  sig="$(od -An -tx1 -N4 "$f" | tr -d ' \r\n')"
+  [[ "$sig" == "7f454c46" ]] || return 1
+  size="$(wc -c < "$f" | tr -d ' ')"
+  [[ "$size" -gt 1048576 && "$size" -le 83886080 ]]
+}
+
+verify_panel_agent() {
+  local f="$1" hdr="$2" expected actual
+  is_agent_file "$f" || return 1
+  expected="$(header_field x-sha256 "$hdr")"
+  [[ "$expected" =~ ^[0-9A-Fa-f]{64}$ ]] || return 1
+  actual="$(sha256sum "$f" | awk '{print $1}' | tr -d '\r')"
+  [[ "${actual,,}" == "${expected,,}" ]]
+}
+
+verify_sums_agent() {
+  local f="$1" sums="$2" asset="$3" expected actual
+  is_agent_file "$f" || return 1
+  expected="$(awk -v a="$asset" '$2 == a { print $1; exit }' "$sums" | tr -d '\r')"
+  [[ "$expected" =~ ^[0-9A-Fa-f]{64}$ ]] || return 1
+  actual="$(sha256sum "$f" | awk '{print $1}' | tr -d '\r')"
+  [[ "${actual,,}" == "${expected,,}" ]]
+}
+
+resolve_agent_version() {
+  local v="${RELEASE:-}"
+  if [[ -z "$v" ]]; then
+    v="${LIKING_VERSION_BAKED:-}"
+  fi
+  v="${v#v}"
+  if [[ -z "$v" || "$v" == "__LIKING_VERSION__" || "$v" == *" "* || "$v" == *"/"* ]]; then
+    return 1
+  fi
+  printf '%s' "$v"
+}
+
+download_agent_to() {
+  local dest="$1"
+  local tmpbin hdr sums panel_ok ver base asset
+  tmpbin="$(mktemp)"
+  hdr="$(mktemp)"
+  sums="$(mktemp)"
+  cleanup_dl() { rm -f "$tmpbin" "$hdr" "$sums"; }
+  panel_ok=0
+  BIN_URL="${PANEL_URL%/}/v1/agent-bin?os=linux&arch=${GOARCH}"
+  if fetch_url "$tmpbin" "$BIN_URL" "$hdr" && verify_panel_agent "$tmpbin" "$hdr"; then
+    panel_ok=1
+  else
+    warn "从面板下载 agent 失败：$BIN_URL"
+    rm -f "$tmpbin" "$hdr"
+  fi
+  if [[ "$panel_ok" -ne 1 ]]; then
+    ver="$(resolve_agent_version)" || {
+      cleanup_dl
+      die "从面板下载失败，且没有版本号，不能改走 GitHub。请加 --release vX.Y.Z，或在面板升级后再复制安装命令"
+    }
+    if [[ -z "${GH_PROXY:-}" ]]; then
+      cleanup_dl
+      die "这台机器连不上面板，下不到 agent。请加上 --gh-proxy https://gh-proxy.com/ 后重试"
+    fi
+    note "改从 GitHub 镜像下载 agent ${ver} …"
+    base="${GH_PROXY}https://github.com/${REPO}/releases/download/v${ver}"
+    asset="liking-agent-linux-${GOARCH}"
+    if ! fetch_url "$sums" "$base/SHA256SUMS"; then
+      cleanup_dl
+      die "镜像上下不到 SHA256SUMS。请检查 --gh-proxy 是否可访问"
+    fi
+    if ! fetch_url "$tmpbin" "$base/$asset" || ! verify_sums_agent "$tmpbin" "$sums" "$asset"; then
+      if [[ "$GOARCH" == "amd64" ]] && fetch_url "$tmpbin" "$base/liking-agent" && verify_sums_agent "$tmpbin" "$sums" "liking-agent"; then
+        note "已用 liking-agent 代替 $asset"
+      else
+        cleanup_dl
+        die "从镜像下载 agent 失败：$base/$asset"
+      fi
+    fi
+  fi
+  install -m 0755 "$tmpbin" "$dest"
+  cleanup_dl
+}
+
+if [[ "${LIKING_AGENT_FETCH_TEST:-}" == 1 ]]; then
+  PANEL_URL="${LIKING_PANEL_URL:-http://panel.test}"
+  GH_PROXY="${LIKING_GITHUB_PROXY:-}"
+  if [[ -n "$GH_PROXY" && "$GH_PROXY" != */ ]]; then
+    GH_PROXY="${GH_PROXY}/"
+  fi
+  GOARCH="${LIKING_TEST_ARCH:-amd64}"
+  RELEASE="${LIKING_TEST_RELEASE:-}"
+  if [[ -n "${LIKING_TEST_VERSION:-}" ]]; then
+    LIKING_VERSION_BAKED="$LIKING_TEST_VERSION"
+  fi
+  download_agent_to "${LIKING_TEST_DEST:?}"
+  exit 0
+fi
+
 require_val() {
   if [[ -z "${2:-}" || "${2:-}" == --* ]]; then
     die "$1 需要值"
@@ -61,7 +199,7 @@ PANEL_URL="${LIKING_PANEL_URL:-}"
 TOKEN="${AGENT_TOKEN:-}"
 ALLOW_INSECURE="${LIKING_ALLOW_INSECURE:-}"
 GH_PROXY="${LIKING_GITHUB_PROXY:-}"
-CURL_TLS=()
+RELEASE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -72,6 +210,8 @@ while [[ $# -gt 0 ]]; do
     --insecure) ALLOW_INSECURE=1; shift ;;
     --gh-proxy) require_val --gh-proxy "${2:-}"; GH_PROXY="$2"; shift 2 ;;
     --gh-proxy=*) GH_PROXY="${1#*=}"; shift ;;
+    --release) require_val --release "${2:-}"; RELEASE="$2"; shift 2 ;;
+    --release=*) RELEASE="${1#*=}"; shift ;;
     -k|--insecure-tls) CURL_TLS=(-k); shift ;;
     -h|--help)
       cat <<'H'
@@ -79,7 +219,8 @@ liking 节点安装
   --panel-url URL   面板地址，缺省用脚本内置
   --token TOKEN     节点 token（必填）
   --insecure        允许明文 http / ws 控制信道
-  --gh-proxy URL    GitHub 镜像前缀，国内机器装内核用，如 https://gh-proxy.com/
+  --gh-proxy URL    GitHub 镜像。连不上面板时用它下载 Agent，内核也走这个镜像
+  --release VER     Agent 版本，例如 v0.3.44。面板下发的脚本不用填
   -k                curl 跳过 TLS 校验
 H
       exit 0 ;;
@@ -87,8 +228,11 @@ H
   esac
 done
 
-if [[ -z "$PANEL_URL" ]]; then
+if [[ -z "$PANEL_URL" || "$PANEL_URL" == "__LIKING_PANEL_URL__" ]]; then
   PANEL_URL="${LIKING_PANEL_URL_BAKED:-}"
+fi
+if [[ "$PANEL_URL" == "__LIKING_PANEL_URL__" ]]; then
+  PANEL_URL=""
 fi
 case "$PANEL_URL" in
   http://*|https://*|ws://*|wss://*) ;;
@@ -135,22 +279,7 @@ if [[ -n "$GH_PROXY" ]]; then
 fi
 
 note "下载 liking-agent ($GOARCH) …"
-BIN_URL="${PANEL_URL%/}/v1/agent-bin?os=linux&arch=${GOARCH}"
-tmpbin="$(mktemp)"
-hdr="$(mktemp)"
-trap 'rm -f "$tmpbin" "$hdr"' EXIT
-curl -fsSL "${CURL_TLS[@]}" --max-filesize 83886080 -D "$hdr" -o "$tmpbin" "$BIN_URL" \
-  || die "下载 agent 失败（面板旁边需要 liking-agent-linux-$GOARCH） $BIN_URL"
-sig="$(od -An -tx1 -N4 "$tmpbin" | tr -d ' \n')"
-[[ "$sig" == "7f454c46" ]] || die "下载的不是 Linux 可执行文件（面板是否放了对应架构的 agent？）"
-size="$(wc -c < "$tmpbin" | tr -d ' ')"
-[[ "$size" -gt 1048576 ]] || die "agent 文件过小 ($size)"
-[[ "$size" -le 83886080 ]] || die "agent 文件过大 ($size)"
-expected="$(header_field x-sha256 "$hdr")"
-[[ "$expected" =~ ^[0-9A-Fa-f]{64}$ ]] || die "响应缺少有效的 agent sha256"
-actual="$(sha256sum "$tmpbin" | awk '{print $1}')"
-[[ "${actual,,}" == "${expected,,}" ]] || die "agent sha256 不匹配"
-install -m 0755 "$tmpbin" "$INSTALL_DIR/liking-agent"
+download_agent_to "$INSTALL_DIR/liking-agent"
 
 CONNECT="$PANEL_URL"
 CONNECT="${CONNECT/https:/wss:}"

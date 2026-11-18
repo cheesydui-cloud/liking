@@ -1,6 +1,6 @@
 .PHONY: web bin dist run test tidy
 
-VERSION ?= 0.3.40
+VERSION ?= 0.3.44
 LDFLAGS := -s -w -X liking/internal/version.Version=$(VERSION)
 export GOCACHE := $(CURDIR)/.gocache
 export GOMODCACHE := $(CURDIR)/.gomod
@@ -24,7 +24,7 @@ run: bin
 
 test:
 	go test ./...
-	cd web && node --test src/lib/dest.test.js
+	cd web && node --test src/lib/dest.test.js src/lib/installCmd.test.js
 
 tidy:
 	go mod tidy

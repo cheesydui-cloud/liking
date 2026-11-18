@@ -2,13 +2,16 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,13 +20,94 @@ import (
 
 const maxAgentBin = 80 << 20
 
+func http1Transport(dial time.Duration) *http.Transport {
+	return &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: dial, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   dial,
+		ResponseHeaderTimeout: 30 * time.Second,
+		ForceAttemptHTTP2:     false,
+		TLSNextProto:          map[string]func(string, *tls.Conn) http.RoundTripper{},
+	}
+}
+
 func (a *Agent) httpClient() *http.Client {
 	return &http.Client{
-		Timeout: 3 * time.Minute,
+		Timeout:   40 * time.Second,
+		Transport: http1Transport(15 * time.Second),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return fmt.Errorf("下载不能跳转")
 		},
 	}
+}
+
+func fallbackHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout:   90 * time.Second,
+		Transport: http1Transport(20 * time.Second),
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("跳转过多")
+			}
+			if !strings.EqualFold(req.URL.Scheme, "https") {
+				return fmt.Errorf("下载不能跳到明文地址")
+			}
+			if fallbackRedirectHostOK(req.URL.Hostname(), via[0].URL.Hostname()) {
+				return nil
+			}
+			return fmt.Errorf("下载不能跳到 %s", req.URL.Hostname())
+		},
+	}
+}
+
+func fallbackRedirectHostOK(host, origin string) bool {
+	host = strings.ToLower(host)
+	origin = strings.ToLower(origin)
+	if host == origin || strings.HasSuffix(host, "."+origin) {
+		return true
+	}
+	switch host {
+	case "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com", "github-releases.githubusercontent.com":
+		return true
+	}
+	return strings.HasSuffix(host, ".githubusercontent.com") || strings.HasSuffix(host, ".github.com")
+}
+
+var agentFallbackPath = regexp.MustCompile(`^/cheesydui-cloud/liking/releases/download/v[0-9]+\.[0-9]+\.[0-9]+/liking-agent(-linux-(amd64|arm64))?$`)
+
+func checkAgentFallbackURL(src string) error {
+	u, err := url.Parse(src)
+	if err != nil || u.Host == "" || u.User != nil {
+		return fmt.Errorf("备用地址无效")
+	}
+	if !strings.EqualFold(u.Scheme, "https") || !strings.EqualFold(u.Hostname(), "github.com") {
+		return fmt.Errorf("备用地址必须来自 GitHub")
+	}
+	if u.RawQuery != "" || u.Fragment != "" || !agentFallbackPath.MatchString(u.EscapedPath()) {
+		return fmt.Errorf("备用地址无效")
+	}
+	return nil
+}
+
+func (a *Agent) upgradeSources(req wsproto.Upgrade) ([]string, error) {
+	primary, err := a.resolveURL(req.URL)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.checkUpgradeURL(primary); err != nil {
+		return nil, err
+	}
+	out := []string{primary}
+	fb := strings.TrimSpace(req.FallbackURL)
+	if fb == "" || checkAgentFallbackURL(fb) != nil {
+		return out, nil
+	}
+	if p := githubProxy(); p != "" {
+		out = append(out, p+"/"+fb)
+		return out, nil
+	}
+	out = append(out, fb)
+	return out, nil
 }
 
 func (a *Agent) resolveURL(raw string) (string, error) {
@@ -79,12 +163,13 @@ func (a *Agent) checkUpgradeURL(src string) error {
 }
 
 func (a *Agent) replaceSelf(ctx context.Context, req wsproto.Upgrade) error {
-	src, err := a.resolveURL(req.URL)
+	sources, err := a.upgradeSources(req)
 	if err != nil {
 		return err
 	}
-	if err := a.checkUpgradeURL(src); err != nil {
-		return err
+	want := strings.ToLower(strings.TrimSpace(req.SHA256))
+	if want == "" {
+		return fmt.Errorf("缺少校验")
 	}
 	exe, err := os.Executable()
 	if err != nil {
@@ -95,33 +180,51 @@ func (a *Agent) replaceSelf(ctx context.Context, req wsproto.Upgrade) error {
 		return err
 	}
 	tmp := exe + ".new"
-	if err := downloadFile(ctx, a.httpClient(), src, tmp); err != nil {
-		_ = os.Remove(tmp)
-		return err
+	var last error
+	for i, src := range sources {
+		client := a.httpClient()
+		attempt := ctx
+		cancel := func() {}
+		if i == 0 {
+			attempt, cancel = context.WithTimeout(ctx, 40*time.Second)
+		} else {
+			client = fallbackHTTPClient()
+		}
+		err := downloadFile(attempt, client, src, tmp)
+		cancel()
+		if err != nil {
+			last = err
+			_ = os.Remove(tmp)
+			continue
+		}
+		sum, err := fileSHA256(tmp)
+		if err != nil {
+			last = err
+			_ = os.Remove(tmp)
+			continue
+		}
+		if want != sum {
+			last = fmt.Errorf("校验失败")
+			_ = os.Remove(tmp)
+			continue
+		}
+		if err := os.Chmod(tmp, 0o755); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+		if err := os.Rename(tmp, exe); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+		return nil
 	}
-	sum, err := fileSHA256(tmp)
-	if err != nil {
-		_ = os.Remove(tmp)
-		return err
+	if last == nil {
+		last = fmt.Errorf("下载失败")
 	}
-	want := strings.ToLower(strings.TrimSpace(req.SHA256))
-	if want == "" {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("缺少校验")
+	if len(sources) > 1 {
+		return fmt.Errorf("面板和镜像都没下到 agent: %v", last)
 	}
-	if want != sum {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("校验失败")
-	}
-	if err := os.Chmod(tmp, 0o755); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, exe); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
+	return last
 }
 
 func downloadFile(ctx context.Context, client *http.Client, src, dest string) error {

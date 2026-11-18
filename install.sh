@@ -64,7 +64,7 @@ liking 一键安装 / 升级 / 卸载（面板 liking-server）
   liking-upgrade              升级到 latest
   liking-uninstall            卸载（加 --purge 清数据）
 
-节点 Agent 不走 GitHub，在面板「服务器」页复制一键命令。
+节点 Agent 在面板「服务器」页复制一键命令。连不上面板时勾选「国内机器」，脚本和 Agent 改从 GitHub 镜像下载。
 USAGE
 }
 

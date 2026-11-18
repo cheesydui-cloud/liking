@@ -13,6 +13,7 @@ import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, FilterTabs, Icon, LineStatus, Meter, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, fmtAgo, fmtBps, fmtBytes, machineTone } from '../components/ui'
 import { CORE_OPTIONS, coreLabel, fmtExpires, fmtResetDay, isExpired, parseCores, ymd, ymdToUnix } from '../lib/display'
 import { DEFAULT_PORT_MAX, DEFAULT_PORT_MIN, formatPortRange, parsePort } from '../lib/ports'
+import { cnAgentInstallCommand } from '../lib/installCmd'
 
 function gbFromLimit(n) {
   if (!n) return ''
@@ -79,6 +80,17 @@ function withGhProxyFlag(cmd, on, url) {
   return `${cmd.replace(/\s+$/, '')} --gh-proxy ${norm}`
 }
 
+function installFrom(d, command) {
+  const src = d && typeof d === 'object' ? d : {}
+  return {
+    command: command || src.command || src.install || '',
+    token: src.token || '',
+    panel_url: src.panel_url || '',
+    version: src.version || '',
+    insecure: !!src.insecure,
+  }
+}
+
 export default function Servers() {
   const toast = useToast()
   const dialog = useDialog()
@@ -87,7 +99,7 @@ export default function Servers() {
   const [ready, setReady] = useState(() => peekList('servers') !== undefined)
   const [name, setName] = useState('')
   const [host, setHost] = useState('')
-  const [cmd, setCmd] = useState('')
+  const [install, setInstall] = useState(null)
   const [cnInstall, setCnInstall] = useState(() => loadGhProxyPref().on)
   const [ghProxy, setGhProxy] = useState(() => loadGhProxyPref().url)
   const [formOpen, setFormOpen] = useState(false)
@@ -179,7 +191,20 @@ export default function Servers() {
     } catch {}
   }, [cnInstall, ghProxy])
 
-  const installCmd = useMemo(() => withGhProxyFlag(cmd, cnInstall, ghProxy), [cmd, cnInstall, ghProxy])
+  const installCmd = useMemo(() => {
+    if (!install?.command) return ''
+    if (cnInstall) {
+      const built = cnAgentInstallCommand({
+        panelURL: install.panel_url,
+        token: install.token,
+        version: install.version,
+        proxy: ghProxy,
+        insecure: install.insecure,
+      })
+      if (built) return built
+    }
+    return withGhProxyFlag(install.command, cnInstall, ghProxy)
+  }, [install, cnInstall, ghProxy])
 
   const openCreate = () => {
     setName('')
@@ -222,7 +247,7 @@ export default function Servers() {
       })
       setName(''); setHost('')
       setFormOpen(false)
-      setCmd(d.install || '')
+      setInstall(installFrom(d, d.install))
       toast('已添加实例')
       load()
     } catch (e) { toast(e.message, 'error') }
@@ -412,7 +437,7 @@ export default function Servers() {
   const showInstall = async (id) => {
     try {
       const d = await api.get(`/servers/${id}/install`)
-      setCmd(d.command)
+      setInstall(installFrom(d, d.command))
     } catch (e) { toast(e.message, 'error') }
   }
 
@@ -607,7 +632,7 @@ export default function Servers() {
     }))) return
     try {
       const d = await api.post(`/servers/${s.id}/rotate-token`)
-      if (d.command) setCmd(d.command)
+      if (d.command) setInstall(installFrom(d, d.command))
       toast('令牌已更换')
       load()
     } catch (e) { toast(e.message, 'error') }
@@ -992,9 +1017,9 @@ export default function Servers() {
         ) : null}
       </Modal>
 
-      <Modal open={!!cmd} title="一键安装 Agent" onClose={() => setCmd('')} wide footer={
+      <Modal open={!!install} title="一键安装 Agent" onClose={() => setInstall(null)} wide footer={
         <>
-          <button type="button" className="btn-ghost" onClick={() => setCmd('')}>关闭</button>
+          <button type="button" className="btn-ghost" onClick={() => setInstall(null)}>关闭</button>
           <button type="button" className="btn-primary" onClick={async () => {
             try { await copyText(installCmd); toast('已复制') }
             catch { toast('浏览器不允许自动复制，请手动选中命令', 'error') }
@@ -1009,7 +1034,7 @@ export default function Servers() {
           <input type="checkbox" className="mt-0.5" checked={cnInstall} onChange={e => setCnInstall(e.target.checked)} />
           <span>
             <span className="font-medium text-ink">国内机器</span>
-            <span className="block text-[12px] text-ink-mut mt-0.5">Agent 从本面板下载。勾选后第一次下发节点时，Xray / sing-box 走 GitHub 镜像。</span>
+            <span className="block text-[12px] text-ink-mut mt-0.5">安装脚本和 Agent 都从 GitHub 镜像下载，不依赖这台机器访问面板。内核下载也走镜像。装好后 Agent 仍要能连上面板。</span>
           </span>
         </label>
         {cnInstall ? (

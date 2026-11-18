@@ -185,7 +185,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	u := userFromCtx(r.Context())
 	db.AddAudit(s.DB, &u.ID, "server.create", srv.Name)
-	jsonOK(w, map[string]any{"server": srv, "install": s.installCmd(r, srv)})
+	jsonOK(w, s.installFields(r, srv, map[string]any{"server": srv, "install": s.installCmd(r, srv)}))
 }
 
 func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
@@ -332,7 +332,23 @@ func (s *Server) handleServerInstall(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "服务器不存在")
 		return
 	}
-	jsonOK(w, map[string]any{"command": s.installCmd(r, srv), "token": srv.Token})
+	jsonOK(w, s.installFields(r, srv, map[string]any{"command": s.installCmd(r, srv), "token": srv.Token}))
+}
+
+const agentInstallCurl = "curl -fsSL --http1.1 --retry 5 --retry-delay 2 --connect-timeout 20"
+
+func (s *Server) installFields(r *http.Request, srv *db.Server, extra map[string]any) map[string]any {
+	base := panelURL(s.DB, r)
+	out := map[string]any{
+		"token":     srv.Token,
+		"panel_url": base,
+		"version":   version.Version,
+		"insecure":  strings.HasPrefix(base, "http://"),
+	}
+	for k, v := range extra {
+		out[k] = v
+	}
+	return out
 }
 
 func (s *Server) installCmd(r *http.Request, srv *db.Server) string {
@@ -341,7 +357,7 @@ func (s *Server) installCmd(r *http.Request, srv *db.Server) string {
 	if strings.HasPrefix(base, "http://") {
 		insecure = " --insecure"
 	}
-	return fmt.Sprintf("curl -fsSL %s | bash -s -- --token %s%s", shellQuote(base+"/v1/install-agent"), shellQuote(srv.Token), insecure)
+	return fmt.Sprintf("%s %s | bash -s -- --token %s%s", agentInstallCurl, shellQuote(base+"/v1/install-agent"), shellQuote(srv.Token), insecure)
 }
 
 func shellQuote(s string) string {

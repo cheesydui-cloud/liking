@@ -253,6 +253,7 @@ func (s *Server) handleBranding(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleInstallAgent(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	body := strings.ReplaceAll(installscript.AgentInstall, "__LIKING_PANEL_URL__", shellQuote(panelURL(s.DB, r)))
+	body = strings.ReplaceAll(body, "__LIKING_VERSION__", version.Version)
 	_, _ = w.Write([]byte(body))
 }
 

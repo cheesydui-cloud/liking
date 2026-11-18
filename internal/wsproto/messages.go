@@ -179,6 +179,10 @@ type Upgrade struct {
 	Version string `json:"version"`
 	SHA256  string `json:"sha256,omitempty"`
 	URL     string `json:"url"`
+	// FallbackURL is a GitHub release asset. Agents that cannot fetch URL
+	// try it, through the local GitHub mirror when one is configured.
+	// Older agents ignore the field.
+	FallbackURL string `json:"fallback_url,omitempty"`
 }
 
 type UpgradeAck struct {

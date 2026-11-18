@@ -21,6 +21,13 @@ func agentBinDownloadURL(osName, arch string) string {
 	return "/v1/agent-bin?" + q.Encode()
 }
 
+// agentFallbackURL is the GitHub release asset for this panel version.
+// Agents that cannot reach the panel download it, optionally through the
+// mirror saved at install time. The bytes must still match the panel file.
+func agentFallbackURL(arch string) string {
+	return "https://github.com/cheesydui-cloud/liking/releases/download/v" + version.Version + "/liking-agent-linux-" + arch
+}
+
 func agentBinaryHasVersion(path, want string) (bool, error) {
 	want = strings.TrimSpace(want)
 	if want == "" {
