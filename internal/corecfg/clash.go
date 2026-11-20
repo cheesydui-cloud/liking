@@ -138,18 +138,29 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 	return name, b.String(), nil
 }
 
-func ClashDocument(names []string, proxiesYAML string, selected []string) string {
+func ClashDocument(names []string, proxiesYAML string, selected []string, leak bool) string {
 	var b strings.Builder
 	b.WriteString("mixed-port: 7890\nallow-lan: false\nmode: rule\n")
+	if leak {
+		b.WriteString("ipv6: false\n")
+		b.WriteString("tun:\n  enable: true\n  stack: mixed\n  auto-route: true\n  auto-detect-interface: true\n  strict-route: true\n")
+		b.WriteString("  dns-hijack:\n    - any:53\n")
+	}
 	b.WriteString("dns:\n  enable: true\n  ipv6: false\n  enhanced-mode: fake-ip\n")
 	b.WriteString("  fake-ip-range: 198.18.0.1/16\n")
-	b.WriteString("  nameserver:\n    - 1.1.1.1\n    - 8.8.8.8\n")
-	b.WriteString("  fallback:\n    - 1.0.0.1\n")
+	if leak {
+		b.WriteString("  respect-rules: true\n")
+		b.WriteString("  proxy-server-nameserver:\n    - 1.1.1.1\n")
+		b.WriteString("  nameserver:\n    - https://1.1.1.1/dns-query\n    - https://dns.google/dns-query\n")
+	} else {
+		b.WriteString("  nameserver:\n    - 1.1.1.1\n    - 8.8.8.8\n")
+		b.WriteString("  fallback:\n    - 1.0.0.1\n")
+	}
 	b.WriteString("  fake-ip-filter:\n    - '*.lan'\n    - localhost\n    - '*.local'\n")
 	b.WriteString("proxies:\n")
 	b.WriteString(proxiesYAML)
 	writeClashGroups(&b, names, selected)
-	writeClashRules(&b, selected)
+	writeClashRules(&b, selected, leak)
 	writeClashRuleProviders(&b, selected)
 	return b.String()
 }
@@ -203,9 +214,24 @@ func writeClashGroup(b *strings.Builder, name, typ string, extra func(*strings.B
 	}
 }
 
-func writeClashRules(b *strings.Builder, selected []string) {
+func writeClashRules(b *strings.Builder, selected []string, leak bool) {
 	cats := SelectedCategories(selected)
 	b.WriteString("rules:\n")
+	if leak {
+		for _, rule := range []string{
+			"GEOIP,private,DIRECT,no-resolve",
+			"IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
+			"IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
+			"IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+			"IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+			"IP-CIDR,100.64.0.0/10,DIRECT,no-resolve",
+			"IP-CIDR,169.254.0.0/16,DIRECT,no-resolve",
+			"AND,((NETWORK,UDP),(DST-PORT,3478))," + GroupSelect,
+			"AND,((NETWORK,UDP),(DST-PORT,19302))," + GroupSelect,
+		} {
+			fmt.Fprintf(b, "  - %s\n", yq(rule))
+		}
+	}
 	seen := map[string]bool{}
 	for _, c := range cats {
 		for _, p := range c.SiteRules {
@@ -225,7 +251,11 @@ func writeClashRules(b *strings.Builder, selected []string) {
 			fmt.Fprintf(b, "  - %s\n", yq("RULE-SET,"+p.Key+","+c.Label+",no-resolve"))
 		}
 	}
-	fmt.Fprintf(b, "  - %s\n", yq("MATCH,"+GroupFallback))
+	final := GroupFallback
+	if leak {
+		final = GroupSelect
+	}
+	fmt.Fprintf(b, "  - %s\n", yq("MATCH,"+final))
 }
 
 func writeClashRuleProviders(b *strings.Builder, selected []string) {

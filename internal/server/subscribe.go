@@ -47,9 +47,10 @@ func (s *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 	writeSubInfo(w, u)
 	over := s.serverOverMap()
 
+	leak := pkg != nil && pkg.LeakProtect
 	switch fmtName {
 	case "clash", "meta", "mihomo":
-		body, err := buildClash(s.DB, u, clients, over)
+		body, err := buildClash(s.DB, u, clients, over, leak)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -58,7 +59,7 @@ func (s *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Profile-Title", "liking")
 		_, _ = w.Write([]byte(body))
 	case "singbox", "sing-box", "sfa":
-		body, err := buildSingboxSub(s.DB, u, clients, over)
+		body, err := buildSingboxSub(s.DB, u, clients, over, leak)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -256,7 +257,7 @@ func subEscape(s string) string {
 	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
 }
 
-func buildClash(d *sql.DB, u *db.User, clients []*db.Client, over map[int64]bool) (string, error) {
+func buildClash(d *sql.DB, u *db.User, clients []*db.Client, over map[int64]bool, leak bool) (string, error) {
 	items, err := collectSubItems(d, u, clients, over)
 	if err != nil {
 		return "", err
@@ -271,7 +272,7 @@ func buildClash(d *sql.DB, u *db.User, clients []*db.Client, over map[int64]bool
 		names = append(names, name)
 		b.WriteString(yaml)
 	}
-	return corecfg.ClashDocument(names, b.String(), subRuleNames(d, u)), nil
+	return corecfg.ClashDocument(names, b.String(), subRuleNames(d, u), leak), nil
 }
 
 func subRuleNames(d *sql.DB, u *db.User) []string {
@@ -293,7 +294,7 @@ func subRuleNames(d *sql.DB, u *db.User) []string {
 	return corecfg.ApplySiteFilterToSubRules(names, corecfg.SiteFilterFromUser(u).Mode)
 }
 
-func buildSingboxSub(d *sql.DB, u *db.User, clients []*db.Client, over map[int64]bool) ([]byte, error) {
+func buildSingboxSub(d *sql.DB, u *db.User, clients []*db.Client, over map[int64]bool, leak bool) ([]byte, error) {
 	items, err := collectSubItems(d, u, clients, over)
 	if err != nil {
 		return nil, err
@@ -322,7 +323,7 @@ func buildSingboxSub(d *sql.DB, u *db.User, clients []*db.Client, over map[int64
 			tags = append(tags, tag)
 		}
 	}
-	doc := corecfg.SingboxClientDocument(outs, tags, subRuleNames(d, u))
+	doc := corecfg.SingboxClientDocument(outs, tags, subRuleNames(d, u), leak)
 	if len(endpoints) > 0 {
 		doc["endpoints"] = endpoints
 	}

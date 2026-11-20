@@ -185,7 +185,7 @@ func mustSubClash(t *testing.T, d *sql.DB, u *db.User) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := buildClash(d, u, clients, nil)
+	body, err := buildClash(d, u, clients, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

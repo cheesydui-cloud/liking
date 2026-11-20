@@ -34,6 +34,8 @@ const (
 	TypeAllowPortAck  = "allow_port_ack"
 	TypeSyncTime      = "sync_time"
 	TypeSyncTimeAck   = "sync_time_ack"
+	TypeTuneBBR       = "tune_bbr"
+	TypeTuneBBRAck    = "tune_bbr_ack"
 
 	CapCores     = "cores"
 	CapProbe     = "probe"
@@ -44,6 +46,7 @@ const (
 	CapAllowPort = "allow_port"
 	CapForward   = "forward"
 	CapTime      = "time"
+	CapBBR       = "bbr"
 )
 
 type Envelope struct {
@@ -164,6 +167,10 @@ type Stats struct {
 	HasClock    bool  `json:"has_clock,omitempty"`
 	ClockSkewMS int64 `json:"clock_skew_ms,omitempty"`
 	NTPSynced   bool  `json:"ntp_synced,omitempty"`
+	// HasTCP reports the live congestion control and qdisc. It is display-only.
+	HasTCP     bool   `json:"has_tcp,omitempty"`
+	Congestion string `json:"congestion,omitempty"`
+	Qdisc      string `json:"qdisc,omitempty"`
 }
 
 // PortRate is one listen port's realtime speed. It is display-only:
@@ -283,6 +290,19 @@ type SyncTimeAck struct {
 	AfterMS int64  `json:"after_ms"`
 	Stepped bool   `json:"stepped"`
 	NTP     bool   `json:"ntp"`
+}
+
+type TuneBBR struct {
+	Profile string `json:"profile"`
+}
+
+type TuneBBRAck struct {
+	OK         bool   `json:"ok"`
+	Error      string `json:"error,omitempty"`
+	Congestion string `json:"congestion,omitempty"`
+	Qdisc      string `json:"qdisc,omitempty"`
+	Changed    bool   `json:"changed"`
+	Assumed    bool   `json:"assumed,omitempty"`
 }
 
 type Ping struct {

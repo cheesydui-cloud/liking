@@ -147,7 +147,7 @@ func TestShareClashSingboxSOCKS5(t *testing.T) {
 }
 
 func TestClashDocumentDNS(t *testing.T) {
-	doc := ClashDocument([]string{"a"}, "  - name: \"a\"\n    type: ss\n", nil)
+	doc := ClashDocument([]string{"a"}, "  - name: \"a\"\n    type: ss\n", nil, false)
 	if !strings.Contains(doc, "enhanced-mode: fake-ip") {
 		t.Fatalf("missing fake-ip\n%s", doc)
 	}

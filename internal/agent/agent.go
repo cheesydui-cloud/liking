@@ -130,7 +130,7 @@ func (a *Agent) session(ctx context.Context) error {
 		Arch:         runtime.GOARCH,
 		LastRev:      lastRev,
 		Cores:        detectedCores(),
-		Caps:         []string{wsproto.CapCores, wsproto.CapProbe, wsproto.CapKick, wsproto.CapNFT, wsproto.CapWG, wsproto.CapWGRemove, wsproto.CapAllowPort, wsproto.CapForward, wsproto.CapTime},
+		Caps:         []string{wsproto.CapCores, wsproto.CapProbe, wsproto.CapKick, wsproto.CapNFT, wsproto.CapWG, wsproto.CapWGRemove, wsproto.CapAllowPort, wsproto.CapForward, wsproto.CapTime, wsproto.CapBBR},
 	})
 	if err := a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeHello, ID: "hello", Payload: hello}); err != nil {
 		return err
@@ -182,7 +182,7 @@ func (a *Agent) session(ctx context.Context) error {
 		case err := <-errCh:
 			return err
 		case env := <-envCh:
-			if env.Type == wsproto.TypeApply || env.Type == wsproto.TypeEnsureCore || env.Type == wsproto.TypeRemoveCore || env.Type == wsproto.TypeProbe || env.Type == wsproto.TypeKick || env.Type == wsproto.TypeEnsureNFT || env.Type == wsproto.TypeEnsureWG || env.Type == wsproto.TypeRemoveWG || env.Type == wsproto.TypeAllowPort || env.Type == wsproto.TypeSyncTime {
+			if env.Type == wsproto.TypeApply || env.Type == wsproto.TypeEnsureCore || env.Type == wsproto.TypeRemoveCore || env.Type == wsproto.TypeProbe || env.Type == wsproto.TypeKick || env.Type == wsproto.TypeEnsureNFT || env.Type == wsproto.TypeEnsureWG || env.Type == wsproto.TypeRemoveWG || env.Type == wsproto.TypeAllowPort || env.Type == wsproto.TypeSyncTime || env.Type == wsproto.TypeTuneBBR {
 				go func(env wsproto.Envelope) {
 					var err error
 					switch env.Type {
@@ -206,6 +206,8 @@ func (a *Agent) session(ctx context.Context) error {
 						err = a.handleAllowPort(ctx, ws, env)
 					case wsproto.TypeSyncTime:
 						err = a.handleSyncTime(ctx, ws, env)
+					case wsproto.TypeTuneBBR:
+						err = a.handleTuneBBR(ctx, ws, env)
 					}
 					if err != nil {
 						log.Printf("agent %s: %v", env.Type, err)
@@ -250,6 +252,7 @@ func (a *Agent) session(ctx context.Context) error {
 			diskFree, diskTotal := snapshotDisk()
 			memAvail, memTotal := snapshotMem()
 			skewMS, hasClock, ntpOn := a.clockSample()
+			cc, qdisc, hasTCP := sampleTCP()
 			st, _ := json.Marshal(wsproto.Stats{
 				Samples:      samples,
 				NetUp:        up,
@@ -270,6 +273,9 @@ func (a *Agent) session(ctx context.Context) error {
 				HasClock:     hasClock,
 				ClockSkewMS:  skewMS,
 				NTPSynced:    ntpOn,
+				HasTCP:       hasTCP,
+				Congestion:   cc,
+				Qdisc:        qdisc,
 			})
 			if err := a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeStats, Payload: st}); err != nil {
 				finishStats(false)
@@ -377,6 +383,26 @@ func (a *Agent) handleSyncTime(ctx context.Context, ws *websocket.Conn, env wspr
 	}
 	p, _ := json.Marshal(ack)
 	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeSyncTimeAck, ID: env.ID, Payload: p})
+}
+
+func (a *Agent) handleTuneBBR(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {
+	var req wsproto.TuneBBR
+	if err := json.Unmarshal(env.Payload, &req); err != nil {
+		req.Profile = ""
+	}
+	rep := tuneBBR(req.Profile, a.cfg.Dir)
+	ack := wsproto.TuneBBRAck{
+		OK:         rep.Err == nil,
+		Congestion: rep.Congestion,
+		Qdisc:      rep.Qdisc,
+		Changed:    rep.Changed,
+		Assumed:    rep.Assumed,
+	}
+	if rep.Err != nil {
+		ack.Error = rep.Err.Error()
+	}
+	p, _ := json.Marshal(ack)
+	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeTuneBBRAck, ID: env.ID, Payload: p})
 }
 
 func (a *Agent) noteClock(rep ClockReport) {

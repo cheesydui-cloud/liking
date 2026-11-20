@@ -933,9 +933,9 @@ func insertPackageTx(tx *sql.Tx, p *Package) (int64, error) {
 	}
 	res, err := tx.Exec(`INSERT INTO packages(
 		name,traffic_bytes,cycle_days,reset_day,direction,created_at,speed_limit,
-		sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains,site_filter_mode,reset_mode
-	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, p.Name, p.TrafficBytes, cycleDays, p.ResetDay, direction, now(), p.SpeedLimit,
-		p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, mode)
+		sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains,site_filter_mode,reset_mode,leak_protect
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, p.Name, p.TrafficBytes, cycleDays, p.ResetDay, direction, now(), p.SpeedLimit,
+		p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, mode, boolInt(p.LeakProtect))
 	if err != nil {
 		return 0, err
 	}
@@ -947,8 +947,8 @@ func updatePackageTx(tx *sql.Tx, p *Package) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`UPDATE packages SET name=?, traffic_bytes=?, cycle_days=?, reset_day=?, direction=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=?, site_filter_mode=?, reset_mode=? WHERE id=?`,
-		p.Name, p.TrafficBytes, p.CycleDays, p.ResetDay, p.Direction, p.SpeedLimit, p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, mode, p.ID)
+	_, err = tx.Exec(`UPDATE packages SET name=?, traffic_bytes=?, cycle_days=?, reset_day=?, direction=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=?, site_filter_mode=?, reset_mode=?, leak_protect=? WHERE id=?`,
+		p.Name, p.TrafficBytes, p.CycleDays, p.ResetDay, p.Direction, p.SpeedLimit, p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, mode, boolInt(p.LeakProtect), p.ID)
 	return err
 }
 
@@ -1070,11 +1070,13 @@ func UpdatePackageConfigured(d *sql.DB, p *Package, relation string, ids []int64
 func GetPackage(d *sql.DB, id int64) (*Package, error) {
 	p := &Package{}
 	var catsRaw, denyCatsRaw, denyDomsRaw string
-	err := d.QueryRow(`SELECT id,name,traffic_bytes,cycle_days,reset_day,direction,created_at,speed_limit,sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains,site_filter_mode,reset_mode FROM packages WHERE id=?`, id).
-		Scan(&p.ID, &p.Name, &p.TrafficBytes, &p.CycleDays, &p.ResetDay, &p.Direction, &p.CreatedAt, &p.SpeedLimit, &p.SubRulePreset, &catsRaw, &denyCatsRaw, &denyDomsRaw, &p.SiteFilterMode, &p.ResetMode)
+	var leak int
+	err := d.QueryRow(`SELECT id,name,traffic_bytes,cycle_days,reset_day,direction,created_at,speed_limit,sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains,site_filter_mode,reset_mode,leak_protect FROM packages WHERE id=?`, id).
+		Scan(&p.ID, &p.Name, &p.TrafficBytes, &p.CycleDays, &p.ResetDay, &p.Direction, &p.CreatedAt, &p.SpeedLimit, &p.SubRulePreset, &catsRaw, &denyCatsRaw, &denyDomsRaw, &p.SiteFilterMode, &p.ResetMode, &leak)
 	if err != nil {
 		return nil, err
 	}
+	p.LeakProtect = leak != 0
 	p.SubRuleCategories = decodeStringSlice(catsRaw)
 	p.SiteDenyCategories = decodeStringSlice(denyCatsRaw)
 	p.SiteDenyDomains = decodeStringSlice(denyDomsRaw)
@@ -1173,12 +1175,13 @@ func UpdatePackage(d *sql.DB, p *Package) error {
 	if err != nil {
 		return err
 	}
-	_, err = d.Exec(`UPDATE packages SET name=?, traffic_bytes=?, cycle_days=?, reset_day=?, direction=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=?, site_filter_mode=?, reset_mode=? WHERE id=?`,
-		p.Name, p.TrafficBytes, p.CycleDays, p.ResetDay, p.Direction, p.SpeedLimit, p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, mode, p.ID)
+	_, err = d.Exec(`UPDATE packages SET name=?, traffic_bytes=?, cycle_days=?, reset_day=?, direction=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=?, site_filter_mode=?, reset_mode=?, leak_protect=? WHERE id=?`,
+		p.Name, p.TrafficBytes, p.CycleDays, p.ResetDay, p.Direction, p.SpeedLimit, p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, mode, boolInt(p.LeakProtect), p.ID)
 	return err
 }
 
 // CopyPackagePolicy writes suite defaults onto a user. Call only on 开户 / 换套餐.
+// LeakProtect is read from the package when the subscription is built, so it stays here.
 func CopyPackagePolicy(dst *User, p *Package) {
 	if dst == nil || p == nil {
 		return

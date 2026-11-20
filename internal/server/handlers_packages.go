@@ -31,11 +31,15 @@ type packagePolicyReq struct {
 	SiteDenyCategories *[]string `json:"site_deny_categories"`
 	SiteDenyDomains    *[]string `json:"site_deny_domains"`
 	SiteFilterMode     *string   `json:"site_filter_mode"`
+	LeakProtect        *bool     `json:"leak_protect"`
 }
 
 func applyPackagePolicyReq(p *db.Package, req packagePolicyReq) error {
 	if p == nil {
 		return nil
+	}
+	if req.LeakProtect != nil {
+		p.LeakProtect = *req.LeakProtect
 	}
 	if req.SpeedLimit != nil {
 		if !corecfg.ValidSpeedKBps(*req.SpeedLimit) {
@@ -180,6 +184,7 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 	p.SiteFilterMode = pol.SiteFilterMode
 	p.SiteDenyCategories = pol.SiteDenyCategories
 	p.SiteDenyDomains = pol.SiteDenyDomains
+	p.LeakProtect = pol.LeakProtect
 	relation := db.PackageRelationsServer
 	ids := req.ServerIDs
 	if req.InboundIDs != nil {

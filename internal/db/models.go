@@ -79,6 +79,10 @@ type Server struct {
 	CanAllowPort    bool   `json:"can_allow_port,omitempty"`
 	CanForward      bool   `json:"can_forward,omitempty"`
 	CanSyncTime     bool   `json:"can_sync_time,omitempty"`
+	CanTuneBBR      bool   `json:"can_tune_bbr,omitempty"`
+	HasTCP          bool   `json:"has_tcp,omitempty"`
+	Congestion      string `json:"congestion,omitempty"`
+	Qdisc           string `json:"qdisc,omitempty"`
 	HasClock        bool   `json:"has_clock,omitempty"`
 	ClockSkewMS     int64  `json:"clock_skew_ms,omitempty"`
 	NTPSynced       bool   `json:"ntp_synced,omitempty"`
@@ -119,6 +123,7 @@ type Package struct {
 	SiteDenyCategories []string  `json:"site_deny_categories"`
 	SiteDenyDomains    []string  `json:"site_deny_domains"`
 	SiteFilterMode     string    `json:"site_filter_mode"`
+	LeakProtect        bool      `json:"leak_protect"`
 }
 
 type Inbound struct {

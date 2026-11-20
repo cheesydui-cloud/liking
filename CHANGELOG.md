@@ -2,6 +2,21 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.3.47 — 2026-11-20
+
+Clash 和 sing-box 订阅默认不拦 DNS 和 WebRTC。安装 WireGuard、nftables 占着实例菜单。TCP 拥塞控制只能到机器上手改。
+
+### 变更
+- 套餐增加「防泄漏」，默认关。打开后，这个套餐的 Clash Meta 和 sing-box 订阅走 TUN，DNS 和未匹配流量进代理。局域网仍直连。UDP 3478 和 19302 进节点选择。URI、小火箭、v2rayN 不变
+- 实例菜单的「安装 WireGuard」和「安装 nftables」移到「推送核心」的系统组件。卸载 WireGuard 仍在菜单和蓝色标签上。装不上时，卡片上的安装按钮还在
+- 实例菜单可「开启 BBR」或「恢复系统 TCP」。只写 fq 和 bbr，并记下原来的值。没有原值就按 cubic 和 fq_codel 恢复。卸载 Agent 时，只有面板改过的机器才写回。卡片在线且拥塞控制是 bbr 时显示 BBR
+
+### 升级注意
+- 先在面板机器执行 `liking-upgrade`。这次 Agent 也有变更。要开 BBR，面板升级后再到实例页点「升级全部」
+- 防泄漏和菜单调整只在面板。Agent 不升级也能用。已有用户下次刷新 Clash 或 sing-box 订阅才生效。需要客户端管理员权限。打印机可能要重新设一下
+- 旧 Agent 没有 BBR 命令。不升级就点「开启 BBR」，会提示先升级。Hysteria2、WireGuard、Mieru 这些 UDP 节点不受 BBR 影响，客户端不用改
+- 回滚：`liking-upgrade --release v0.3.46`
+
 ## v0.3.46 — 2026-11-20
 
 机器时钟慢过 30 秒时，SS2022 会直接拒绝握手。面板上看不到偏差，也不能在机器上对时。

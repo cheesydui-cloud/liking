@@ -278,6 +278,7 @@ func colocatedPanel() bool {
 
 func (a *Agent) uninstall() error {
 	a.cores.StopAll()
+	restoreOwnedBBR(a.cfg.Dir)
 	applyDisableIPv6(false)
 	_ = os.Remove(ipv6SysctlPath)
 	_ = exec.Command("systemctl", "disable", "--now", "liking-agent.service").Run()

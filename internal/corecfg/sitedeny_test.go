@@ -635,14 +635,14 @@ func TestClientHealthCheckURL(t *testing.T) {
 	if strings.Contains(ClientHealthCheckURL, "gstatic") || strings.Contains(ClientHealthCheckURL, "google") {
 		t.Fatalf("health %s", ClientHealthCheckURL)
 	}
-	doc := ClashDocument([]string{"jp"}, "  - name: \"jp\"\n    type: ss\n", nil)
+	doc := ClashDocument([]string{"jp"}, "  - name: \"jp\"\n    type: ss\n", nil, false)
 	if !strings.Contains(doc, "url: "+ClientHealthCheckURL) || !strings.Contains(doc, "timeout: 10000") {
 		t.Fatalf("clash health\n%s", doc)
 	}
 	if strings.Contains(doc, "gstatic.com") {
 		t.Fatal("clash still uses gstatic")
 	}
-	sb := SingboxClientDocument(nil, []string{"jp"}, nil)
+	sb := SingboxClientDocument(nil, []string{"jp"}, nil, false)
 	found := false
 	for _, raw := range sb["outbounds"].([]any) {
 		m, _ := raw.(map[string]any)

@@ -116,6 +116,9 @@ type agentConn struct {
 	hasClock     bool
 	clockSkewMS  int64
 	ntpSynced    bool
+	hasTCP       bool
+	congestion   string
+	qdisc        string
 }
 
 func (a *agentConn) nextID() string {
@@ -319,7 +322,7 @@ func (h *Hub) readerLoop(parent context.Context, ac *agentConn) {
 			h.noteLive(ac, st)
 			h.notePorts(ac.serverID, st)
 			h.consumeStats(ac.serverID, st)
-		case wsproto.TypeApplyAck, wsproto.TypeHelloAck, wsproto.TypeUpgradeAck, wsproto.TypeUninstallAck, wsproto.TypeEnsureCoreAck, wsproto.TypeRemoveCoreAck, wsproto.TypeProbeAck, wsproto.TypeKickAck, wsproto.TypeEnsureNFTAck, wsproto.TypeEnsureWGAck, wsproto.TypeRemoveWGAck, wsproto.TypeAllowPortAck, wsproto.TypeSyncTimeAck:
+		case wsproto.TypeApplyAck, wsproto.TypeHelloAck, wsproto.TypeUpgradeAck, wsproto.TypeUninstallAck, wsproto.TypeEnsureCoreAck, wsproto.TypeRemoveCoreAck, wsproto.TypeProbeAck, wsproto.TypeKickAck, wsproto.TypeEnsureNFTAck, wsproto.TypeEnsureWGAck, wsproto.TypeRemoveWGAck, wsproto.TypeAllowPortAck, wsproto.TypeSyncTimeAck, wsproto.TypeTuneBBRAck:
 			ac.dispatchAck(env)
 		default:
 			log.Printf("hub: server %d unknown frame %q", ac.serverID, env.Type)
@@ -477,6 +480,9 @@ func (h *Hub) Health(id int64) (wsproto.Stats, bool) {
 		HasClock:     ac.hasClock,
 		ClockSkewMS:  ac.clockSkewMS,
 		NTPSynced:    ac.ntpSynced,
+		HasTCP:       ac.hasTCP,
+		Congestion:   ac.congestion,
+		Qdisc:        ac.qdisc,
 	}, true
 }
 
@@ -513,6 +519,37 @@ func (h *Hub) NoteClock(id int64, skewMS int64, ntp bool) {
 	ac.liveMu.Unlock()
 }
 
+// TCP is the last reported congestion control and qdisc for an online agent.
+func (h *Hub) TCP(id int64) (congestion, qdisc string, ok bool) {
+	h.mu.RLock()
+	ac, exists := h.conns[id]
+	h.mu.RUnlock()
+	if !exists {
+		return "", "", false
+	}
+	ac.liveMu.Lock()
+	defer ac.liveMu.Unlock()
+	if !ac.hasTCP {
+		return "", "", false
+	}
+	return ac.congestion, ac.qdisc, true
+}
+
+// NoteTCP stores a tune result so the card updates before the next stats frame.
+func (h *Hub) NoteTCP(id int64, congestion, qdisc string) {
+	h.mu.RLock()
+	ac, exists := h.conns[id]
+	h.mu.RUnlock()
+	if !exists {
+		return
+	}
+	ac.liveMu.Lock()
+	ac.hasTCP = congestion != "" || qdisc != ""
+	ac.congestion = congestion
+	ac.qdisc = qdisc
+	ac.liveMu.Unlock()
+}
+
 func (h *Hub) Live(id int64) (up, down int64, ok bool) {
 	h.mu.RLock()
 	ac, exists := h.conns[id]
@@ -543,6 +580,11 @@ func (h *Hub) noteLive(ac *agentConn, st wsproto.Stats) {
 		ac.hasClock = true
 		ac.clockSkewMS = st.ClockSkewMS
 		ac.ntpSynced = st.NTPSynced
+	}
+	if st.HasTCP {
+		ac.hasTCP = true
+		ac.congestion = st.Congestion
+		ac.qdisc = st.Qdisc
 	}
 	if st.HasNet {
 		ac.upBps = st.NetUp

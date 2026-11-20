@@ -15,6 +15,7 @@ const emptyForm = {
   name: '', gb: '', direction: 'oneway', reset_mode: 'anniversary', inbound_ids: [], transit_ids: [], forward_ids: [], multipliers: {},
   speed_value: '', speed_unit: 'mbps', sub_rule_preset: '', sub_rule_categories: [],
   site_filter_mode: '', site_deny_categories: [], site_deny_domains: '',
+  leak_protect: false,
 }
 
 const siteFilterTabs = [
@@ -297,6 +298,7 @@ export default function Packages() {
       site_deny_categories: Array.isArray(p.site_deny_categories) ? p.site_deny_categories : [],
       site_deny_domains: Array.isArray(p.site_deny_domains) ? p.site_deny_domains.join('\n') : '',
       reset_mode: p.reset_mode === 'anniversary' ? 'anniversary' : '',
+      leak_protect: !!p.leak_protect,
     })
     setFormOpen(true)
   }
@@ -346,6 +348,7 @@ export default function Packages() {
       site_filter_mode: mode,
       site_deny_categories: mode ? f.site_deny_categories : [],
       site_deny_domains: mode ? domains : [],
+      leak_protect: !!f.leak_protect,
     }
     const wasEdit = !!editId
     try {
@@ -487,6 +490,7 @@ export default function Packages() {
                   <Metric label="限速" value={speedLine(p)} plain />
                   <Metric label="分流" value={ruleLine(p.sub_rule_preset)} plain />
                   <Metric label="访问" value={accessLine(p)} plain />
+                  <Metric label="防泄漏" value={p.leak_protect ? '开' : '关'} plain />
                 </div>
                 <div className="pkg-card-nodes" title={nodeTip}>
                   {meta.all && fwLines.length === 0 ? (
@@ -704,6 +708,13 @@ export default function Packages() {
               </div>
             )}
           </div>
+          <label className="flex items-start gap-2 text-[13px] text-ink-soft select-none">
+            <input type="checkbox" className="mt-0.5" checked={!!f.leak_protect} onChange={e => setF({ ...f, leak_protect: e.target.checked })} />
+            <span>
+              <span className="font-medium text-ink">防泄漏</span>
+              <span className="block text-[12px] text-ink-mut mt-0.5">打开后，Clash Meta 和 sing-box 会走 TUN，DNS 和未匹配流量进代理。这个套餐里已有的用户，下次刷新订阅就会生效。需要客户端管理员权限。局域网仍直连，打印机可能要重新设一下。URI、小火箭、v2rayN 不受影响。</span>
+            </span>
+          </label>
           <div>
             <div className="text-[12px] font-medium text-ink-soft">开户默认</div>
             <p className="text-[12px] text-ink-mut mt-0.5 mb-3">只对之后开户或换套餐生效，不会改已经开好的用户。</p>

@@ -352,6 +352,70 @@ func (s *Server) handleSyncTime(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleTuneBBR(w http.ResponseWriter, r *http.Request) {
+	id, err := chiID(r, "id")
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	srv, err := db.GetServer(s.DB, id)
+	if err != nil {
+		jsonErr(w, http.StatusNotFound, "服务器不存在")
+		return
+	}
+	var req struct {
+		Profile string `json:"profile"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效请求")
+		return
+	}
+	profile := strings.TrimSpace(req.Profile)
+	if profile != "bbr" && profile != "reset" {
+		jsonErr(w, http.StatusBadRequest, "档位无效")
+		return
+	}
+	if !s.Hub.IsOnline(id) {
+		jsonErr(w, http.StatusBadRequest, "Agent 不在线，无法调整 TCP")
+		return
+	}
+	osName, _, _ := s.Hub.ConnMeta(id)
+	if osName != "" && osName != "linux" {
+		jsonErr(w, http.StatusBadRequest, "需要 Linux 才能调整 TCP")
+		return
+	}
+	if !s.Hub.HasCap(id, wsproto.CapBBR) {
+		jsonErrExtra(w, http.StatusBadRequest, "该 Agent 还不支持开启 BBR。请先一键升级 Agent。", map[string]any{"code": "agent_too_old"})
+		return
+	}
+	raw, err := s.Hub.SendRPC(id, wsproto.TypeTuneBBR, wsproto.TuneBBR{Profile: profile}, 30*time.Second)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var ack wsproto.TuneBBRAck
+	_ = json.Unmarshal(raw, &ack)
+	if !ack.OK {
+		msg := strings.TrimSpace(ack.Error)
+		if msg == "" {
+			msg = "调整 TCP 失败"
+		}
+		jsonErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	s.Hub.NoteTCP(id, ack.Congestion, ack.Qdisc)
+	u := userFromCtx(r.Context())
+	db.AddAudit(s.DB, &u.ID, "agent.tune_bbr", srv.Name+" "+profile)
+	jsonOK(w, map[string]any{
+		"ok":         true,
+		"profile":    profile,
+		"congestion": ack.Congestion,
+		"qdisc":      ack.Qdisc,
+		"changed":    ack.Changed,
+		"assumed":    ack.Assumed,
+	})
+}
+
 func (s *Server) handlePushWG(w http.ResponseWriter, r *http.Request) {
 	id, err := chiID(r, "id")
 	if err != nil {

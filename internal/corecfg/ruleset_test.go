@@ -22,14 +22,14 @@ func TestApplySiteFilterToSubRulesDropsDomesticOnAllow(t *testing.T) {
 	if strings.Join(same, ",") != strings.Join(cats, ",") {
 		t.Fatalf("deny should keep %v", same)
 	}
-	doc := ClashDocument([]string{"jp"}, "  - name: \"jp\"\n    type: ss\n", got)
+	doc := ClashDocument([]string{"jp"}, "  - name: \"jp\"\n    type: ss\n", got, false)
 	if strings.Contains(doc, "国内服务") || strings.Contains(doc, "geolocation-cn") {
 		t.Fatalf("allow clash still domestic\n%s", doc)
 	}
 	if !strings.Contains(doc, "私有网络") {
 		t.Fatalf("allow clash dropped private\n%s", doc)
 	}
-	sb := SingboxClientDocument(nil, []string{"jp"}, got)
+	sb := SingboxClientDocument(nil, []string{"jp"}, got, false)
 	route, _ := sb["route"].(map[string]any)
 	raw, _ := route["rule_set"].([]any)
 	for _, r := range raw {
@@ -114,7 +114,7 @@ func TestNormalizeCategoryNamesKeepsCatalogOrder(t *testing.T) {
 
 func TestClashDocumentRules(t *testing.T) {
 	_, cats := ResolveSubRules("balanced", nil)
-	doc := ClashDocument([]string{"jp"}, "  - name: \"jp\"\n    type: ss\n", cats)
+	doc := ClashDocument([]string{"jp"}, "  - name: \"jp\"\n    type: ss\n", cats, false)
 	for _, s := range []string{
 		"proxy-groups:",
 		`name: "节点选择"`,
@@ -149,7 +149,7 @@ func TestClashDocumentRules(t *testing.T) {
 }
 
 func TestClashDocumentAdsRejectFirst(t *testing.T) {
-	doc := ClashDocument(nil, "", []string{"ads"})
+	doc := ClashDocument(nil, "", []string{"ads"}, false)
 	want := "name: \"广告拦截\"\n    type: select\n    proxies:\n      - \"REJECT\"\n"
 	if !strings.Contains(doc, want) {
 		t.Fatalf("ads not REJECT-first\n%s", doc)
@@ -161,7 +161,7 @@ func TestClashDocumentAdsRejectFirst(t *testing.T) {
 
 func TestSingboxClientDocument(t *testing.T) {
 	outs := []any{map[string]any{"type": "shadowsocks", "tag": "jp"}}
-	doc := SingboxClientDocument(outs, []string{"jp"}, []string{"youtube", "private", "ads"})
+	doc := SingboxClientDocument(outs, []string{"jp"}, []string{"youtube", "private", "ads"}, false)
 	route, _ := doc["route"].(map[string]any)
 	if route["final"] != GroupFallback {
 		t.Fatalf("final %+v", route["final"])

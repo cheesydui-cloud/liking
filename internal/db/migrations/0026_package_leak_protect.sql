@@ -1,0 +1,1 @@
+ALTER TABLE packages ADD COLUMN leak_protect INTEGER NOT NULL DEFAULT 0;

@@ -34,6 +34,10 @@ function clockOff(ms) {
   return n < 0 ? `慢了 ${sec} 秒` : `快了 ${sec} 秒`
 }
 
+function bbrOn(s) {
+  return !!(s && s.online && s.has_tcp && s.congestion === 'bbr' && s.qdisc === 'fq')
+}
+
 function Metric({ label, value, tone }) {
   return (
     <div className={`metric${tone ? ` is-${tone}` : ''}`}>
@@ -70,6 +74,7 @@ function ServerMeta({ s, onRemoveWG }) {
           {clockDrifted(s.clock_skew_ms) ? `时钟${clockOff(s.clock_skew_ms)}` : '时间已对齐'}
         </span>
       ) : null}
+      {s.online && s.has_tcp && s.congestion === 'bbr' ? <span className="machine-meta-item">BBR</span> : null}
       {s.disable_ipv6 ? <span className="machine-meta-item">IPv6 关</span> : null}
       {cores.map(c => (
         c === 'wireguard' && onRemoveWG ? (
@@ -146,6 +151,7 @@ export default function Servers() {
   const [editSrv, setEditSrv] = useState(null)
   const [edit, setEdit] = useState({ name: '', host: '', min: '', max: '', gb: '', expires: '', resetDay: '0', disableIpv6: false })
   const [coreSrv, setCoreSrv] = useState(null)
+  const [pkgKind, setPkgKind] = useState('')
   const [corePick, setCorePick] = useState('xray')
   const [allowSrv, setAllowSrv] = useState(null)
   const [allowPort, setAllowPort] = useState('')
@@ -329,6 +335,16 @@ export default function Servers() {
     setCoreSrv(s)
   }
 
+  const installPkg = async (kind, s) => {
+    setPkgKind(kind)
+    try {
+      if (kind === 'wg') await pushWG(s)
+      else await pushNft(s)
+    } finally {
+      setPkgKind('')
+    }
+  }
+
   const removeWG = async (s) => {
     if (!s?.id) return
     if (!s.online) {
@@ -402,6 +418,35 @@ export default function Servers() {
       if (d.stepped) toast(`已把时钟拨正，原先${clockOff(d.skew_ms)}`)
       else toast(clockDrifted(after) ? `还是${clockOff(after)}` : '时间已对齐')
       setList(prev => prev.map(x => x.id === s.id ? { ...x, has_clock: true, clock_skew_ms: after, ntp_synced: !!d.ntp } : x))
+    } catch (e) {
+      toast(e.message, 'error')
+      if (e.code === 'agent_too_old') showInstall(s.id)
+    } finally { setBusyId(0) }
+  }
+
+  const tuneBBR = async (s) => {
+    if (!s?.id) return
+    if (!s.online) {
+      toast('Agent 不在线，无法调整 TCP', 'error')
+      return
+    }
+    if (!s.can_tune_bbr) {
+      toast('该 Agent 还不支持开启 BBR。请先一键升级', 'error')
+      return
+    }
+    const profile = bbrOn(s) ? 'reset' : 'bbr'
+    setBusyId(s.id)
+    try {
+      const d = await api.post(`/servers/${s.id}/tune-bbr`, { profile })
+      if (profile === 'bbr') toast(d.changed ? '已开启 BBR' : '这台机器已经是 BBR')
+      else if (d.assumed) toast('没有记下原来的值，已按系统默认恢复')
+      else toast(d.changed ? '已恢复系统 TCP' : '这台机器已经是系统 TCP')
+      setList(prev => prev.map(x => x.id === s.id ? {
+        ...x,
+        has_tcp: true,
+        congestion: d.congestion || '',
+        qdisc: d.qdisc || '',
+      } : x))
     } catch (e) {
       toast(e.message, 'error')
       if (e.code === 'agent_too_old') showInstall(s.id)
@@ -837,13 +882,7 @@ export default function Servers() {
                         disabled: !s.online || cardBusy,
                         onSelect: () => openAllow(s),
                       },
-                      { label: '推送核心', hint: s.can_push_cores ? '安装或卸载 Xray / sing-box / Mita，也可卸载 WireGuard' : (s.online ? '需先升级 Agent' : '需在线'), onSelect: () => openCores(s) },
-                      {
-                        label: '安装 WireGuard',
-                        hint: s.can_push_wg ? '安装 wg 和 wg-quick。已装则跳过' : (s.online ? '需先升级 Agent' : '需在线'),
-                        disabled: !s.online || cardBusy,
-                        onSelect: () => pushWG(s),
-                      },
+                      { label: '推送核心', hint: s.can_push_cores ? '安装或卸载 Xray / sing-box / Mita，也可装 WireGuard、nftables' : (s.online ? '需先升级 Agent' : '需在线'), onSelect: () => openCores(s) },
                       ...(parseCores(s.cores).includes('wireguard') ? [{
                         label: '卸载 WireGuard',
                         danger: true,
@@ -852,16 +891,16 @@ export default function Servers() {
                         onSelect: () => removeWG(s),
                       }] : []),
                       {
-                        label: '安装 nftables',
-                        hint: s.can_push_nft ? '拒绝中国 IP 需要。已装则跳过' : (s.online ? '需先升级 Agent' : '需在线'),
-                        disabled: !s.online || cardBusy,
-                        onSelect: () => pushNft(s),
-                      },
-                      {
                         label: '对齐时间',
                         hint: s.can_sync_time ? '偏差超过 5 秒会拨正，并尽量打开 NTP' : (s.online ? '需先升级 Agent' : '需在线'),
                         disabled: !s.online || cardBusy,
                         onSelect: () => syncTime(s),
+                      },
+                      {
+                        label: bbrOn(s) ? '恢复系统 TCP' : '开启 BBR',
+                        hint: s.can_tune_bbr ? '只改这台机器的 TCP，UDP 节点不变。客户端不用改。' : (s.online ? '需先升级 Agent' : '需在线'),
+                        disabled: !s.online || cardBusy,
+                        onSelect: () => tuneBBR(s),
                       },
                       { label: '流量上限', onSelect: () => saveLimit(s) },
                       {
@@ -1079,36 +1118,61 @@ export default function Servers() {
         {coreSrv ? (
           <div className="space-y-4">
             <p className="text-[13px] text-ink-mut">
-              把内核装到 {coreSrv.name}。不用的可以卸掉。国内机器需先在安装命令里勾选 GitHub 镜像。
+              把内核装到 {coreSrv.name}。不用的可以卸掉。WireGuard 和 nftables 也在这里装。国内机器需先在安装命令里勾选 GitHub 镜像。
             </p>
             {!coreSrv.online ? (
               <div className="notice">Agent 不在线，无法推送或卸载。</div>
-            ) : !coreSrv.can_push_cores ? (
-              <div className="notice">该 Agent 还不支持推送核心。请先用菜单里的「一键升级」升到当前面板版本。</div>
             ) : (
               <>
-                <Field label="选择核心">
-                  <div className="flex gap-2">
-                    <select className="input-field" value={corePick} onChange={e => setCorePick(e.target.value)}>
-                      {CORE_OPTIONS.map(c => (
-                        <option key={c.id} value={c.id}>{c.label}</option>
+                {!coreSrv.can_push_cores ? (
+                  <div className="notice">该 Agent 还不支持推送核心。请先用菜单里的「一键升级」升到当前面板版本。</div>
+                ) : (
+                  <>
+                    <Field label="选择核心">
+                      <div className="flex gap-2">
+                        <select className="input-field" value={corePick} onChange={e => setCorePick(e.target.value)}>
+                          {CORE_OPTIONS.map(c => (
+                            <option key={c.id} value={c.id}>{c.label}</option>
+                          ))}
+                        </select>
+                        <button type="button" className="btn-primary shrink-0" disabled={busy || !!pkgKind} onClick={pushCore}>
+                          {busy ? '推送中…' : '推送'}
+                        </button>
+                      </div>
+                    </Field>
+                    <div>
+                      <div className="text-[12px] font-medium text-ink-soft mb-1">已安装</div>
+                      {parseCores(coreSrv.cores).length === 0 ? (
+                        <div className="text-[13px] text-ink-mut py-2">还没有探测到内核。</div>
+                      ) : parseCores(coreSrv.cores).map(c => (
+                        <div key={c} className="core-installed">
+                          <span className={`core-tag is-${c}`}>{coreLabel(c)}</span>
+                          <button type="button" className="row-act" style={{ color: 'var(--color-danger)' }} disabled={busy || !!pkgKind} onClick={() => c === 'wireguard' ? removeWG(coreSrv) : removeCore(c)}>卸载</button>
+                        </div>
                       ))}
-                    </select>
-                    <button type="button" className="btn-primary shrink-0" disabled={busy} onClick={pushCore}>
-                      {busy ? '推送中…' : '推送'}
+                    </div>
+                  </>
+                )}
+                <div>
+                  <div className="text-[12px] font-medium text-ink-soft mb-1">系统组件</div>
+                  <div className="core-installed">
+                    <div className="min-w-0">
+                      <div className="text-[13px]">WireGuard</div>
+                      <div className="text-[12px] text-ink-mut">安装 wg 和 wg-quick。已装则跳过</div>
+                    </div>
+                    <button type="button" className="btn-primary h-8 shrink-0" disabled={busy || !!pkgKind} onClick={() => installPkg('wg', coreSrv)}>
+                      {pkgKind === 'wg' ? '安装中…' : '安装'}
                     </button>
                   </div>
-                </Field>
-                <div>
-                  <div className="text-[12px] font-medium text-ink-soft mb-1">已安装</div>
-                  {parseCores(coreSrv.cores).length === 0 ? (
-                    <div className="text-[13px] text-ink-mut py-2">还没有探测到内核。</div>
-                  ) : parseCores(coreSrv.cores).map(c => (
-                    <div key={c} className="core-installed">
-                      <span className={`core-tag is-${c}`}>{coreLabel(c)}</span>
-                      <button type="button" className="row-act" style={{ color: 'var(--color-danger)' }} disabled={busy} onClick={() => c === 'wireguard' ? removeWG(coreSrv) : removeCore(c)}>卸载</button>
+                  <div className="core-installed">
+                    <div className="min-w-0">
+                      <div className="text-[13px]">nftables</div>
+                      <div className="text-[12px] text-ink-mut">拒绝中国 IP 需要。已装则跳过</div>
                     </div>
-                  ))}
+                    <button type="button" className="btn-primary h-8 shrink-0" disabled={busy || !!pkgKind} onClick={() => installPkg('nft', coreSrv)}>
+                      {pkgKind === 'nft' ? '安装中…' : '安装'}
+                    </button>
+                  </div>
                 </div>
               </>
             )}
