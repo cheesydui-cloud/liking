@@ -113,6 +113,9 @@ type agentConn struct {
 	conns        int
 	coresRunning string
 	caps         []string
+	hasClock     bool
+	clockSkewMS  int64
+	ntpSynced    bool
 }
 
 func (a *agentConn) nextID() string {
@@ -316,7 +319,7 @@ func (h *Hub) readerLoop(parent context.Context, ac *agentConn) {
 			h.noteLive(ac, st)
 			h.notePorts(ac.serverID, st)
 			h.consumeStats(ac.serverID, st)
-		case wsproto.TypeApplyAck, wsproto.TypeHelloAck, wsproto.TypeUpgradeAck, wsproto.TypeUninstallAck, wsproto.TypeEnsureCoreAck, wsproto.TypeRemoveCoreAck, wsproto.TypeProbeAck, wsproto.TypeKickAck, wsproto.TypeEnsureNFTAck, wsproto.TypeEnsureWGAck, wsproto.TypeRemoveWGAck, wsproto.TypeAllowPortAck:
+		case wsproto.TypeApplyAck, wsproto.TypeHelloAck, wsproto.TypeUpgradeAck, wsproto.TypeUninstallAck, wsproto.TypeEnsureCoreAck, wsproto.TypeRemoveCoreAck, wsproto.TypeProbeAck, wsproto.TypeKickAck, wsproto.TypeEnsureNFTAck, wsproto.TypeEnsureWGAck, wsproto.TypeRemoveWGAck, wsproto.TypeAllowPortAck, wsproto.TypeSyncTimeAck:
 			ac.dispatchAck(env)
 		default:
 			log.Printf("hub: server %d unknown frame %q", ac.serverID, env.Type)
@@ -471,7 +474,43 @@ func (h *Hub) Health(id int64) (wsproto.Stats, bool) {
 		LoadMilli:    ac.loadMilli,
 		Conns:        ac.conns,
 		CoresRunning: running,
+		HasClock:     ac.hasClock,
+		ClockSkewMS:  ac.clockSkewMS,
+		NTPSynced:    ac.ntpSynced,
 	}, true
+}
+
+// Clock is the last measured skew for an online agent. ok is false until
+// the agent has reported a clock sample or a manual align has finished.
+func (h *Hub) Clock(id int64) (skewMS int64, ntp, ok bool) {
+	h.mu.RLock()
+	ac, exists := h.conns[id]
+	h.mu.RUnlock()
+	if !exists {
+		return 0, false, false
+	}
+	ac.liveMu.Lock()
+	defer ac.liveMu.Unlock()
+	if !ac.hasClock {
+		return 0, false, false
+	}
+	return ac.clockSkewMS, ac.ntpSynced, true
+}
+
+// NoteClock stores a skew measured by a manual align so the card updates
+// before the next stats frame.
+func (h *Hub) NoteClock(id int64, skewMS int64, ntp bool) {
+	h.mu.RLock()
+	ac, exists := h.conns[id]
+	h.mu.RUnlock()
+	if !exists {
+		return
+	}
+	ac.liveMu.Lock()
+	ac.hasClock = true
+	ac.clockSkewMS = skewMS
+	ac.ntpSynced = ntp
+	ac.liveMu.Unlock()
 }
 
 func (h *Hub) Live(id int64) (up, down int64, ok bool) {
@@ -500,6 +539,11 @@ func (h *Hub) noteLive(ac *agentConn, st wsproto.Stats) {
 	ac.loadMilli = st.LoadMilli
 	ac.conns = st.Conns
 	ac.coresRunning = strings.Join(st.CoresRunning, ",")
+	if st.HasClock {
+		ac.hasClock = true
+		ac.clockSkewMS = st.ClockSkewMS
+		ac.ntpSynced = st.NTPSynced
+	}
 	if st.HasNet {
 		ac.upBps = st.NetUp
 		ac.downBps = st.NetDown

@@ -54,6 +54,12 @@ func (s *Server) decorateServers(list []*db.Server) {
 		x.CanRemoveWG = s.Hub.HasCap(x.ID, wsproto.CapWGRemove)
 		x.CanAllowPort = s.Hub.HasCap(x.ID, wsproto.CapAllowPort)
 		x.CanForward = s.Hub.HasCap(x.ID, wsproto.CapForward)
+		x.CanSyncTime = s.Hub.HasCap(x.ID, wsproto.CapTime)
+		if skew, ntp, ok := s.Hub.Clock(x.ID); ok {
+			x.HasClock = true
+			x.ClockSkewMS = skew
+			x.NTPSynced = ntp
+		}
 		if up, down, ok := s.Hub.Live(x.ID); ok {
 			x.NetUpBps = up
 			x.NetDownBps = down

@@ -22,6 +22,18 @@ function gbFromLimit(n) {
   return String(Math.round(gb * 1000) / 1000)
 }
 
+const clockWarnMS = 5000
+
+function clockDrifted(ms) {
+  return Math.abs(Number(ms) || 0) >= clockWarnMS
+}
+
+function clockOff(ms) {
+  const n = Number(ms) || 0
+  const sec = Math.max(1, Math.round(Math.abs(n) / 1000))
+  return n < 0 ? `慢了 ${sec} 秒` : `快了 ${sec} 秒`
+}
+
 function Metric({ label, value, tone }) {
   return (
     <div className={`metric${tone ? ` is-${tone}` : ''}`}>
@@ -53,6 +65,11 @@ function ServerMeta({ s, onRemoveWG }) {
     <div className="machine-meta">
       {s.agent_ver ? <span className="machine-meta-item">Agent {s.agent_ver}</span> : null}
       <span className="machine-meta-item">心跳 {fmtAgo(s.last_seen)}</span>
+      {s.has_clock ? (
+        <span className={`machine-meta-item${clockDrifted(s.clock_skew_ms) ? ' is-warn' : ''}`}>
+          {clockDrifted(s.clock_skew_ms) ? `时钟${clockOff(s.clock_skew_ms)}` : '时间已对齐'}
+        </span>
+      ) : null}
       {s.disable_ipv6 ? <span className="machine-meta-item">IPv6 关</span> : null}
       {cores.map(c => (
         c === 'wireguard' && onRemoveWG ? (
@@ -362,6 +379,29 @@ export default function Servers() {
       if (d.apply_error) toast(d.apply_error, 'error')
       else toast('已安装 WireGuard')
       await load()
+    } catch (e) {
+      toast(e.message, 'error')
+      if (e.code === 'agent_too_old') showInstall(s.id)
+    } finally { setBusyId(0) }
+  }
+
+  const syncTime = async (s) => {
+    if (!s?.id) return
+    if (!s.online) {
+      toast('Agent 不在线，无法对齐时间', 'error')
+      return
+    }
+    if (!s.can_sync_time) {
+      toast('该 Agent 还不支持对齐时间。请先一键升级', 'error')
+      return
+    }
+    setBusyId(s.id)
+    try {
+      const d = await api.post(`/servers/${s.id}/sync-time`, {})
+      const after = Number(d.after_ms) || 0
+      if (d.stepped) toast(`已把时钟拨正，原先${clockOff(d.skew_ms)}`)
+      else toast(clockDrifted(after) ? `还是${clockOff(after)}` : '时间已对齐')
+      setList(prev => prev.map(x => x.id === s.id ? { ...x, has_clock: true, clock_skew_ms: after, ntp_synced: !!d.ntp } : x))
     } catch (e) {
       toast(e.message, 'error')
       if (e.code === 'agent_too_old') showInstall(s.id)
@@ -817,6 +857,12 @@ export default function Servers() {
                         disabled: !s.online || cardBusy,
                         onSelect: () => pushNft(s),
                       },
+                      {
+                        label: '对齐时间',
+                        hint: s.can_sync_time ? '偏差超过 5 秒会拨正，并尽量打开 NTP' : (s.online ? '需先升级 Agent' : '需在线'),
+                        disabled: !s.online || cardBusy,
+                        onSelect: () => syncTime(s),
+                      },
                       { label: '流量上限', onSelect: () => saveLimit(s) },
                       {
                         label: s.disable_ipv6 ? '允许 IPv6' : '禁止 IPv6',
@@ -890,6 +936,14 @@ export default function Servers() {
                   <div className="px-3 pb-2">
                     <button type="button" className="btn-primary h-8 w-full" disabled={cardBusy} onClick={() => upgradeAgent(s)}>
                       {busyId === s.id ? '升级中…' : '一键升级'}
+                    </button>
+                  </div>
+                ) : null}
+                {s.online && s.has_clock && clockDrifted(s.clock_skew_ms) ? (
+                  <div className="px-3 pb-2">
+                    <div className="machine-clock">时钟{clockOff(s.clock_skew_ms)}，SS 可能连不上</div>
+                    <button type="button" className="btn-primary h-8 w-full" disabled={cardBusy} onClick={() => syncTime(s)}>
+                      {busyId === s.id ? '对齐中…' : '对齐时间'}
                     </button>
                   </div>
                 ) : null}

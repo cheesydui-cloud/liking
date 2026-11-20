@@ -45,6 +45,11 @@ type Agent struct {
 	revMu   sync.Mutex
 	writeMu sync.Mutex
 	exit    func(int)
+
+	clockMu     sync.Mutex
+	clockKnown  bool
+	clockSkewMS int64
+	clockNTP    bool
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -125,7 +130,7 @@ func (a *Agent) session(ctx context.Context) error {
 		Arch:         runtime.GOARCH,
 		LastRev:      lastRev,
 		Cores:        detectedCores(),
-		Caps:         []string{wsproto.CapCores, wsproto.CapProbe, wsproto.CapKick, wsproto.CapNFT, wsproto.CapWG, wsproto.CapWGRemove, wsproto.CapAllowPort, wsproto.CapForward},
+		Caps:         []string{wsproto.CapCores, wsproto.CapProbe, wsproto.CapKick, wsproto.CapNFT, wsproto.CapWG, wsproto.CapWGRemove, wsproto.CapAllowPort, wsproto.CapForward, wsproto.CapTime},
 	})
 	if err := a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeHello, ID: "hello", Payload: hello}); err != nil {
 		return err
@@ -143,6 +148,7 @@ func (a *Agent) session(ctx context.Context) error {
 		return fmt.Errorf("hello rejected: %s", ack.Error)
 	}
 	log.Printf("agent: connected as server %d %s", ack.ServerID, ack.Name)
+	go a.alignLoop(ctx)
 
 	ping := time.NewTicker(10 * time.Second)
 	defer ping.Stop()
@@ -176,7 +182,7 @@ func (a *Agent) session(ctx context.Context) error {
 		case err := <-errCh:
 			return err
 		case env := <-envCh:
-			if env.Type == wsproto.TypeApply || env.Type == wsproto.TypeEnsureCore || env.Type == wsproto.TypeRemoveCore || env.Type == wsproto.TypeProbe || env.Type == wsproto.TypeKick || env.Type == wsproto.TypeEnsureNFT || env.Type == wsproto.TypeEnsureWG || env.Type == wsproto.TypeRemoveWG || env.Type == wsproto.TypeAllowPort {
+			if env.Type == wsproto.TypeApply || env.Type == wsproto.TypeEnsureCore || env.Type == wsproto.TypeRemoveCore || env.Type == wsproto.TypeProbe || env.Type == wsproto.TypeKick || env.Type == wsproto.TypeEnsureNFT || env.Type == wsproto.TypeEnsureWG || env.Type == wsproto.TypeRemoveWG || env.Type == wsproto.TypeAllowPort || env.Type == wsproto.TypeSyncTime {
 				go func(env wsproto.Envelope) {
 					var err error
 					switch env.Type {
@@ -198,6 +204,8 @@ func (a *Agent) session(ctx context.Context) error {
 						err = a.handleRemoveWG(ctx, ws, env)
 					case wsproto.TypeAllowPort:
 						err = a.handleAllowPort(ctx, ws, env)
+					case wsproto.TypeSyncTime:
+						err = a.handleSyncTime(ctx, ws, env)
 					}
 					if err != nil {
 						log.Printf("agent %s: %v", env.Type, err)
@@ -241,6 +249,7 @@ func (a *Agent) session(ctx context.Context) error {
 			up, down, hasNet := snapshotNet()
 			diskFree, diskTotal := snapshotDisk()
 			memAvail, memTotal := snapshotMem()
+			skewMS, hasClock, ntpOn := a.clockSample()
 			st, _ := json.Marshal(wsproto.Stats{
 				Samples:      samples,
 				NetUp:        up,
@@ -258,6 +267,9 @@ func (a *Agent) session(ctx context.Context) error {
 				HasPorts:     hasPorts,
 				WGPeers:      wgPeers,
 				HasWGPeers:   hasWG,
+				HasClock:     hasClock,
+				ClockSkewMS:  skewMS,
+				NTPSynced:    ntpOn,
 			})
 			if err := a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeStats, Payload: st}); err != nil {
 				finishStats(false)
@@ -321,6 +333,67 @@ func (a *Agent) ackUpgrade(ctx context.Context, ws *websocket.Conn, id string, o
 func (a *Agent) ackUninstall(ctx context.Context, ws *websocket.Conn, id string, ok bool, errMsg string) error {
 	p, _ := json.Marshal(wsproto.UninstallAck{OK: ok, Error: errMsg})
 	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeUninstallAck, ID: id, Payload: p})
+}
+
+func (a *Agent) alignLoop(ctx context.Context) {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	timer := time.NewTimer(15 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			runCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+			rep := AlignClock(runCtx, false)
+			cancel()
+			a.noteClock(rep)
+			if rep.Err != nil {
+				log.Printf("agent time: %v", rep.Err)
+			} else if rep.Stepped {
+				log.Printf("agent time: stepped %s, now %s", rep.Skew, rep.After)
+			}
+			timer.Reset(10 * time.Minute)
+		}
+	}
+}
+
+func (a *Agent) handleSyncTime(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {
+	runCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	rep := AlignClock(runCtx, true)
+	a.noteClock(rep)
+	ack := wsproto.SyncTimeAck{
+		OK:      rep.Err == nil,
+		SkewMS:  rep.Skew.Milliseconds(),
+		AfterMS: rep.After.Milliseconds(),
+		Stepped: rep.Stepped,
+		NTP:     rep.NTP,
+	}
+	if rep.Err != nil {
+		ack.Error = rep.Err.Error()
+	}
+	p, _ := json.Marshal(ack)
+	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeSyncTimeAck, ID: env.ID, Payload: p})
+}
+
+func (a *Agent) noteClock(rep ClockReport) {
+	if !rep.Measured {
+		return
+	}
+	a.clockMu.Lock()
+	a.clockKnown = true
+	a.clockSkewMS = rep.After.Milliseconds()
+	a.clockNTP = rep.NTP
+	a.clockMu.Unlock()
+}
+
+func (a *Agent) clockSample() (skewMS int64, known, ntp bool) {
+	a.clockMu.Lock()
+	defer a.clockMu.Unlock()
+	return a.clockSkewMS, a.clockKnown, a.clockNTP
 }
 
 func (a *Agent) handleEnsureCore(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {

@@ -1941,6 +1941,12 @@ button.metric:hover .metric-affordance {
   font-size: 12px;
   color: var(--color-danger);
 }
+.machine-clock {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--color-warn);
+}
+.machine-meta-item.is-warn { color: var(--color-warn); }
 .machine-meta {
   display: flex;
   flex-wrap: wrap;

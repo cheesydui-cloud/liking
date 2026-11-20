@@ -301,6 +301,57 @@ func (s *Server) handlePushNft(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, out)
 }
 
+func (s *Server) handleSyncTime(w http.ResponseWriter, r *http.Request) {
+	id, err := chiID(r, "id")
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	srv, err := db.GetServer(s.DB, id)
+	if err != nil {
+		jsonErr(w, http.StatusNotFound, "服务器不存在")
+		return
+	}
+	if !s.Hub.IsOnline(id) {
+		jsonErr(w, http.StatusBadRequest, "Agent 不在线，无法对齐时间")
+		return
+	}
+	osName, _, _ := s.Hub.ConnMeta(id)
+	if osName != "" && osName != "linux" {
+		jsonErr(w, http.StatusBadRequest, "需要 Linux 才能对齐时间")
+		return
+	}
+	if !s.Hub.HasCap(id, wsproto.CapTime) {
+		jsonErrExtra(w, http.StatusBadRequest, "该 Agent 还不支持对齐时间。请先一键升级 Agent。", map[string]any{"code": "agent_too_old"})
+		return
+	}
+	raw, err := s.Hub.SendRPC(id, wsproto.TypeSyncTime, map[string]any{}, 3*time.Minute+30*time.Second)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var ack wsproto.SyncTimeAck
+	_ = json.Unmarshal(raw, &ack)
+	if !ack.OK {
+		msg := strings.TrimSpace(ack.Error)
+		if msg == "" {
+			msg = "对齐时间失败"
+		}
+		jsonErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	s.Hub.NoteClock(id, ack.AfterMS, ack.NTP)
+	u := userFromCtx(r.Context())
+	db.AddAudit(s.DB, &u.ID, "agent.sync_time", srv.Name)
+	jsonOK(w, map[string]any{
+		"ok":       true,
+		"skew_ms":  ack.SkewMS,
+		"after_ms": ack.AfterMS,
+		"stepped":  ack.Stepped,
+		"ntp":      ack.NTP,
+	})
+}
+
 func (s *Server) handlePushWG(w http.ResponseWriter, r *http.Request) {
 	id, err := chiID(r, "id")
 	if err != nil {

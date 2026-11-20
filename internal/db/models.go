@@ -78,6 +78,10 @@ type Server struct {
 	CanRemoveWG     bool   `json:"can_remove_wg,omitempty"`
 	CanAllowPort    bool   `json:"can_allow_port,omitempty"`
 	CanForward      bool   `json:"can_forward,omitempty"`
+	CanSyncTime     bool   `json:"can_sync_time,omitempty"`
+	HasClock        bool   `json:"has_clock,omitempty"`
+	ClockSkewMS     int64  `json:"clock_skew_ms,omitempty"`
+	NTPSynced       bool   `json:"ntp_synced,omitempty"`
 }
 
 type Certificate struct {

@@ -32,6 +32,8 @@ const (
 	TypeRemoveWGAck   = "remove_wg_ack"
 	TypeAllowPort     = "allow_port"
 	TypeAllowPortAck  = "allow_port_ack"
+	TypeSyncTime      = "sync_time"
+	TypeSyncTimeAck   = "sync_time_ack"
 
 	CapCores     = "cores"
 	CapProbe     = "probe"
@@ -41,6 +43,7 @@ const (
 	CapWGRemove  = "remove_wg"
 	CapAllowPort = "allow_port"
 	CapForward   = "forward"
+	CapTime      = "time"
 )
 
 type Envelope struct {
@@ -156,6 +159,11 @@ type Stats struct {
 	HasPorts     bool         `json:"has_ports,omitempty"`
 	WGPeers      []WGPeerStat `json:"wg_peers,omitempty"`
 	HasWGPeers   bool         `json:"has_wg_peers,omitempty"`
+	// ClockSkewMS is local time minus the reference clock. Negative means
+	// the machine is slow. SS2022 rejects a difference over 30 seconds.
+	HasClock    bool  `json:"has_clock,omitempty"`
+	ClockSkewMS int64 `json:"clock_skew_ms,omitempty"`
+	NTPSynced   bool  `json:"ntp_synced,omitempty"`
 }
 
 // PortRate is one listen port's realtime speed. It is display-only:
@@ -266,6 +274,15 @@ type AllowPortAck struct {
 	Error string `json:"error,omitempty"`
 	Port  int    `json:"port,omitempty"`
 	How   string `json:"how,omitempty"`
+}
+
+type SyncTimeAck struct {
+	OK      bool   `json:"ok"`
+	Error   string `json:"error,omitempty"`
+	SkewMS  int64  `json:"skew_ms"`
+	AfterMS int64  `json:"after_ms"`
+	Stepped bool   `json:"stepped"`
+	NTP     bool   `json:"ntp"`
 }
 
 type Ping struct {
