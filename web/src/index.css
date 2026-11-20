@@ -333,6 +333,13 @@ body {
   outline-offset: -1px;
 }
 select.input-field { cursor: pointer; }
+.date-drop {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+  margin-top: 6px;
+}
+.date-drop .input-field { padding-left: 8px; padding-right: 6px; }
 textarea.input-field { height: auto; min-height: 7rem; padding-top: 0.55rem; padding-bottom: 0.55rem; resize: vertical; }
 
 .search-field {
@@ -1959,6 +1966,13 @@ button.metric:hover .metric-affordance {
 .core-tag.is-singbox { color: var(--color-down); }
 .core-tag.is-mita { color: var(--color-warn); }
 .core-tag.is-wireguard { color: #3b6fd8; }
+button.core-tag {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+button.core-tag.is-wireguard:hover { text-decoration: underline; }
 .line-tag {
   margin-left: 6px;
   font-size: 11px;

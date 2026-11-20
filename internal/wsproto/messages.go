@@ -28,6 +28,8 @@ const (
 	TypeEnsureNFTAck  = "ensure_nft_ack"
 	TypeEnsureWG      = "ensure_wg"
 	TypeEnsureWGAck   = "ensure_wg_ack"
+	TypeRemoveWG      = "remove_wg"
+	TypeRemoveWGAck   = "remove_wg_ack"
 	TypeAllowPort     = "allow_port"
 	TypeAllowPortAck  = "allow_port_ack"
 
@@ -36,6 +38,7 @@ const (
 	CapKick      = "kick"
 	CapNFT       = "nft"
 	CapWG        = "wireguard"
+	CapWGRemove  = "remove_wg"
 	CapAllowPort = "allow_port"
 	CapForward   = "forward"
 )
@@ -244,6 +247,13 @@ type EnsureWGAck struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
 	Have  bool   `json:"have"`
+}
+
+type RemoveWGAck struct {
+	OK    bool     `json:"ok"`
+	Error string   `json:"error,omitempty"`
+	Have  bool     `json:"have"`
+	Cores []string `json:"cores"`
 }
 
 type AllowPort struct {

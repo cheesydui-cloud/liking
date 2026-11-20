@@ -75,6 +75,7 @@ type Server struct {
 	CanPushCores    bool   `json:"can_push_cores,omitempty"`
 	CanPushNft      bool   `json:"can_push_nft,omitempty"`
 	CanPushWG       bool   `json:"can_push_wg,omitempty"`
+	CanRemoveWG     bool   `json:"can_remove_wg,omitempty"`
 	CanAllowPort    bool   `json:"can_allow_port,omitempty"`
 	CanForward      bool   `json:"can_forward,omitempty"`
 }

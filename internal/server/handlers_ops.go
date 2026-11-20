@@ -23,6 +23,7 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 			PackageID *int64 `json:"package_id"`
 			Days      int    `json:"days"`
 			Months    int    `json:"months"`
+			ExpiresAt int64  `json:"expires_at"`
 		} `json:"users"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -76,7 +77,7 @@ func (s *Server) handleBulkUsers(w http.ResponseWriter, r *http.Request) {
 			out = append(out, rec)
 			continue
 		}
-		exp, expErr := resolveCreateExpiry(s.DB, 0, item.Days, item.Months)
+		exp, expErr := resolveCreateExpiry(s.DB, item.ExpiresAt, item.Days, item.Months)
 		if expErr != nil {
 			rec.Error = expErr.Error()
 			out = append(out, rec)

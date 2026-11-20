@@ -125,7 +125,7 @@ func (a *Agent) session(ctx context.Context) error {
 		Arch:         runtime.GOARCH,
 		LastRev:      lastRev,
 		Cores:        detectedCores(),
-		Caps:         []string{wsproto.CapCores, wsproto.CapProbe, wsproto.CapKick, wsproto.CapNFT, wsproto.CapWG, wsproto.CapAllowPort, wsproto.CapForward},
+		Caps:         []string{wsproto.CapCores, wsproto.CapProbe, wsproto.CapKick, wsproto.CapNFT, wsproto.CapWG, wsproto.CapWGRemove, wsproto.CapAllowPort, wsproto.CapForward},
 	})
 	if err := a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeHello, ID: "hello", Payload: hello}); err != nil {
 		return err
@@ -176,7 +176,7 @@ func (a *Agent) session(ctx context.Context) error {
 		case err := <-errCh:
 			return err
 		case env := <-envCh:
-			if env.Type == wsproto.TypeApply || env.Type == wsproto.TypeEnsureCore || env.Type == wsproto.TypeRemoveCore || env.Type == wsproto.TypeProbe || env.Type == wsproto.TypeKick || env.Type == wsproto.TypeEnsureNFT || env.Type == wsproto.TypeEnsureWG || env.Type == wsproto.TypeAllowPort {
+			if env.Type == wsproto.TypeApply || env.Type == wsproto.TypeEnsureCore || env.Type == wsproto.TypeRemoveCore || env.Type == wsproto.TypeProbe || env.Type == wsproto.TypeKick || env.Type == wsproto.TypeEnsureNFT || env.Type == wsproto.TypeEnsureWG || env.Type == wsproto.TypeRemoveWG || env.Type == wsproto.TypeAllowPort {
 				go func(env wsproto.Envelope) {
 					var err error
 					switch env.Type {
@@ -194,6 +194,8 @@ func (a *Agent) session(ctx context.Context) error {
 						err = a.handleEnsureNFT(ctx, ws, env)
 					case wsproto.TypeEnsureWG:
 						err = a.handleEnsureWG(ctx, ws, env)
+					case wsproto.TypeRemoveWG:
+						err = a.handleRemoveWG(ctx, ws, env)
 					case wsproto.TypeAllowPort:
 						err = a.handleAllowPort(ctx, ws, env)
 					}
@@ -469,6 +471,26 @@ func (a *Agent) handleEnsureWG(ctx context.Context, ws *websocket.Conn, env wspr
 	}
 	p, _ := json.Marshal(wsproto.EnsureWGAck{OK: ok, Error: msg, Have: have})
 	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeEnsureWGAck, ID: env.ID, Payload: p})
+}
+
+func (a *Agent) handleRemoveWG(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {
+	err := a.cores.UninstallWireGuard()
+	have := haveWG()
+	ok := err == nil && !have
+	msg := ""
+	if !ok {
+		if err != nil {
+			msg = err.Error()
+		} else {
+			msg = "卸载后仍能找到 wg"
+		}
+	}
+	cores := detectedCores()
+	if cores == nil {
+		cores = []string{}
+	}
+	p, _ := json.Marshal(wsproto.RemoveWGAck{OK: ok, Error: msg, Have: have, Cores: cores})
+	return a.writeEnv(ctx, ws, wsproto.Envelope{Type: wsproto.TypeRemoveWGAck, ID: env.ID, Payload: p})
 }
 
 func (a *Agent) handleApply(ctx context.Context, ws *websocket.Conn, env wsproto.Envelope) error {

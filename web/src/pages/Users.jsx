@@ -103,7 +103,60 @@ function bytesFromUsed(value, unit) {
 
 const emptyForm = { username: '', password: '', remark: '', package_id: '', duration: '3', days: '', expires: '', traffic_gb: '', enabled: true, traffic_reset_day: 0, speed_value: '', speed_unit: 'mbps' }
 
-function DurationPicker({ duration, days, onDuration, onDays }) {
+function daysInMonth(year, month) {
+  if (!year || !month) return 31
+  return new Date(Date.UTC(year, month, 0)).getUTCDate()
+}
+
+function DateDropdowns({ value, onChange }) {
+  const today = shanghaiToday()
+  const [ty, tm, td] = today.split('-').map(Number)
+  const parts = String(value || '').split('-').map(Number)
+  const year = parts[0] || 0
+  const month = parts[1] || 0
+  const day = parts[2] || 0
+  const years = []
+  for (let y = ty; y <= ty + 30; y++) years.push(y)
+  const minMonth = year === ty ? tm : 1
+  const shownMonth = month && month >= minMonth ? month : minMonth
+  const maxDay = year ? daysInMonth(year, shownMonth) : 31
+  const minDay = year === ty && shownMonth === tm ? td : 1
+  const months = []
+  for (let m = minMonth; m <= 12; m++) months.push(m)
+  const days = []
+  for (let d = minDay; d <= maxDay; d++) days.push(d)
+  const shownDay = year ? Math.min(Math.max(day || minDay, minDay), maxDay) : 0
+  const z = n => String(n).padStart(2, '0')
+  const set = (y, m, d) => {
+    if (!y) {
+      onChange('')
+      return
+    }
+    let mm = m || (y === ty ? tm : 1)
+    if (y === ty && mm < tm) mm = tm
+    const last = daysInMonth(y, mm)
+    let dd = d || (y === ty && mm === tm ? td : 1)
+    if (y === ty && mm === tm && dd < td) dd = td
+    if (dd > last) dd = last
+    onChange(`${y}-${z(mm)}-${z(dd)}`)
+  }
+  return (
+    <div className="date-drop">
+      <select className="input-field" aria-label="年" value={year || ''} onChange={e => set(Number(e.target.value), month, day)}>
+        <option value="">不限期</option>
+        {years.map(y => <option key={y} value={y}>{y}年</option>)}
+      </select>
+      <select className="input-field" aria-label="月" value={year ? shownMonth : ''} disabled={!year} onChange={e => set(year, Number(e.target.value), day)}>
+        {year ? months.map(m => <option key={m} value={m}>{m}月</option>) : <option value="">月</option>}
+      </select>
+      <select className="input-field" aria-label="日" value={year ? shownDay : ''} disabled={!year} onChange={e => set(year, shownMonth, Number(e.target.value))}>
+        {year ? days.map(d => <option key={d} value={d}>{d}日</option>) : <option value="">日</option>}
+      </select>
+    </div>
+  )
+}
+
+function DurationPicker({ duration, expires, onDuration, onExpires }) {
   return (
     <div>
       <div className="text-[12px] font-medium text-ink-soft mb-1.5">时长</div>
@@ -113,7 +166,10 @@ function DurationPicker({ duration, days, onDuration, onDays }) {
         ))}
       </div>
       {duration === 'custom' ? (
-        <input className="input-field mt-1.5" type="number" min="0" max="36500" placeholder="天数，0 为不限期" value={days} onChange={e => onDays(e.target.value)} />
+        <>
+          <DateDropdowns value={expires} onChange={onExpires} />
+          <div className="text-[12px] text-ink-mut mt-1.5">选年、月、日作为到期日。选不限期则一直有效。</div>
+        </>
       ) : (
         <div className="text-[12px] text-ink-mut mt-1.5">按自然月。1月31日加1个月，到期日是2月最后一天。</div>
       )}
@@ -530,7 +586,7 @@ export default function Users() {
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkPkg, setBulkPkg] = useState('')
   const [bulkDuration, setBulkDuration] = useState('3')
-  const [bulkDays, setBulkDays] = useState('')
+  const [bulkExpires, setBulkExpires] = useState('')
   const [ruleUser, setRuleUser] = useState(null)
   const [denyUser, setDenyUser] = useState(null)
   const [selected, setSelected] = useState(() => new Set())
@@ -582,12 +638,12 @@ export default function Users() {
   const closeForm = () => {
     setFormOpen(false)
     setEditUser(null)
-    setF({ ...emptyForm, package_id: f.package_id, duration: '3', days: '' })
+    setF({ ...emptyForm, package_id: f.package_id, duration: '3', days: '', expires: '' })
   }
 
   const openCreate = () => {
     setEditUser(null)
-    setF({ ...emptyForm, package_id: f.package_id, duration: '3', days: '' })
+    setF({ ...emptyForm, package_id: f.package_id, duration: '3', days: '', expires: '' })
     setFormOpen(true)
   }
 
@@ -639,12 +695,9 @@ export default function Users() {
       toast('密码至少 6 位', 'error')
       return
     }
-    if (!editUser && f.duration === 'custom') {
-      const days = Number(f.days) || 0
-      if (!Number.isFinite(days) || days < 0 || days > 36500) {
-        toast('天数无效', 'error')
-        return
-      }
+    if (!editUser && f.duration === 'custom' && f.expires && f.expires < shanghaiToday()) {
+      toast('到期日不能早于今天', 'error')
+      return
     }
     if (editUser) {
       if (editUser.enabled !== false && f.enabled === false) {
@@ -710,7 +763,7 @@ export default function Users() {
         } else toast('已保存')
       } else {
         const body = { username, remark: f.remark }
-        if (f.duration === 'custom') body.days = Number(f.days) || 0
+        if (f.duration === 'custom') body.expires_at = f.expires ? ymdToUnix(f.expires) : 0
         else body.months = Number(f.duration)
         if (f.password) body.password = f.password
         if (f.package_id) body.package_id = Number(f.package_id)
@@ -1201,7 +1254,12 @@ export default function Users() {
               </div>
             </div>
           ) : (
-            <DurationPicker duration={f.duration} days={f.days} onDuration={duration => setF({ ...f, duration })} onDays={days => setF({ ...f, days })} />
+            <DurationPicker
+              duration={f.duration}
+              expires={f.expires}
+              onDuration={duration => setF({ ...f, duration, expires: duration === 'custom' && !f.expires ? shanghaiToday() : f.expires })}
+              onExpires={expires => setF({ ...f, expires })}
+            />
           )}
           {editing && (
             <Field label="流量上限 G" hint={f.traffic_gb === '' ? (selectedPkg?.traffic_bytes ? `留空跟随套餐 ${fmtBytes(selectedPkg.traffic_bytes)}` : '留空跟随套餐，0 为不限') : (Number(f.traffic_gb) === 0 ? '0 = 不限流量' : '覆盖套餐额度')}>
@@ -1363,16 +1421,16 @@ export default function Users() {
           <button type="button" className="btn-primary" disabled={bulkBusy} onClick={async () => {
             const lines = bulkText.split('\n').map(x => x.trim()).filter(Boolean)
             if (!lines.length) { toast('请填写用户名，一行一个', 'error'); return }
-            if (bulkDuration === 'custom') {
-              const days = Number(bulkDays) || 0
-              if (!Number.isFinite(days) || days < 0 || days > 36500) { toast('天数无效', 'error'); return }
+            if (bulkDuration === 'custom' && bulkExpires && bulkExpires < shanghaiToday()) {
+              toast('到期日不能早于今天', 'error')
+              return
             }
             setBulkBusy(true)
             try {
               const users = lines.map(line => {
                 const [username, password] = line.split(/[\s,]+/).filter(Boolean)
                 const row = { username, password: password || '', package_id: bulkPkg ? Number(bulkPkg) : undefined }
-                if (bulkDuration === 'custom') row.days = Number(bulkDays) || 0
+                if (bulkDuration === 'custom') row.expires_at = bulkExpires ? ymdToUnix(bulkExpires) : 0
                 else row.months = Number(bulkDuration)
                 return row
               })
@@ -1419,7 +1477,15 @@ export default function Users() {
                 {pkgs.map(p => <option key={p.id} value={p.id}>{p.name}{p.reset_mode === 'anniversary' ? ' / 按开通日' : ''}</option>)}
               </select>
             </Field>
-            <DurationPicker duration={bulkDuration} days={bulkDays} onDuration={setBulkDuration} onDays={setBulkDays} />
+            <DurationPicker
+              duration={bulkDuration}
+              expires={bulkExpires}
+              onDuration={duration => {
+                setBulkDuration(duration)
+                if (duration === 'custom' && !bulkExpires) setBulkExpires(shanghaiToday())
+              }}
+              onExpires={setBulkExpires}
+            />
           </div>
           {bulkResult ? (
             <Field label="本次名片" hint="关闭后不再显示。复制失败也请从这里选中。">

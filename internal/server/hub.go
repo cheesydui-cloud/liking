@@ -316,7 +316,7 @@ func (h *Hub) readerLoop(parent context.Context, ac *agentConn) {
 			h.noteLive(ac, st)
 			h.notePorts(ac.serverID, st)
 			h.consumeStats(ac.serverID, st)
-		case wsproto.TypeApplyAck, wsproto.TypeHelloAck, wsproto.TypeUpgradeAck, wsproto.TypeUninstallAck, wsproto.TypeEnsureCoreAck, wsproto.TypeRemoveCoreAck, wsproto.TypeProbeAck, wsproto.TypeKickAck, wsproto.TypeEnsureNFTAck, wsproto.TypeEnsureWGAck, wsproto.TypeAllowPortAck:
+		case wsproto.TypeApplyAck, wsproto.TypeHelloAck, wsproto.TypeUpgradeAck, wsproto.TypeUninstallAck, wsproto.TypeEnsureCoreAck, wsproto.TypeRemoveCoreAck, wsproto.TypeProbeAck, wsproto.TypeKickAck, wsproto.TypeEnsureNFTAck, wsproto.TypeEnsureWGAck, wsproto.TypeRemoveWGAck, wsproto.TypeAllowPortAck:
 			ac.dispatchAck(env)
 		default:
 			log.Printf("hub: server %d unknown frame %q", ac.serverID, env.Type)

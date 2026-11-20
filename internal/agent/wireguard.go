@@ -322,7 +322,61 @@ func (c *Cores) knownWGIfaces() []string {
 	for _, iface := range likingWGConfs(c.dir) {
 		add(iface)
 	}
+	for _, iface := range listWGIfaces() {
+		add(iface)
+	}
 	return out
+}
+
+func listWGIfaces() []string {
+	bin := lookBin("wg")
+	if bin == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "show", "interfaces").Output()
+	if err != nil {
+		return nil
+	}
+	return strings.Fields(string(out))
+}
+
+func (c *Cores) UninstallWireGuard() error {
+	if foreign := wgForeignNames(); len(foreign) > 0 {
+		return fmt.Errorf("这台机器还有其它 WireGuard 接口 %s，卸掉工具会把它一起停掉", strings.Join(foreign, "、"))
+	}
+	c.mu.Lock()
+	err := c.downAllWireGuard()
+	if err == nil {
+		c.purgeWGFiles()
+	}
+	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return uninstallWG()
+}
+
+func (c *Cores) purgeWGFiles() {
+	if strings.TrimSpace(c.dir) == "" {
+		return
+	}
+	entries, err := os.ReadDir(c.dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		name := e.Name()
+		switch {
+		case strings.HasPrefix(name, "likingwg") && (strings.HasSuffix(name, ".conf") || strings.HasSuffix(name, ".sync")):
+		case strings.HasPrefix(name, "wg-dial"):
+		case name == "wg-peers.json":
+		default:
+			continue
+		}
+		_ = os.Remove(filepath.Join(c.dir, name))
+	}
 }
 
 func likingWGConfs(dir string) []string {

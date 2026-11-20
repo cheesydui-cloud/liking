@@ -2,6 +2,21 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.3.45 — 2026-11-20
+
+新建用户的自定义时长只能填天数。WireGuard 装上以后，不能像其它核心一样卸掉。
+
+### 变更
+- 新建用户和批量开户点「自定义」后，用年、月、日三个下拉框选到期日。年选「不限期」则一直有效。到期时间是上海时间当天 23:59:59
+- 实例可以卸载 WireGuard。点卡片上的蓝色 WireGuard 标签，或 ⋯ 里的「卸载 WireGuard」，或推送核心里已装列表的「卸载」
+- 机器上还有 WireGuard 节点、还是家宽出口、或有其它非 liking 的 WireGuard 接口时会拒绝。只删除 wireguard 和 wireguard-tools，不删除 iptables
+
+### 升级注意
+- 先在面板机器执行 `liking-upgrade`。这次 Agent 也有变更。要卸载 WireGuard，面板升级后再到实例页点「升级全部」
+- 日期下拉框只在面板。Agent 不升级也能开户
+- 0.3.44 的 Agent 没有卸载命令。不升级就点蓝色标签，会提示先升级
+- 回滚：`liking-upgrade --release v0.3.44`
+
 ## v0.3.44 — 2026-11-18
 
 国内机器连不上面板时，安装和升级 Agent 会卡在下载。`--gh-proxy` 只给内核用，Agent 本体仍然只从面板拉。

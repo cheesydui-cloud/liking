@@ -47,7 +47,7 @@ function ServerDates({ s }) {
   )
 }
 
-function ServerMeta({ s }) {
+function ServerMeta({ s, onRemoveWG }) {
   const cores = parseCores(s.cores)
   return (
     <div className="machine-meta">
@@ -55,7 +55,11 @@ function ServerMeta({ s }) {
       <span className="machine-meta-item">心跳 {fmtAgo(s.last_seen)}</span>
       {s.disable_ipv6 ? <span className="machine-meta-item">IPv6 关</span> : null}
       {cores.map(c => (
-        <span key={c} className={`core-tag is-${c}`}>{coreLabel(c)}</span>
+        c === 'wireguard' && onRemoveWG ? (
+          <button key={c} type="button" className="core-tag is-wireguard" title="卸载 WireGuard" onClick={() => onRemoveWG(s)}>WireGuard</button>
+        ) : (
+          <span key={c} className={`core-tag is-${c}`}>{coreLabel(c)}</span>
+        )
       ))}
     </div>
   )
@@ -306,6 +310,40 @@ export default function Servers() {
     const next = CORE_OPTIONS.find(c => !have.has(c.id)) || CORE_OPTIONS[0]
     setCorePick(next.id)
     setCoreSrv(s)
+  }
+
+  const removeWG = async (s) => {
+    if (!s?.id) return
+    if (!s.online) {
+      toast('Agent 不在线，无法卸载 WireGuard', 'error')
+      return
+    }
+    if (!s.can_remove_wg) {
+      toast('该 Agent 还不支持卸载 WireGuard。请先一键升级', 'error')
+      return
+    }
+    if (!(await dialog.confirm({
+      title: '卸载 WireGuard',
+      message: `从 ${s.name} 卸掉 WireGuard。隧道会关掉，wg 和 wg-quick 会从系统里删掉。可能要等一会儿。`,
+      danger: true,
+      okText: '卸载',
+    }))) return
+    setBusy(true)
+    setBusyId(s.id)
+    try {
+      const d = await api.post(`/servers/${s.id}/remove-wg`, {})
+      toast('已卸载 WireGuard')
+      if (Array.isArray(d.cores)) {
+        const cores = d.cores.join(',')
+        setCoreSrv(prev => prev && prev.id === s.id ? { ...prev, cores } : prev)
+      }
+      await load()
+    } catch (e) {
+      toast(e.message, 'error')
+    } finally {
+      setBusy(false)
+      setBusyId(0)
+    }
   }
 
   const pushWG = async (s) => {
@@ -759,13 +797,20 @@ export default function Servers() {
                         disabled: !s.online || cardBusy,
                         onSelect: () => openAllow(s),
                       },
-                      { label: '推送核心', hint: s.can_push_cores ? '安装或卸载 Xray / sing-box / Mita' : (s.online ? '需先升级 Agent' : '需在线'), onSelect: () => openCores(s) },
+                      { label: '推送核心', hint: s.can_push_cores ? '安装或卸载 Xray / sing-box / Mita，也可卸载 WireGuard' : (s.online ? '需先升级 Agent' : '需在线'), onSelect: () => openCores(s) },
                       {
                         label: '安装 WireGuard',
                         hint: s.can_push_wg ? '安装 wg 和 wg-quick。已装则跳过' : (s.online ? '需先升级 Agent' : '需在线'),
                         disabled: !s.online || cardBusy,
                         onSelect: () => pushWG(s),
                       },
+                      ...(parseCores(s.cores).includes('wireguard') ? [{
+                        label: '卸载 WireGuard',
+                        danger: true,
+                        hint: s.can_remove_wg ? '关掉隧道并卸掉 wg、wg-quick' : (s.online ? '需先升级 Agent' : '需在线'),
+                        disabled: !s.online || cardBusy,
+                        onSelect: () => removeWG(s),
+                      }] : []),
                       {
                         label: '安装 nftables',
                         hint: s.can_push_nft ? '拒绝中国 IP 需要。已装则跳过' : (s.online ? '需先升级 Agent' : '需在线'),
@@ -848,7 +893,7 @@ export default function Servers() {
                     </button>
                   </div>
                 ) : null}
-                {!fresh ? <ServerMeta s={s} /> : null}
+                {!fresh ? <ServerMeta s={s} onRemoveWG={removeWG} /> : null}
                 <div className="machine-foot">
                   <button type="button" className="machine-ports" onClick={() => openEdit(s)} title="编辑实例">
                     端口 {formatPortRange(s)}
@@ -1002,12 +1047,12 @@ export default function Servers() {
                 </Field>
                 <div>
                   <div className="text-[12px] font-medium text-ink-soft mb-1">已安装</div>
-                  {parseCores(coreSrv.cores).filter(c => c !== 'wireguard').length === 0 ? (
+                  {parseCores(coreSrv.cores).length === 0 ? (
                     <div className="text-[13px] text-ink-mut py-2">还没有探测到内核。</div>
-                  ) : parseCores(coreSrv.cores).filter(c => c !== 'wireguard').map(c => (
+                  ) : parseCores(coreSrv.cores).map(c => (
                     <div key={c} className="core-installed">
                       <span className={`core-tag is-${c}`}>{coreLabel(c)}</span>
-                      <button type="button" className="row-act" style={{ color: 'var(--color-danger)' }} disabled={busy} onClick={() => removeCore(c)}>卸载</button>
+                      <button type="button" className="row-act" style={{ color: 'var(--color-danger)' }} disabled={busy} onClick={() => c === 'wireguard' ? removeWG(coreSrv) : removeCore(c)}>卸载</button>
                     </div>
                   ))}
                 </div>

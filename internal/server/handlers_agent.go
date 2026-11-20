@@ -1,6 +1,7 @@
 package server
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -346,6 +347,87 @@ func (s *Server) handlePushWG(w http.ResponseWriter, r *http.Request) {
 		out["apply_error"] = err.Error()
 	}
 	jsonOK(w, out)
+}
+
+func (s *Server) handleRemoveWG(w http.ResponseWriter, r *http.Request) {
+	id, err := chiID(r, "id")
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	srv, err := db.GetServer(s.DB, id)
+	if err != nil {
+		jsonErr(w, http.StatusNotFound, "服务器不存在")
+		return
+	}
+	if !s.Hub.IsOnline(id) {
+		jsonErr(w, http.StatusBadRequest, "Agent 不在线，无法卸载 WireGuard")
+		return
+	}
+	osName, _, _ := s.Hub.ConnMeta(id)
+	if osName != "" && osName != "linux" {
+		jsonErr(w, http.StatusBadRequest, "需要 Linux 才能卸载 WireGuard")
+		return
+	}
+	if !s.Hub.HasCap(id, wsproto.CapWGRemove) {
+		jsonErrExtra(w, http.StatusBadRequest, "该 Agent 还不支持卸载 WireGuard。请先一键升级 Agent。", map[string]any{"code": "agent_too_old"})
+		return
+	}
+	if msg := wgUninstallBlocked(s.DB, id); msg != "" {
+		jsonErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	raw, err := s.Hub.SendRPC(id, wsproto.TypeRemoveWG, map[string]any{}, 3*time.Minute+30*time.Second)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var ack wsproto.RemoveWGAck
+	if err := json.Unmarshal(raw, &ack); err != nil {
+		jsonErr(w, http.StatusBadRequest, "卸载 WireGuard 失败")
+		return
+	}
+	if ack.Cores != nil {
+		_ = db.SetServerCores(s.DB, id, ack.Cores)
+	}
+	if !ack.OK {
+		msg := strings.TrimSpace(ack.Error)
+		if msg == "" {
+			msg = "卸载 WireGuard 失败"
+		}
+		jsonErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	u := userFromCtx(r.Context())
+	db.AddAudit(s.DB, &u.ID, "agent.remove_wg", srv.Name)
+	jsonOK(w, map[string]any{"ok": true, "have": ack.Have, "cores": ack.Cores})
+}
+
+func wgUninstallBlocked(d *sql.DB, serverID int64) string {
+	ins, err := db.ListInbounds(d)
+	if err != nil {
+		return "无法确认节点占用"
+	}
+	local, exits := 0, 0
+	for _, in := range ins {
+		if in == nil || in.Profile != corecfg.ProfileWireGuard {
+			continue
+		}
+		if in.ServerID == serverID {
+			local++
+			continue
+		}
+		if int64(corecfg.ParseSettings(in.Settings).Int("exit_server_id", 0)) == serverID {
+			exits++
+		}
+	}
+	if local > 0 {
+		return fmt.Sprintf("还有 %d 个 WireGuard 节点在这台机器上，先删节点再卸载", local)
+	}
+	if exits > 0 {
+		return fmt.Sprintf("这台机器还是 %d 条 WireGuard 的家宽出口，先改节点或删节点再卸载", exits)
+	}
+	return ""
 }
 
 func (s *Server) handleAllowPort(w http.ResponseWriter, r *http.Request) {
