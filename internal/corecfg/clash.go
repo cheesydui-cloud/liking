@@ -27,7 +27,7 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 			b.WriteString("    flow: xtls-rprx-vision\n")
 		}
 		fmt.Fprintf(&b, "    servername: %s\n", yq(first(st.Strings("server_names"))))
-		fmt.Fprintf(&b, "    client-fingerprint: %s\n", yq(nz(st.String("fingerprint"), "chrome")))
+		fmt.Fprintf(&b, "    client-fingerprint: %s\n", yq(nz(st.String("fingerprint"), DefaultFingerprint)))
 		b.WriteString("    reality-opts:\n")
 		fmt.Fprintf(&b, "      public-key: %s\n", yq(st.String("public_key")))
 		fmt.Fprintf(&b, "      short-id: %s\n", yq(first(st.Strings("short_ids"))))
@@ -40,7 +40,7 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 			sni = host
 		}
 		fmt.Fprintf(&b, "    servername: %s\n", yq(sni))
-		fmt.Fprintf(&b, "    client-fingerprint: %s\n", yq(nz(st.String("fingerprint"), "chrome")))
+		fmt.Fprintf(&b, "    client-fingerprint: %s\n", yq(nz(st.String("fingerprint"), DefaultFingerprint)))
 		writeClashALPN(&b, st)
 		b.WriteString("    xhttp-opts:\n")
 		fmt.Fprintf(&b, "      path: %s\n", yq(st.String("path")))
@@ -49,7 +49,7 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 		fmt.Fprintf(&b, "    uuid: %s\n", yq(c.UUID))
 		b.WriteString("    network: xhttp\n    tls: true\n    udp: true\n")
 		fmt.Fprintf(&b, "    servername: %s\n", yq(first(st.Strings("server_names"))))
-		fmt.Fprintf(&b, "    client-fingerprint: %s\n", yq(nz(st.String("fingerprint"), "chrome")))
+		fmt.Fprintf(&b, "    client-fingerprint: %s\n", yq(nz(st.String("fingerprint"), DefaultFingerprint)))
 		b.WriteString("    reality-opts:\n")
 		fmt.Fprintf(&b, "      public-key: %s\n", yq(st.String("public_key")))
 		fmt.Fprintf(&b, "      short-id: %s\n", yq(first(st.Strings("short_ids"))))
@@ -68,7 +68,7 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 			sni = host
 		}
 		fmt.Fprintf(&b, "    sni: %s\n", yq(sni))
-		fmt.Fprintf(&b, "    client-fingerprint: %s\n", yq(nz(st.String("fingerprint"), "chrome")))
+		fmt.Fprintf(&b, "    client-fingerprint: %s\n", yq(nz(st.String("fingerprint"), DefaultFingerprint)))
 		writeClashALPN(&b, st)
 	case ProfileSS2022:
 		b.WriteString("    type: ss\n")
@@ -83,7 +83,7 @@ func ClashProxyYAML(in *db.Inbound, c *db.Client) (string, string, error) {
 			sni = host
 		}
 		fmt.Fprintf(&b, "    sni: %s\n", yq(sni))
-		fmt.Fprintf(&b, "    client-fingerprint: %s\n", yq(nz(st.String("fingerprint"), "chrome")))
+		fmt.Fprintf(&b, "    client-fingerprint: %s\n", yq(nz(st.String("fingerprint"), DefaultFingerprint)))
 		writeClashALPN(&b, st)
 		b.WriteString("    udp: true\n")
 	case ProfileHysteria2:

@@ -369,7 +369,7 @@ func xrayTLS(in *db.Inbound, st Settings, certs map[int64]*db.Certificate) (map[
 func xrayClientTLS(st Settings, sni string) map[string]any {
 	tls := map[string]any{
 		"allowInsecure": false,
-		"fingerprint":   nz(st.String("fingerprint"), "chrome"),
+		"fingerprint":   nz(st.String("fingerprint"), DefaultFingerprint),
 		"alpn":          st.ALPN(),
 	}
 	if sni != "" {
@@ -571,7 +571,7 @@ func xrayShareStream(t *ShareTarget) map[string]any {
 	case "reality":
 		rs := map[string]any{
 			"serverName":  sni,
-			"fingerprint": nz(t.Fingerprint, "chrome"),
+			"fingerprint": nz(t.Fingerprint, DefaultFingerprint),
 			"publicKey":   t.PublicKey,
 			"shortId":     t.ShortID,
 		}
@@ -640,7 +640,7 @@ func xrayLandOutbound(tag string, land *db.Inbound, st Settings) (map[string]any
 			sid := first(lst.Strings("short_ids"))
 			rs := map[string]any{
 				"serverName":  sni,
-				"fingerprint": nz(lst.String("fingerprint"), "chrome"),
+				"fingerprint": nz(lst.String("fingerprint"), DefaultFingerprint),
 				"publicKey":   lst.String("public_key"),
 				"shortId":     sid,
 			}
@@ -666,7 +666,7 @@ func xrayLandOutbound(tag string, land *db.Inbound, st Settings) (map[string]any
 			sid := first(lst.Strings("short_ids"))
 			rs := map[string]any{
 				"serverName":  sni,
-				"fingerprint": nz(lst.String("fingerprint"), "chrome"),
+				"fingerprint": nz(lst.String("fingerprint"), DefaultFingerprint),
 				"publicKey":   lst.String("public_key"),
 				"shortId":     sid,
 			}

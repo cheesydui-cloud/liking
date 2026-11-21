@@ -359,7 +359,7 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 		st["short_ids"] = ids
 		fp := strings.ToLower(strings.TrimSpace(st.String("fingerprint")))
 		if !validFingerprint(fp) {
-			fp = "chrome"
+			fp = DefaultFingerprint
 		}
 		st["fingerprint"] = fp
 		xver := st.Int("xver", 0)
@@ -388,14 +388,14 @@ func Normalize(in *db.Inbound, exit *db.Inbound) error {
 		if fp := strings.ToLower(strings.TrimSpace(st.String("fingerprint"))); validFingerprint(fp) {
 			st["fingerprint"] = fp
 		} else if st.String("fingerprint") == "" {
-			st["fingerprint"] = "chrome"
+			st["fingerprint"] = DefaultFingerprint
 		}
 	case ProfileTrojanTLS, ProfileAnyTLS:
 		fillTLSDefaults(st)
 		if fp := strings.ToLower(strings.TrimSpace(st.String("fingerprint"))); validFingerprint(fp) {
 			st["fingerprint"] = fp
 		} else if st.String("fingerprint") == "" {
-			st["fingerprint"] = "chrome"
+			st["fingerprint"] = DefaultFingerprint
 		}
 	case ProfileHysteria2:
 		if err := fillHysteria2(st); err != nil {
@@ -691,6 +691,11 @@ func fillTLSDefaults(st Settings) {
 		st["alpn"] = []string{"h2", "http/1.1"}
 	}
 }
+
+// DefaultFingerprint is written into share links, subscriptions, and chain
+// land outbounds when a node has no fingerprint. xray 26 often aborts a
+// REALITY handshake that uses the chrome uTLS hello; safari completes it.
+const DefaultFingerprint = "safari"
 
 func validFingerprint(s string) bool {
 	switch s {

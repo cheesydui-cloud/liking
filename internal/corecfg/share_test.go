@@ -31,6 +31,37 @@ func TestNormalizeRealityAndURI(t *testing.T) {
 	if !strings.HasPrefix(uri, "vless://") || !strings.Contains(uri, "security=reality") || !strings.Contains(uri, "flow=xtls-rprx-vision") {
 		t.Fatalf("uri %s", uri)
 	}
+	if !strings.Contains(uri, "fp=safari") {
+		t.Fatalf("uri %s", uri)
+	}
+}
+
+func TestShareFingerprintDefaultAndExplicit(t *testing.T) {
+	c := &db.Client{UUID: "11111111-1111-4111-8111-111111111111"}
+	empty := &db.Inbound{
+		Name: "empty", Profile: ProfileVLESSRealityVision, Port: 443, ServerHost: "example.com",
+		Settings: `{"server_names":["www.cloudflare.com"],"public_key":"abc","short_ids":["abcd"]}`,
+	}
+	uri, err := ShareURI(empty, c)
+	if err != nil || !strings.Contains(uri, "fp=safari") {
+		t.Fatalf("empty %s %v", uri, err)
+	}
+	for _, fp := range []string{"firefox", "chrome"} {
+		in := &db.Inbound{
+			Name: fp, Profile: ProfileVLESSRealityVision, Port: 443, ServerHost: "example.com",
+			LineKind: "direct", Settings: `{"fingerprint":"` + fp + `"}`,
+		}
+		if err := Normalize(in, nil); err != nil {
+			t.Fatal(err)
+		}
+		if got := ParseSettings(in.Settings).String("fingerprint"); got != fp {
+			t.Fatalf("%s stored %s", fp, got)
+		}
+		uri, err = ShareURI(in, c)
+		if err != nil || !strings.Contains(uri, "fp="+fp) {
+			t.Fatalf("%s uri %s %v", fp, uri, err)
+		}
+	}
 }
 
 func TestMieruCannotLand(t *testing.T) {

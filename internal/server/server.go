@@ -143,6 +143,7 @@ func (s *Server) Router() http.Handler {
 			r.Put("/api/servers/{id}", s.handleUpdateServer)
 			r.Delete("/api/servers/{id}", s.handleDeleteServer)
 			r.Post("/api/servers/{id}/sync", s.handleSyncServer)
+			r.Post("/api/servers/sync-all", s.handleSyncAllServers)
 			r.Get("/api/servers/{id}/install", s.handleServerInstall)
 			r.Post("/api/servers/upgrade-agents", s.handleUpgradeAgents)
 			r.Post("/api/servers/{id}/upgrade-agent", s.handleUpgradeAgent)

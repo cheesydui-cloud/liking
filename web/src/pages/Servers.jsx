@@ -159,6 +159,8 @@ export default function Servers() {
   const [loadErr, setLoadErr] = useState('')
   const [upgradeBusy, setUpgradeBusy] = useState(false)
   const [upgradeReport, setUpgradeReport] = useState(null)
+  const [syncBusy, setSyncBusy] = useState(false)
+  const [syncReport, setSyncReport] = useState(null)
   const listSeq = useRef(0)
   const loadRef = useRef(() => {})
   const order = useCardOrder('servers', () => loadRef.current())
@@ -677,9 +679,34 @@ export default function Servers() {
     () => list.filter(s => s.online && s.needs_upgrade && !s.needs_reinstall),
     [list],
   )
+  const syncTargets = useMemo(() => list.filter(s => s.online), [list])
+
+  const syncAll = async () => {
+    if (syncBusy || upgradeBusy) return
+    if (!syncTargets.length) {
+      toast('没有在线实例。离线的会在上线后自动下发。')
+      return
+    }
+    if (!(await dialog.confirm({
+      title: '同步全部实例',
+      message: `把当前配置下发到 ${syncTargets.length} 台在线实例。和卡片上的「同步」一样：配置没变就不会重写防火墙，也不会重启内核。离线的会跳过，上线后自动拿到配置。`,
+      okText: '同步',
+    }))) return
+    setSyncBusy(true)
+    setSyncReport(null)
+    try {
+      const d = await api.post('/servers/sync-all')
+      setSyncReport(d)
+      load()
+    } catch (e) {
+      toast(e.message, 'error')
+    } finally {
+      setSyncBusy(false)
+    }
+  }
 
   const upgradeAll = async () => {
-    if (upgradeBusy) return
+    if (upgradeBusy || syncBusy) return
     if (!upgradeTargets.length) {
       toast('没有可升级的实例。离线、未安装和版本太旧的需要单独处理。')
       return
@@ -785,7 +812,12 @@ export default function Servers() {
         actions={
           <>
             {list.length > 0 ? (
-              <button type="button" className="btn-ghost" disabled={upgradeBusy || busyId !== 0} onClick={upgradeAll}>
+              <button type="button" className="btn-ghost" disabled={syncBusy || upgradeBusy || busyId !== 0} onClick={syncAll}>
+                {syncBusy ? '同步中…' : (syncTargets.length ? `同步全部 ${syncTargets.length}` : '同步全部')}
+              </button>
+            ) : null}
+            {list.length > 0 ? (
+              <button type="button" className="btn-ghost" disabled={syncBusy || upgradeBusy || busyId !== 0} onClick={upgradeAll}>
                 {upgradeBusy ? '升级中…' : (upgradeTargets.length ? `升级全部 ${upgradeTargets.length}` : '升级全部')}
               </button>
             ) : null}
@@ -845,7 +877,7 @@ export default function Servers() {
             const expired = isExpired(s.expires_at)
             const expSoon = !expired && s.expires_at && Number(s.expires_at) * 1000 < Date.now() + 7 * 86400 * 1000
             const quotaPct = s.traffic_limit ? Math.min(100, Math.floor(used * 100 / Number(s.traffic_limit))) : 0
-            const cardBusy = busyId === s.id || upgradeBusy
+            const cardBusy = busyId === s.id || upgradeBusy || syncBusy
             return (
               <div key={s.id} className={`machine ${machineTone(s)}${drag.dragging ? ' is-sorting' : ''}`} {...drag.itemProps}>
                 <div className="machine-head">
@@ -1286,6 +1318,25 @@ export default function Servers() {
         )}
       </Modal>
       <Modal
+        open={syncBusy || !!syncReport}
+        title={syncReport ? '同步结果' : '正在同步'}
+        onClose={() => { if (!syncBusy) setSyncReport(null) }}
+        footer={syncReport ? <button type="button" className="btn-ghost" onClick={() => setSyncReport(null)}>关闭</button> : null}
+      >
+        {syncReport ? (
+          <>
+            <p className="text-[13px] mb-3">
+              已下发 {syncReport.synced || 0} 台
+              {syncReport.failed ? `，失败 ${syncReport.failed} 台` : ''}
+              {syncReport.skipped ? `，跳过 ${syncReport.skipped} 台` : ''}。
+            </p>
+            <UpgradeReportList report={syncReport} />
+          </>
+        ) : (
+          <p className="text-[13px] text-ink-mut leading-relaxed">正在把当前配置下发到在线实例。配置没变的机器不会重启内核。</p>
+        )}
+      </Modal>
+      <Modal
         open={upgradeBusy || !!upgradeReport}
         title={upgradeReport ? '升级结果' : '正在升级'}
         onClose={() => { if (!upgradeBusy) setUpgradeReport(null) }}
@@ -1317,7 +1368,7 @@ function UpgradeReportList({ report }) {
         <div key={row.id} className="flex items-baseline gap-2 py-2 border-b border-[var(--color-line-soft)] min-w-0">
           <span className="text-[13px] font-medium shrink-0">{row.name}</span>
           <span className={`text-[12px] truncate ${row.status === 'failed' ? 'text-[var(--color-danger)]' : 'text-ink-mut'}`}>
-            {row.status === 'upgraded' ? '已升级，正在重启' : (row.error || row.status)}
+            {row.status === 'upgraded' ? '已升级，正在重启' : row.status === 'synced' ? '已下发' : (row.error || row.status)}
           </span>
         </div>
       ))}

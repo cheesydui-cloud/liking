@@ -25,7 +25,7 @@ func SingboxOutbound(in *db.Inbound, c *db.Client) (map[string]any, error) {
 			"tls": map[string]any{
 				"enabled":     true,
 				"server_name": first(st.Strings("server_names")),
-				"utls":        map[string]any{"enabled": true, "fingerprint": nz(st.String("fingerprint"), "chrome")},
+				"utls":        map[string]any{"enabled": true, "fingerprint": nz(st.String("fingerprint"), DefaultFingerprint)},
 				"reality": map[string]any{
 					"enabled":    true,
 					"public_key": st.String("public_key"),
@@ -58,7 +58,7 @@ func SingboxOutbound(in *db.Inbound, c *db.Client) (map[string]any, error) {
 			"tls": map[string]any{
 				"enabled":     true,
 				"server_name": first(st.Strings("server_names")),
-				"utls":        map[string]any{"enabled": true, "fingerprint": nz(st.String("fingerprint"), "chrome")},
+				"utls":        map[string]any{"enabled": true, "fingerprint": nz(st.String("fingerprint"), DefaultFingerprint)},
 				"reality": map[string]any{
 					"enabled":    true,
 					"public_key": st.String("public_key"),

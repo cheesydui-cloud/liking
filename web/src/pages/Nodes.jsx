@@ -138,7 +138,8 @@ function DestPicker({ value, onChange, server }) {
   )
 }
 
-const FINGERPRINTS = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'qq', 'random', 'randomized']
+const FINGERPRINTS = ['safari', 'ios', 'chrome', 'firefox', 'android', 'edge', 'qq', 'random', 'randomized']
+const DEFAULT_FINGERPRINT = 'safari'
 
 const emptyLine = {
   server_id: 0, name: '', profile: 'vless-reality-vision', port: '', listen: '0.0.0.0',
@@ -147,7 +148,7 @@ const emptyLine = {
   method: '2022-blake3-aes-256-gcm', transport: 'BOTH',
   obfs: true, masquerade: 'https://www.cloudflare.com', up_mbps: '', down_mbps: '',
   wg_network: '10.7.0.0/24', wg_address: '10.7.0.1/24', wg_exit: '10.7.0.2/32', wg_exit_server: 0,
-  fingerprint: 'chrome', short_ids: '', xver: 0, spider_x: '',
+  fingerprint: DEFAULT_FINGERPRINT, short_ids: '', xver: 0, spider_x: '',
   min_version: '1.3', alpn: 'h2,http/1.1', reject_unknown_sni: true,
   rotate_keys: false, settings: {},
 }
@@ -268,7 +269,7 @@ function inboundParamRows(inb) {
 
 function hasAdvanced(st) {
   if (!st) return false
-  if (st.fingerprint && st.fingerprint !== 'chrome') return true
+  if (st.fingerprint && st.fingerprint !== 'safari' && st.fingerprint !== 'chrome') return true
   if (Array.isArray(st.short_ids) && st.short_ids.length > 1) return true
   if (st.min_version && st.min_version !== '1.3') return true
   if (st.reject_unknown_sni === false) return true
@@ -356,7 +357,7 @@ function formFromInbound(inb) {
     masquerade: st.masquerade || 'https://www.cloudflare.com',
     up_mbps: st.up_mbps || '',
     down_mbps: st.down_mbps || '',
-    fingerprint: st.fingerprint || 'chrome',
+    fingerprint: st.fingerprint || DEFAULT_FINGERPRINT,
     short_ids: short,
     xver: st.xver ?? 0,
     spider_x: st.spider_x || '',
@@ -474,7 +475,7 @@ export default function Nodes() {
       const names = csv(f.sni)
       if (names.length) settings.server_names = names
       else delete settings.server_names
-      settings.fingerprint = f.fingerprint || 'chrome'
+      settings.fingerprint = f.fingerprint || DEFAULT_FINGERPRINT
       const ids = csv(f.short_ids)
       if (ids.length) settings.short_ids = ids
       else delete settings.short_ids
@@ -489,7 +490,7 @@ export default function Nodes() {
     if (needsTLS(profile)) {
       if (String(f.sni || '').trim()) settings.sni = f.sni.trim()
       else delete settings.sni
-      settings.fingerprint = f.fingerprint || 'chrome'
+      settings.fingerprint = f.fingerprint || DEFAULT_FINGERPRINT
       settings.min_version = f.min_version || '1.3'
       const alpn = csv(f.alpn)
       if (alpn.length) settings.alpn = alpn
@@ -1062,7 +1063,7 @@ export default function Nodes() {
                 </Field>
               )}
               {(isReality(f.profile) || needsTLS(f.profile)) && (
-                <Field label="uTLS 指纹" hint="客户端伪装成这种浏览器的 TLS 握手。">
+                <Field label="uTLS 指纹" hint="客户端伪装成这种浏览器的 TLS 握手。新建节点默认 safari。">
                   <select className="input-field" value={f.fingerprint} onChange={e => setF({ ...f, fingerprint: e.target.value })}>
                     {FINGERPRINTS.map(x => <option key={x} value={x}>{x}</option>)}
                   </select>

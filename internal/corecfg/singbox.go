@@ -592,7 +592,7 @@ func singLandOutbound(tag string, land *db.Inbound, st Settings) (map[string]any
 			"tls": map[string]any{
 				"enabled":     true,
 				"server_name": sni,
-				"utls":        map[string]any{"enabled": true, "fingerprint": nz(lst.String("fingerprint"), "chrome")},
+				"utls":        map[string]any{"enabled": true, "fingerprint": nz(lst.String("fingerprint"), DefaultFingerprint)},
 				"reality": map[string]any{
 					"enabled":    true,
 					"public_key": lst.String("public_key"),
@@ -615,7 +615,7 @@ func singLandOutbound(tag string, land *db.Inbound, st Settings) (map[string]any
 			"tls": map[string]any{
 				"enabled":     true,
 				"server_name": sni,
-				"utls":        map[string]any{"enabled": true, "fingerprint": nz(lst.String("fingerprint"), "chrome")},
+				"utls":        map[string]any{"enabled": true, "fingerprint": nz(lst.String("fingerprint"), DefaultFingerprint)},
 				"reality": map[string]any{
 					"enabled":    true,
 					"public_key": lst.String("public_key"),
@@ -688,7 +688,7 @@ func singClientTLS(st Settings, sni string) map[string]any {
 		"enabled":     true,
 		"min_version": nz(st.String("min_version"), "1.3"),
 		"alpn":        st.ALPN(),
-		"utls":        map[string]any{"enabled": true, "fingerprint": nz(st.String("fingerprint"), "chrome")},
+		"utls":        map[string]any{"enabled": true, "fingerprint": nz(st.String("fingerprint"), DefaultFingerprint)},
 	}
 	if sni != "" {
 		tls["server_name"] = sni

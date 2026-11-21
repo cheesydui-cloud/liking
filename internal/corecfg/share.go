@@ -39,7 +39,7 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 		q.Set("security", "reality")
 		q.Set("type", "tcp")
 		q.Set("sni", first(st.Strings("server_names")))
-		q.Set("fp", nz(st.String("fingerprint"), "chrome"))
+		q.Set("fp", nz(st.String("fingerprint"), DefaultFingerprint))
 		q.Set("pbk", st.String("public_key"))
 		q.Set("sid", first(st.Strings("short_ids")))
 		if spx := st.String("spider_x"); spx != "" {
@@ -61,7 +61,7 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 			sni = host
 		}
 		q.Set("sni", sni)
-		q.Set("fp", nz(st.String("fingerprint"), "chrome"))
+		q.Set("fp", nz(st.String("fingerprint"), DefaultFingerprint))
 		q.Set("alpn", strings.Join(st.ALPN(), ","))
 		if h := st.String("host"); h != "" {
 			q.Set("host", h)
@@ -75,7 +75,7 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 		q.Set("path", st.String("path"))
 		q.Set("mode", nz(st.String("mode"), "auto"))
 		q.Set("sni", first(st.Strings("server_names")))
-		q.Set("fp", nz(st.String("fingerprint"), "chrome"))
+		q.Set("fp", nz(st.String("fingerprint"), DefaultFingerprint))
 		q.Set("pbk", st.String("public_key"))
 		q.Set("sid", first(st.Strings("short_ids")))
 		if spx := st.String("spider_x"); spx != "" {
@@ -94,7 +94,7 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 			sni = host
 		}
 		q.Set("sni", sni)
-		q.Set("fp", nz(st.String("fingerprint"), "chrome"))
+		q.Set("fp", nz(st.String("fingerprint"), DefaultFingerprint))
 		q.Set("alpn", strings.Join(st.ALPN(), ","))
 		return fmt.Sprintf("trojan://%s@%s?%s#%s", url.QueryEscape(c.Password), hp, q.Encode(), name), nil
 	case ProfileSS2022:
@@ -109,7 +109,7 @@ func ShareURI(in *db.Inbound, c *db.Client) (string, error) {
 			sni = host
 		}
 		q.Set("sni", sni)
-		q.Set("fp", nz(st.String("fingerprint"), "chrome"))
+		q.Set("fp", nz(st.String("fingerprint"), DefaultFingerprint))
 		q.Set("alpn", strings.Join(st.ALPN(), ","))
 		return fmt.Sprintf("anytls://%s@%s?%s#%s", url.QueryEscape(c.Password), hp, q.Encode(), name), nil
 	case ProfileHysteria2:
