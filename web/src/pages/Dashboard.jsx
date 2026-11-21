@@ -6,6 +6,7 @@ import { startPoll } from '../lib/poll'
 import { asArray, isAbort } from '../lib/safe'
 import { serverStatus } from '../lib/status'
 import { Badge, DayBars, Empty, HourArea, Icon, LineStatus, PageHead, SkeletonRows, fmtAgo, fmtBps, fmtBytes, machineTone } from '../components/ui'
+import { alertCardParts } from '../lib/alerts'
 
 function alertItemsOf(d) {
   if (Array.isArray(d.alert_items) && d.alert_items.length) return d.alert_items
@@ -83,18 +84,27 @@ export default function Dashboard() {
         </div>
       </div>
       {alerts.length > 0 && (
-        <div className="mb-5">
-          <div className="text-[14px] font-semibold mb-1">报警</div>
-          <div className="flex flex-col gap-1.5">
-            {alerts.map((a, i) => (
-              <Link
-                key={`${a.to || ''}-${a.text}-${i}`}
-                to={a.to || '/servers'}
-                className={`alert-row ${a.kind === 'danger' ? 'is-fault' : 'is-warn'}`}
-              >
-                {a.text}
-              </Link>
-            ))}
+        <div className="alert-board">
+          <div className="text-[14px] font-semibold">报警</div>
+          <div className="alert-grid">
+            {alerts.map((a, i) => {
+              const card = alertCardParts(a)
+              return (
+                <Link
+                  key={`${card.to}-${card.text}-${i}`}
+                  to={card.to}
+                  className={`alert-card ${card.fault ? 'is-fault' : 'is-warn'}`}
+                  title={card.text}
+                >
+                  <div className="alert-card-k">
+                    <span>{card.scope}</span>
+                    <span className={`alert-card-tone ${card.fault ? 'is-fault' : 'is-warn'}`}>{card.tone}</span>
+                  </div>
+                  <div className="alert-card-name">{card.name}</div>
+                  {card.reason ? <div className="alert-card-reason">{card.reason}</div> : null}
+                </Link>
+              )
+            })}
           </div>
         </div>
       )}
