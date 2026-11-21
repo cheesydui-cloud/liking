@@ -15,6 +15,16 @@ export function isDirectNode(inb) {
   return true
 }
 
+// isPanelNode is a card on the nodes page. Admin chain entries belong under
+// the entry instance. Port forwards and customer transit stay off that list.
+export function isPanelNode(inb) {
+  if (!inb) return false
+  if (inb.profile === 'port-forward') return false
+  if (inb.line_kind === 'traffic') return false
+  if (Number(inb.owner_user_id)) return false
+  return true
+}
+
 export function serverInstalled(s) {
   return !!(s && (s.agent_ver || s.last_seen))
 }

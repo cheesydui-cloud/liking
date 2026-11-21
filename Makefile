@@ -1,6 +1,6 @@
 .PHONY: web bin dist run test tidy
 
-VERSION ?= 0.3.49
+VERSION ?= 0.3.50
 LDFLAGS := -s -w -X liking/internal/version.Version=$(VERSION)
 export GOCACHE := $(CURDIR)/.gocache
 export GOMODCACHE := $(CURDIR)/.gomod

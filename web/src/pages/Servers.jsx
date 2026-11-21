@@ -8,7 +8,7 @@ import { startPoll } from '../lib/poll'
 import { createOpLock } from '../lib/opLock'
 import { asArray, isAbort } from '../lib/safe'
 import { copyText } from '../lib/copy'
-import { isDirectNode, serverStatus } from '../lib/status'
+import { isPanelNode, serverStatus } from '../lib/status'
 import { useToast, useDialog } from '../components/Layout'
 import { Badge, Empty, Field, FilterTabs, Icon, LineStatus, Meter, Modal, MoreMenu, PageHead, SearchInput, SkeletonRows, fmtAgo, fmtBps, fmtBytes, machineTone } from '../components/ui'
 import { CORE_OPTIONS, coreLabel, fmtExpires, fmtResetDay, isExpired, parseCores, ymd, ymdToUnix } from '../lib/display'
@@ -788,7 +788,7 @@ export default function Servers() {
     } catch (e) { toast(e.message, 'error') }
   }
 
-  const nodesOf = (id) => ins.filter(x => Number(x.server_id) === Number(id) && isDirectNode(x))
+  const nodesOf = (id) => ins.filter(x => Number(x.server_id) === Number(id) && isPanelNode(x))
   const online = list.filter(s => s.online).length
   const visible = useMemo(() => {
     const needle = q.trim().toLowerCase()

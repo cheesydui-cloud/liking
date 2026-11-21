@@ -3,7 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { copyText } from '../lib/copy'
 import { formatPortRange, serverPortRange } from '../lib/ports'
-import { isDirectNode, nodeStatus, serverHasCore } from '../lib/status'
+import { isPanelNode, nodeStatus, serverHasCore } from '../lib/status'
+import { landingText } from '../lib/forwards'
 import { useToast, useDialog } from '../components/Layout'
 import { coreLabel } from '../lib/display'
 import { cacheGen, peekList, putList } from '../lib/listCache'
@@ -143,7 +144,7 @@ const DEFAULT_FINGERPRINT = 'safari'
 
 const emptyLine = {
   server_id: 0, name: '', profile: 'vless-reality-vision', port: '', listen: '0.0.0.0',
-  line_kind: 'direct', cert_id: 0, enabled: true, reject_cn: false,
+  line_kind: 'direct', exit_inbound_id: 0, exit_uri: '', cert_id: 0, enabled: true, reject_cn: false,
   dest: 'www.cloudflare.com:443', sni: '', path: '', host: '', mode: 'auto',
   method: '2022-blake3-aes-256-gcm', transport: 'BOTH',
   obfs: true, masquerade: 'https://www.cloudflare.com', up_mbps: '', down_mbps: '',
@@ -342,7 +343,9 @@ function formFromInbound(inb) {
     profile: inb.profile,
     port: inb.port,
     listen: inb.listen || '0.0.0.0',
-    line_kind: 'direct',
+    line_kind: inb.line_kind || 'direct',
+    exit_inbound_id: inb.exit_inbound_id || 0,
+    exit_uri: inb.exit_uri || '',
     cert_id: inb.cert_id || 0,
     enabled: inb.enabled !== false,
     reject_cn: !!inb.reject_cn,
@@ -536,16 +539,21 @@ export default function Nodes() {
     } else {
       delete settings.exit_server_id
     }
+    const chain = f.line_kind === 'chain' || !!f.exit_uri
     const body = {
       server_id: Number(f.server_id),
       name: f.name,
       profile,
       port: Number(f.port) || 0,
       listen: f.listen || '0.0.0.0',
-      line_kind: 'direct',
+      line_kind: chain ? 'chain' : 'direct',
       enabled: f.enabled !== false,
       reject_cn: profile === 'wireguard' ? false : !!f.reject_cn,
       settings,
+    }
+    if (chain) {
+      body.exit_inbound_id = Number(f.exit_inbound_id) || 0
+      body.exit_uri = f.exit_uri || ''
     }
     if (f.cert_id) body.cert_id = Number(f.cert_id)
     return body
@@ -610,7 +618,13 @@ export default function Nodes() {
   }
 
   const delLine = async (id) => {
-    if (!(await dialog.confirm({ title: '删除节点', message: '订阅里对应的节点会立刻消失。', danger: true }))) return
+    const inb = list.find(x => Number(x.id) === Number(id))
+    const chain = inb && (inb.line_kind === 'chain' || inb.exit_uri)
+    if (!(await dialog.confirm({
+      title: chain ? '删除入口' : '删除节点',
+      message: chain ? '这条入口会从订阅里消失。落地节点还在。' : '订阅里对应的节点会立刻消失。',
+      danger: true,
+    }))) return
     await ops.current.run(`del-${id}`, async () => {
       try { await api.del(`/inbounds/${id}`); if (editId === id) closeLine(); await load() }
       catch (e) { toast(e.message, 'error') }
@@ -709,16 +723,17 @@ export default function Nodes() {
     })
   }
 
-  const direct = useMemo(() => list.filter(isDirectNode), [list])
+  const byID = useMemo(() => new Map(list.map(x => [Number(x.id), x])), [list])
+  const panel = useMemo(() => list.filter(isPanelNode), [list])
   const groups = useMemo(() => {
     const needle = q.trim().toLowerCase()
     const sid = Number(serverQ) || 0
     const out = []
     for (const s of servers) {
       if (sid && Number(s.id) !== sid) continue
-      let nodes = direct.filter(x => Number(x.server_id) === Number(s.id))
-      if (statusFilter === '故障') nodes = nodes.filter(x => { const st = nodeStatus(x, s); return st === '故障' || st === '流量已满' })
-      else if (statusFilter) nodes = nodes.filter(x => nodeStatus(x, s) === statusFilter)
+      let nodes = panel.filter(x => Number(x.server_id) === Number(s.id))
+      if (statusFilter === '故障') nodes = nodes.filter(x => { const st = nodeStatus(x, s, { byID }); return st === '故障' || st === '流量已满' })
+      else if (statusFilter) nodes = nodes.filter(x => nodeStatus(x, s, { byID }) === statusFilter)
       if (needle) {
         nodes = nodes.filter(x => [x.name, x.profile, protoShort(x.profile), x.port, s.name, s.public_host]
           .some(v => String(v || '').toLowerCase().includes(needle)))
@@ -727,7 +742,7 @@ export default function Nodes() {
       out.push({ server: s, nodes })
     }
     return out
-  }, [servers, direct, q, statusFilter, serverQ])
+  }, [servers, panel, byID, q, statusFilter, serverQ])
 
   const filteredServer = serverQ ? servers.find(s => String(s.id) === String(serverQ)) : null
 
@@ -735,7 +750,7 @@ export default function Nodes() {
     <div>
       <PageHead
         title="节点"
-        desc="按实例分组。链式和端口中转在中转里。"
+        desc="按实例分组。链式入口显示在入口那台实例下，端口中转在中转页。"
         actions={
           servers.length > 0 ? (
             <button type="button" className="btn-primary" onClick={() => openCreateLine()}>
@@ -759,7 +774,7 @@ export default function Nodes() {
             </button>
           ) : (
             <div className="text-[12px] text-ink-mut font-mono sm:ml-auto whitespace-nowrap">
-              {direct.length} 个节点
+              {panel.length} 个节点
             </div>
           )}
         </div>
@@ -816,7 +831,8 @@ export default function Nodes() {
                   }}
                   onCommit={(next) => order.commit(next)}
                   renderItem={(inb, drag) => {
-                    const st = nodeStatus(inb, s)
+                    const st = nodeStatus(inb, s, { byID })
+                    const chain = inb.line_kind === 'chain' || !!inb.exit_uri
                     const used = (inb.used_up || 0) + (inb.used_down || 0)
                     const exitSrv = inb.profile === 'wireguard' ? servers.find(x => Number(x.id) === wgExitServerID(inb)) : null
                     return (
@@ -825,6 +841,7 @@ export default function Nodes() {
                           <div className="min-w-0 flex-1">
                             <div className="machine-title">
                               <span className="machine-name truncate">{inb.name}</span>
+                              {chain ? <span className="line-tag">中转</span> : null}
                               <LineStatus status={st} />
                             </div>
                             {inb.reject_cn ? (
@@ -835,6 +852,11 @@ export default function Nodes() {
                             {inb.profile === 'wireguard' ? (
                               <div className="machine-host">
                                 <span className="text-[12px] text-ink-mut">{exitSrv ? `家宽 ${exitSrv.name}` : '还没选家宽'}</span>
+                              </div>
+                            ) : null}
+                            {chain ? (
+                              <div className="machine-host">
+                                <span className="text-[12px] text-ink-mut truncate">转到 {landingText(inb, byID)}</span>
                               </div>
                             ) : null}
                           </div>
