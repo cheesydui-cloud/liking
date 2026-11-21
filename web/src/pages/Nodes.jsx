@@ -738,7 +738,7 @@ export default function Nodes() {
         nodes = nodes.filter(x => [x.name, x.profile, protoShort(x.profile), x.port, s.name, s.public_host]
           .some(v => String(v || '').toLowerCase().includes(needle)))
       }
-      if (!sid && (statusFilter || needle) && nodes.length === 0) continue
+      if (nodes.length === 0) continue
       out.push({ server: s, nodes })
     }
     return out
@@ -795,7 +795,15 @@ export default function Nodes() {
         </div>
       ) : groups.length === 0 ? (
         <div className="card overflow-hidden">
-          <Empty title="没有匹配的节点" hint="换个关键词或筛选。" />
+          <Empty
+            title={statusFilter || q ? '没有匹配的节点' : '还没有节点'}
+            hint={statusFilter || q ? '换个关键词或筛选。' : '建好节点后，这台实例会出现在这里。'}
+            action={!statusFilter && !q ? (
+              <button type="button" className="btn-primary" onClick={() => openCreateLine(filteredServer?.id)}>
+                <Icon name="plus" size={15} /> 增加节点
+              </button>
+            ) : null}
+          />
         </div>
       ) : (
         <div>
@@ -809,20 +817,7 @@ export default function Nodes() {
                 <span className="node-cluster-count">{nodes.length} 个</span>
                 {userForwards ? <span className="node-cluster-count">用户中转 {userForwards}</span> : null}
               </div>
-              {nodes.length === 0 ? (
-                <div className="card overflow-hidden">
-                  <Empty
-                    title={statusFilter || q ? '没有匹配的节点' : '这台实例还没有节点'}
-                    hint={statusFilter || q ? '换个关键词或筛选。' : '选协议即可，名称和端口都可以留空。'}
-                    action={!statusFilter && !q ? (
-                      <button type="button" className="btn-primary" onClick={() => openCreateLine(s.id)}>
-                        <Icon name="plus" size={15} /> 增加节点
-                      </button>
-                    ) : null}
-                  />
-                </div>
-              ) : (
-                <SortableGrid
+              <SortableGrid
                   items={nodes}
                   className="machine-grid"
                   onPreview={(next) => {
@@ -900,7 +895,6 @@ export default function Nodes() {
                     )
                   }}
                 />
-              )}
             </section>
             )
           })}
