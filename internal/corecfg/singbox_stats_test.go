@@ -22,7 +22,7 @@ func TestSingboxV2RayStatsUsers(t *testing.T) {
 			{InboundID: 8, UserID: 5, Email: "u5.i8", Password: "pw", Enabled: true},
 		},
 	}
-	cfg, err := buildSingbox([]*db.Inbound{socks, anytls}, clients, certs, nil, 60190, 60191, nil, nil)
+	cfg, err := buildSingbox([]*db.Inbound{socks, anytls}, clients, certs, nil, 60190, 60191, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

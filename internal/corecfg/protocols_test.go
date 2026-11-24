@@ -114,7 +114,7 @@ func TestHysteria2ShareAndInbound(t *testing.T) {
 		t.Fatalf("outbound %+v", ob)
 	}
 	certs := map[int64]*db.Certificate{1: {ID: 1, CertPEM: "cert", KeyPEM: "key"}}
-	cfg, err := buildSingbox([]*db.Inbound{in}, map[int64][]*db.Client{8: {c}}, certs, nil, 60190, 0, nil, nil)
+	cfg, err := buildSingbox([]*db.Inbound{in}, map[int64][]*db.Client{8: {c}}, certs, nil, 60190, 0, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

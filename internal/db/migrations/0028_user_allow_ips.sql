@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN allow_ips TEXT NOT NULL DEFAULT '';

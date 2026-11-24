@@ -297,6 +297,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		SiteDenyCategories *[]string       `json:"site_deny_categories"`
 		SiteDenyDomains    *[]string       `json:"site_deny_domains"`
 		SiteFilterMode     *string         `json:"site_filter_mode"`
+		AllowIPs           *[]string       `json:"allow_ips"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -459,6 +460,14 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			u.SiteDenyCategories = deny.Categories
 			u.SiteDenyDomains = deny.Domains
 		}
+	}
+	if req.AllowIPs != nil {
+		ips, err := corecfg.NormalizeAllowIPs(*req.AllowIPs)
+		if err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		u.AllowIPs = ips
 	}
 	var pendingHash, pendingPlain string
 	if req.Password != nil {

@@ -9,7 +9,7 @@ import (
 	"liking/internal/db"
 )
 
-func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound, apiPort, statsPort int, speeds map[int64]int64, denies map[int64]SiteDeny) (map[string]any, error) {
+func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound, apiPort, statsPort int, speeds map[int64]int64, denies map[int64]SiteDeny, allows map[int64][]string) (map[string]any, error) {
 	var ins []any
 	var outs []any
 	used := false
@@ -65,16 +65,13 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 	// Deny, then allow-pass, allow-block, then chain. Catch-all would steal filtered users.
 	var chainRules []any
 	var speedRules []any
+	var ipBlocks []any
 	for _, in := range inbounds {
 		if in.Core != CoreSingbox || !in.Enabled {
 			continue
 		}
 		if in.LineKind == "chain" {
-			chainRules = append(chainRules, map[string]any{
-				"action":   "route",
-				"inbound":  []string{inboundTag(in.ID)},
-				"outbound": outboundTag(in.ID),
-			})
+			chainRules = append(chainRules, singChainIPRules(in, clients[in.ID], allows, outboundTag(in.ID))...)
 			continue
 		}
 		if !acctProfile(in) {
@@ -86,20 +83,26 @@ func buildSingbox(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs 
 			if !ok {
 				continue
 			}
-			speedRules = append(speedRules, map[string]any{
+			rule := map[string]any{
 				"action":    "route",
 				"inbound":   []string{tag},
 				"auth_user": []string{email},
 				"outbound":  limitTag(mark),
-			})
+			}
+			if cidrs := allowOf(allows, c.UserID); len(cidrs) > 0 {
+				rule["source_ip_cidr"] = cidrs
+				ipBlocks = append(ipBlocks, singIPBlock(tag, email))
+			}
+			speedRules = append(speedRules, rule)
 		}
 	}
-	pass, block := collectSiteAllowGroups(inbounds, clients, denies, speeds, CoreSingbox)
+	pass, block := collectSiteAllowGroups(inbounds, clients, denies, speeds, allows, CoreSingbox)
 	routeRules := singSiteDenyRules(collectSiteDenyGroups(inbounds, clients, denies, CoreSingbox))
 	routeRules = append(routeRules, singSiteAllowPassRules(pass)...)
 	routeRules = append(routeRules, singSiteAllowBlockRules(block)...)
 	routeRules = append(routeRules, chainRules...)
 	routeRules = append(routeRules, speedRules...)
+	routeRules = append(routeRules, ipBlocks...)
 	// sing-box 1.13 删除了入站上的 sniff。嗅探必须是路由动作，并且排在域名规则前面。
 	// 不改写目标地址，与旧的 sniff_override_destination: false 相同。
 	routeRules = append([]any{map[string]any{"action": "sniff"}}, routeRules...)

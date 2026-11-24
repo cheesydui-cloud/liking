@@ -404,7 +404,7 @@ func TestCollectSiteAllowGroups(t *testing.T) {
 		2: {Mode: SiteFilterAllow, Categories: []string{"tiktok"}},
 		3: {Mode: SiteFilterDeny, Categories: []string{"google"}},
 	}
-	pass, block := collectSiteAllowGroups([]*db.Inbound{in}, map[int64][]*db.Client{7: {c1, c2, c3}}, filters, nil, CoreXray)
+	pass, block := collectSiteAllowGroups([]*db.Inbound{in}, map[int64][]*db.Client{7: {c1, c2, c3}}, filters, nil, nil, CoreXray)
 	if len(pass) != 2 {
 		t.Fatalf("pass %d %+v", len(pass), pass)
 	}
@@ -426,7 +426,7 @@ func TestCollectSiteAllowGroups(t *testing.T) {
 	}
 
 	speeds := map[int64]int64{1: 10}
-	pass, block = collectSiteAllowGroups([]*db.Inbound{in}, map[int64][]*db.Client{7: {c1, c2}}, filters, speeds, CoreXray)
+	pass, block = collectSiteAllowGroups([]*db.Inbound{in}, map[int64][]*db.Client{7: {c1, c2}}, filters, speeds, nil, CoreXray)
 	if len(pass) != 2 {
 		t.Fatalf("speed split %d %+v", len(pass), pass)
 	}

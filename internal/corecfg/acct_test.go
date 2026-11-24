@@ -44,7 +44,7 @@ func TestSingboxConfigOmitsV2RayAPI(t *testing.T) {
 	clients := map[int64][]*db.Client{
 		7: {{ID: 1, InboundID: 7, UserID: 3, Email: "u3.i7", Password: "pw", Enabled: true}},
 	}
-	cfg, err := buildSingbox([]*db.Inbound{in}, clients, nil, nil, 60190, 60191, nil, nil)
+	cfg, err := buildSingbox([]*db.Inbound{in}, clients, nil, nil, 60190, 60191, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

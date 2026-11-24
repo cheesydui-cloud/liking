@@ -213,6 +213,7 @@ function UserFlags({ u }) {
   if (u.sub_rule_preset) flags.push(<Badge key="rule" tone="muted">独立规则</Badge>)
   const deny = denyBadgeText(u)
   if (deny) flags.push(<Badge key="deny" tone="muted">{deny}</Badge>)
+  if (Array.isArray(u.allow_ips) && u.allow_ips.length) flags.push(<Badge key="ip" tone="muted">IP 白名单</Badge>)
   if (!flags.length) return null
   return flags
 }
@@ -336,6 +337,7 @@ function formatUserCard(u, pkgs = [], base) {
     if (Number(u.traffic_reset_day) > 0) lines.push(`每月 ${u.traffic_reset_day} 号清零`)
     if (u.speed_limit > 0) lines.push(`限速：${formatSpeedLimit(u.speed_limit)}`)
     else lines.push('限速：不限')
+    if (Array.isArray(u.allow_ips) && u.allow_ips.length) lines.push(`IP 白名单：${u.allow_ips.join('、')}`)
   }
   if (u.sub_token) lines.push(`订阅：${origin}/api/sub/${u.sub_token}`)
   if (u.remark) lines.push(`备注：${u.remark}`)
@@ -555,6 +557,52 @@ function UserDenyModal({ user, onClose, onSaved }) {
   )
 }
 
+function UserAllowIPModal({ user, onClose, onSaved }) {
+  const toast = useToast()
+  const [text, setText] = useState(Array.isArray(user.allow_ips) ? user.allow_ips.join('\n') : '')
+  const [busy, setBusy] = useState(false)
+
+  const save = async () => {
+    const lines = parseDenyLines(text)
+    if (lines.length > 32) {
+      toast('IP 白名单最多 32 条', 'error')
+      return
+    }
+    setBusy(true)
+    try {
+      await api.put(`/users/${user.id}`, { allow_ips: lines })
+      toast('已保存，节点立刻生效')
+      onSaved()
+      onClose()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <Modal open title={`${user.username} 的 IP 白名单`} onClose={onClose} footer={
+      <>
+        <button type="button" className="btn-ghost" onClick={onClose}>取消</button>
+        <button type="button" className="btn-primary" disabled={busy} onClick={save}>{busy ? '保存中…' : '保存'}</button>
+      </>
+    }>
+      <div className="space-y-4">
+        <p className="text-[12.5px] text-ink-mut leading-relaxed">
+          只限制这个用户从填写的 IP 连接节点。留空则这个用户不限制。同一端口上的其他用户照常连接。Mieru 和 WireGuard 不生效。已建立的连接可能要重连。
+        </p>
+        <Field label="来源 IP" hint="每行一个 IP 或网段，最多 32 条。">
+          <textarea
+            className="input-field"
+            rows={6}
+            placeholder={"1.2.3.4\n10.0.0.0/8"}
+            value={text}
+            onChange={e => setText(e.target.value)}
+          />
+        </Field>
+      </div>
+    </Modal>
+  )
+}
+
 export default function Users() {
   const toast = useToast()
   const dialog = useDialog()
@@ -589,6 +637,7 @@ export default function Users() {
   const [bulkExpires, setBulkExpires] = useState('')
   const [ruleUser, setRuleUser] = useState(null)
   const [denyUser, setDenyUser] = useState(null)
+  const [ipUser, setIpUser] = useState(null)
   const [selected, setSelected] = useState(() => new Set())
   const [batchBusy, setBatchBusy] = useState(false)
   const [loadErr, setLoadErr] = useState('')
@@ -1177,6 +1226,7 @@ export default function Users() {
                       { label: '编辑', onSelect: () => openEdit(u) },
                       { label: '分流规则', onSelect: () => setRuleUser(u) },
                       { label: '访问限制', onSelect: () => setDenyUser(u) },
+                      { label: 'IP 白名单', onSelect: () => setIpUser(u) },
                       { label: '预览节点', onSelect: () => openPreview(u) },
                       { label: '重置密码', onSelect: () => resetPassword(u) },
                       { sep: true },
@@ -1311,6 +1361,13 @@ export default function Users() {
         <UserDenyModal
           user={denyUser}
           onClose={() => setDenyUser(null)}
+          onSaved={load}
+        />
+      ) : null}
+      {ipUser ? (
+        <UserAllowIPModal
+          user={ipUser}
+          onClose={() => setIpUser(null)}
           onSaved={load}
         />
       ) : null}

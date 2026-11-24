@@ -534,6 +534,7 @@ type siteAllowPassGroup struct {
 	Domains  []string
 	IPs      []string
 	Outbound string
+	Source   []string
 }
 
 func collectSiteDenyGroups(inbounds []*db.Inbound, clients map[int64][]*db.Client, denies map[int64]SiteDeny, core string) []siteDenyGroup {
@@ -596,7 +597,7 @@ func collectSiteDenyGroups(inbounds []*db.Inbound, clients map[int64][]*db.Clien
 	return out
 }
 
-func collectSiteAllowGroups(inbounds []*db.Inbound, clients map[int64][]*db.Client, denies map[int64]SiteDeny, speeds map[int64]int64, core string) (pass []siteAllowPassGroup, block []siteDenyGroup) {
+func collectSiteAllowGroups(inbounds []*db.Inbound, clients map[int64][]*db.Client, denies map[int64]SiteDeny, speeds map[int64]int64, allows map[int64][]string, core string) (pass []siteAllowPassGroup, block []siteDenyGroup) {
 	type acc struct {
 		tags     []string
 		users    []string
@@ -605,6 +606,7 @@ func collectSiteAllowGroups(inbounds []*db.Inbound, clients map[int64][]*db.Clie
 		domains  []string
 		ips      []string
 		outbound string
+		cidrs    []string
 	}
 	byKey := map[string]*acc{}
 	var order []string
@@ -627,14 +629,15 @@ func collectSiteAllowGroups(inbounds []*db.Inbound, clients map[int64][]*db.Clie
 			if ob == "" {
 				continue
 			}
-			key := d.key() + "\x00" + ob
+			cidrs := allowOf(allows, c.UserID)
+			key := d.key() + "\x00" + ob + "\x00" + strings.Join(cidrs, ",")
 			a := byKey[key]
 			if a == nil {
 				doms, ips := ResolveSiteDeny(d)
 				if len(doms) == 0 && len(ips) == 0 {
 					continue
 				}
-				a = &acc{seenT: map[string]bool{}, seenU: map[string]bool{}, domains: doms, ips: ips, outbound: ob}
+				a = &acc{seenT: map[string]bool{}, seenU: map[string]bool{}, domains: doms, ips: ips, outbound: ob, cidrs: cidrs}
 				byKey[key] = a
 				order = append(order, key)
 			}
@@ -660,7 +663,7 @@ func collectSiteAllowGroups(inbounds []*db.Inbound, clients map[int64][]*db.Clie
 	for _, k := range order {
 		a := byKey[k]
 		pass = append(pass, siteAllowPassGroup{
-			Tags: a.tags, Users: a.users, Domains: a.domains, IPs: a.ips, Outbound: a.outbound,
+			Tags: a.tags, Users: a.users, Domains: a.domains, IPs: a.ips, Outbound: a.outbound, Source: a.cidrs,
 		})
 	}
 	if len(blockAcc.users) > 0 && len(blockAcc.tags) > 0 {
@@ -712,22 +715,30 @@ func xraySiteAllowPassRules(groups []siteAllowPassGroup) []any {
 			for _, d := range g.Domains {
 				items = append(items, "domain:"+d)
 			}
-			rules = append(rules, map[string]any{
+			rule := map[string]any{
 				"type":        "field",
 				"inboundTag":  g.Tags,
 				"user":        g.Users,
 				"domain":      items,
 				"outboundTag": g.Outbound,
-			})
+			}
+			if len(g.Source) > 0 {
+				rule["source"] = g.Source
+			}
+			rules = append(rules, rule)
 		}
 		if len(g.IPs) > 0 {
-			rules = append(rules, map[string]any{
+			rule := map[string]any{
 				"type":        "field",
 				"inboundTag":  g.Tags,
 				"user":        g.Users,
 				"ip":          g.IPs,
 				"outboundTag": g.Outbound,
-			})
+			}
+			if len(g.Source) > 0 {
+				rule["source"] = g.Source
+			}
+			rules = append(rules, rule)
 		}
 	}
 	return rules
@@ -782,22 +793,30 @@ func singSiteAllowPassRules(groups []siteAllowPassGroup) []any {
 			continue
 		}
 		if len(g.Domains) > 0 {
-			rules = append(rules, map[string]any{
+			rule := map[string]any{
 				"action":        "route",
 				"inbound":       g.Tags,
 				"auth_user":     g.Users,
 				"domain_suffix": g.Domains,
 				"outbound":      g.Outbound,
-			})
+			}
+			if len(g.Source) > 0 {
+				rule["source_ip_cidr"] = g.Source
+			}
+			rules = append(rules, rule)
 		}
 		if len(g.IPs) > 0 {
-			rules = append(rules, map[string]any{
+			rule := map[string]any{
 				"action":    "route",
 				"inbound":   g.Tags,
 				"auth_user": g.Users,
 				"ip_cidr":   g.IPs,
 				"outbound":  g.Outbound,
-			})
+			}
+			if len(g.Source) > 0 {
+				rule["source_ip_cidr"] = g.Source
+			}
+			rules = append(rules, rule)
 		}
 	}
 	return rules

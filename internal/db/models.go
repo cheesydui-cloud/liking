@@ -33,6 +33,7 @@ type User struct {
 	SiteDenyCategories []string `json:"site_deny_categories"`
 	SiteDenyDomains    []string `json:"site_deny_domains"`
 	SiteFilterMode     string   `json:"site_filter_mode"`
+	AllowIPs           []string `json:"allow_ips"`
 	Transit            bool     `json:"transit,omitempty"`
 }
 

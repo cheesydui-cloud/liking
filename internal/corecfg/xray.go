@@ -7,7 +7,7 @@ import (
 	"liking/internal/db"
 )
 
-func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound, apiPort int, speeds map[int64]int64, denies map[int64]SiteDeny) (map[string]any, error) {
+func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map[int64]*db.Certificate, byID map[int64]*db.Inbound, apiPort int, speeds map[int64]int64, denies map[int64]SiteDeny, allows map[int64][]string) (map[string]any, error) {
 	var ins []any
 	var outs []any
 	var rules []any
@@ -24,6 +24,7 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 	limitOuts := map[uint32]struct{}{}
 	var chainRules []any
 	var speedRules []any
+	var ipBlocks []any
 	var directRules []any
 	for _, in := range inbounds {
 		if in.Core != CoreXray || !in.Enabled {
@@ -52,9 +53,9 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 				return nil, err
 			}
 			outs = append(outs, obs...)
-			chainRules = append(chainRules, map[string]any{
-				"type": "field", "inboundTag": []string{tag}, "outboundTag": obTag,
-			})
+			// Listed sources reach the chain outbound. That user is blocked
+			// before the inbound catch-all, so peers on the same port stay open.
+			chainRules = append(chainRules, xrayChainIPRules(in, clients[in.ID], allows, obTag)...)
 			continue
 		}
 		if in.Profile == ProfilePortForward && in.OwnerUserID != 0 {
@@ -64,9 +65,15 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 					limitOuts[mark] = struct{}{}
 					outs = append(outs, xrayLimitFreedom(mark))
 				}
-				directRules = append(directRules, map[string]any{
+				rule := map[string]any{
 					"type": "field", "inboundTag": []string{tag}, "outboundTag": limitTag(mark),
-				})
+				}
+				if cidrs := allowOf(allows, in.OwnerUserID); len(cidrs) > 0 {
+					rule["source"] = cidrs
+					directRules = append(directRules, rule, xrayInboundBlock(tag))
+				} else {
+					directRules = append(directRules, rule)
+				}
 				continue
 			}
 		}
@@ -83,12 +90,17 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 					limitOuts[mark] = struct{}{}
 					outs = append(outs, xrayLimitFreedom(mark))
 				}
-				speedRules = append(speedRules, map[string]any{
+				rule := map[string]any{
 					"type":        "field",
 					"inboundTag":  []string{tag},
 					"user":        []string{email},
 					"outboundTag": limitTag(mark),
-				})
+				}
+				if cidrs := allowOf(allows, c.UserID); len(cidrs) > 0 {
+					rule["source"] = cidrs
+					ipBlocks = append(ipBlocks, xrayIPBlock(tag, email))
+				}
+				speedRules = append(speedRules, rule)
 			}
 		}
 		directRules = append(directRules, map[string]any{
@@ -121,12 +133,14 @@ func buildXray(inbounds []*db.Inbound, clients map[int64][]*db.Client, certs map
 	}
 
 	// Deny, then allow-pass, allow-block, then chain. Catch-all would steal filtered users.
-	pass, block := collectSiteAllowGroups(inbounds, clients, denies, speeds, CoreXray)
+	// IP blocks sit after the stamped accept rule and before that inbound's catch-all.
+	pass, block := collectSiteAllowGroups(inbounds, clients, denies, speeds, allows, CoreXray)
 	rules = append(rules, xraySiteDenyRules(collectSiteDenyGroups(inbounds, clients, denies, CoreXray))...)
 	rules = append(rules, xraySiteAllowPassRules(pass)...)
 	rules = append(rules, xraySiteAllowBlockRules(block)...)
 	rules = append(rules, chainRules...)
 	rules = append(rules, speedRules...)
+	rules = append(rules, ipBlocks...)
 	rules = append(rules, directRules...)
 
 	if !used {

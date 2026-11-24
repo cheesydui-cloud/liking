@@ -220,7 +220,7 @@ liking 节点安装
   --token TOKEN     节点 token（必填）
   --insecure        允许明文 http / ws 控制信道
   --gh-proxy URL    GitHub 镜像。连不上面板时用它下载 Agent，内核也走这个镜像
-  --release VER     Agent 版本，例如 v0.3.51。面板下发的脚本不用填
+  --release VER     Agent 版本，例如 v0.3.52。面板下发的脚本不用填
   -k                curl 跳过 TLS 校验
 H
       exit 0 ;;

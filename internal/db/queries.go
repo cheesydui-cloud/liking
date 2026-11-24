@@ -176,9 +176,9 @@ func GetUser(d *sql.DB, id int64) (*User, error) {
 	var en int
 	var tlim sql.NullInt64
 	var totpEn int
-	var catsRaw, denyCatsRaw, denyDomsRaw string
-	err := d.QueryRow(`SELECT id,username,password_hash,role,remark,enabled,expires_at,traffic_limit,used_up,used_down,cycle_start,sub_token,created_at,totp_secret,totp_enabled,traffic_reset_day,password_plain,speed_limit,sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains,site_filter_mode FROM users WHERE id=?`, id).
-		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Remark, &en, &u.ExpiresAt, &tlim, &u.UsedUp, &u.UsedDown, &u.CycleStart, &u.SubToken, &u.CreatedAt, &u.TOTPSecret, &totpEn, &u.TrafficResetDay, &u.PasswordPlain, &u.SpeedLimit, &u.SubRulePreset, &catsRaw, &denyCatsRaw, &denyDomsRaw, &u.SiteFilterMode)
+	var catsRaw, denyCatsRaw, denyDomsRaw, allowRaw string
+	err := d.QueryRow(`SELECT id,username,password_hash,role,remark,enabled,expires_at,traffic_limit,used_up,used_down,cycle_start,sub_token,created_at,totp_secret,totp_enabled,traffic_reset_day,password_plain,speed_limit,sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains,site_filter_mode,allow_ips FROM users WHERE id=?`, id).
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Remark, &en, &u.ExpiresAt, &tlim, &u.UsedUp, &u.UsedDown, &u.CycleStart, &u.SubToken, &u.CreatedAt, &u.TOTPSecret, &totpEn, &u.TrafficResetDay, &u.PasswordPlain, &u.SpeedLimit, &u.SubRulePreset, &catsRaw, &denyCatsRaw, &denyDomsRaw, &u.SiteFilterMode, &allowRaw)
 	if err != nil {
 		return nil, err
 	}
@@ -191,6 +191,7 @@ func GetUser(d *sql.DB, id int64) (*User, error) {
 	u.SubRuleCategories = decodeStringSlice(catsRaw)
 	u.SiteDenyCategories = decodeStringSlice(denyCatsRaw)
 	u.SiteDenyDomains = decodeStringSlice(denyDomsRaw)
+	u.AllowIPs = decodeStringSlice(allowRaw)
 	attachPackage(d, u)
 	return u, nil
 }
@@ -299,8 +300,8 @@ func UpdateUser(d *sql.DB, u *User) error {
 	if u.Enabled {
 		en = 1
 	}
-	_, err := d.Exec(`UPDATE users SET username=?, remark=?, enabled=?, expires_at=?, traffic_limit=?, traffic_reset_day=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=?, site_filter_mode=? WHERE id=?`,
-		u.Username, u.Remark, en, u.ExpiresAt, u.TrafficLimit, u.TrafficResetDay, u.SpeedLimit, u.SubRulePreset, encodeStringSlice(u.SubRuleCategories), encodeStringSlice(u.SiteDenyCategories), encodeStringSlice(u.SiteDenyDomains), u.SiteFilterMode, u.ID)
+	_, err := d.Exec(`UPDATE users SET username=?, remark=?, enabled=?, expires_at=?, traffic_limit=?, traffic_reset_day=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=?, site_filter_mode=?, allow_ips=? WHERE id=?`,
+		u.Username, u.Remark, en, u.ExpiresAt, u.TrafficLimit, u.TrafficResetDay, u.SpeedLimit, u.SubRulePreset, encodeStringSlice(u.SubRuleCategories), encodeStringSlice(u.SiteDenyCategories), encodeStringSlice(u.SiteDenyDomains), u.SiteFilterMode, encodeStringSlice(u.AllowIPs), u.ID)
 	return err
 }
 
