@@ -814,13 +814,17 @@ function PanelUpgradeCard() {
 
   useEffect(() => { load() }, [])
 
-  const watchRestart = (beforeVer, beforeStarted) => {
+  const watchRestart = (beforeVer, beforeStarted, mode) => {
     setWaiting(true)
     const started = Date.now()
+    const limit = mode === 'docker' ? 360000 : 180000
+    const failHint = mode === 'docker'
+      ? '还没看到面板回来。到宿主机看 /opt/liking-docker/upgrade.log'
+      : '还没看到面板回来。到面板机看 liking-upgrade 的输出'
     const tick = async () => {
-      if (Date.now() - started > 180000) {
+      if (Date.now() - started > limit) {
         setWaiting(false)
-        toast('还没看到面板回来。到面板机看 liking-upgrade 的输出', 'error')
+        toast(failHint, 'error')
         return
       }
       try {
@@ -846,16 +850,17 @@ function PanelUpgradeCard() {
     setBusy(true)
     const beforeVer = info?.version || ''
     const beforeStarted = info?.started || 0
+    const mode = info?.mode || ''
     try {
       await api.post('/panel/upgrade', { password: pw })
       setPw('')
-      toast('已开始升级。面板会断开几十秒，完成后自动刷新')
-      watchRestart(beforeVer, beforeStarted)
+      toast(mode === 'docker' ? '已开始升级。构建镜像要几分钟，完成后自动刷新' : '已开始升级。面板会断开几十秒，完成后自动刷新')
+      watchRestart(beforeVer, beforeStarted, mode)
     } catch (err) {
       const dropped = err.message === '网络错误' || err.status === 502 || err.status === 503 || err.status === 504
       if (dropped) {
         toast('连接中断，正在等面板回来')
-        watchRestart(beforeVer, beforeStarted)
+        watchRestart(beforeVer, beforeStarted, mode)
       } else {
         toast(err.message, 'error')
       }
@@ -874,7 +879,9 @@ function PanelUpgradeCard() {
       <div>
         <div className="text-[15px] font-medium">升级面板</div>
         <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
-          下载 GitHub 上的发布版并重启本机面板。同机 Agent 会一起重启。其它实例不会自动升，到实例页点「升级全部」。页面会断开几十秒。
+          {info?.mode === 'docker'
+            ? '下载 GitHub 上的发布版，重新构建镜像并替换这个容器。数据库留在宿主机目录。页面会断开几分钟。其它实例不会自动升，到实例页点「升级全部」。'
+            : '下载 GitHub 上的发布版并重启本机面板。同机 Agent 会一起重启。其它实例不会自动升，到实例页点「升级全部」。页面会断开几十秒。'}
         </p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -886,7 +893,11 @@ function PanelUpgradeCard() {
         </Field>
       </div>
       {info && !info.script ? (
-        <p className="text-[12.5px] text-[var(--color-danger)]">这台机器没有 liking-upgrade，不能在页面里升级。</p>
+        <p className="text-[12.5px] text-[var(--color-danger)]">
+          {info.mode === 'container'
+            ? '容器还没挂载 /var/run/docker.sock 和 /opt/liking-docker，不能在页面里升级。'
+            : '这台机器没有 liking-upgrade，不能在页面里升级。'}
+        </p>
       ) : null}
       <Field label="当前登录密码">
         <input className="input-field" type="password" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} disabled={!can} />

@@ -36,9 +36,20 @@ func run(args []string) int {
 	fs.StringVar(&resetAdminPw, "reset-admin-password", "", "reset admin password and exit")
 	fs.StringVar(&resetAdminUser, "reset-admin-username", "admin", "admin username for reset")
 	showVer := fs.Bool("version", false, "print version")
+	dockerUpgrade := fs.Bool("docker-upgrade", false, "rebuild the panel image and recreate the container")
+	dockerTarget := fs.String("docker-target", "", "container id to recreate")
+	dockerRelease := fs.String("docker-release", "", "release tag to install")
 	_ = fs.Parse(args)
 	if *showVer {
 		fmt.Println(version.Version)
+		return 0
+	}
+	// 助手容器只负责下载、构建和替换，不能打开 panel.db。
+	if *dockerUpgrade {
+		if err := server.RunDockerUpgrade(*dockerTarget, *dockerRelease); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
 		return 0
 	}
 	if bootstrapPw != "" && bootstrapPwFile != "" {

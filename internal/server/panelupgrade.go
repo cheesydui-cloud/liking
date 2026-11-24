@@ -21,11 +21,14 @@ const panelUpgradeUnit = "liking-self-upgrade"
 var panelBootedAt = time.Now()
 
 var (
-	releaseTagRe       = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
-	panelUpgradeScript = detectPanelUpgradeScript
-	startPanelUpgrade  = execPanelUpgrade
-	fetchPanelLatest   = fetchLatestRelease
-	panelUpgradeHTTP   = &http.Client{Timeout: 8 * time.Second}
+	releaseTagRe         = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+	panelUpgradeScript   = detectPanelUpgradeScript
+	startPanelUpgrade    = execPanelUpgrade
+	fetchPanelLatest     = fetchLatestRelease
+	panelUpgradeHTTP     = &http.Client{Timeout: 8 * time.Second}
+	startDockerUpgradeFn = startDockerUpgrade
+	dockerUpgradeReadyFn = detectDockerUpgradeReady
+	panelInContainerFn   = detectPanelInContainer
 )
 
 func detectPanelUpgradeScript() string {
@@ -44,11 +47,26 @@ func detectPanelUpgradeScript() string {
 	return ""
 }
 
+func panelUpgradeMode() string {
+	if panelUpgradeScript() != "" {
+		return "systemd"
+	}
+	if dockerUpgradeReadyFn() {
+		return "docker"
+	}
+	if panelInContainerFn() {
+		return "container"
+	}
+	return ""
+}
+
 func (s *Server) handlePanelUpgradeInfo(w http.ResponseWriter, r *http.Request) {
+	mode := panelUpgradeMode()
 	out := map[string]any{
 		"version": version.Version,
 		"started": panelBootedAt.Unix(),
-		"script":  panelUpgradeScript() != "",
+		"script":  mode == "systemd" || mode == "docker",
+		"mode":    mode,
 	}
 	latest, err := fetchPanelLatest()
 	if err != nil {
@@ -85,13 +103,22 @@ func (s *Server) handlePanelUpgrade(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "版本号无效")
 		return
 	}
-	script := panelUpgradeScript()
-	if script == "" {
-		jsonErr(w, http.StatusBadRequest, "这台机器没有 liking-upgrade，不能在页面里升级")
+	switch panelUpgradeMode() {
+	case "systemd":
+		if err := startPanelUpgrade(panelUpgradeScript(), rel); err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	case "docker":
+		if err := startDockerUpgradeFn(rel); err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	case "container":
+		jsonErr(w, http.StatusBadRequest, "容器还没挂载 /var/run/docker.sock 和 /opt/liking-docker，不能在页面里升级")
 		return
-	}
-	if err := startPanelUpgrade(script, rel); err != nil {
-		jsonErr(w, http.StatusBadRequest, err.Error())
+	default:
+		jsonErr(w, http.StatusBadRequest, "这台机器没有 liking-upgrade，不能在页面里升级")
 		return
 	}
 	detail := "latest"
@@ -172,6 +199,9 @@ func fetchLatestRelease() (string, error) {
 }
 
 func readGHProxy() string {
+	if v := strings.TrimSpace(os.Getenv("LIKING_GH_PROXY")); v != "" {
+		return v
+	}
 	b, err := os.ReadFile("/etc/liking/gh-proxy")
 	if err != nil {
 		return ""
