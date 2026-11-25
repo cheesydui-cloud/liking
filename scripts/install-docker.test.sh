@@ -61,4 +61,28 @@ reset_fn="$(awk '/^do_docker_reset\(\)/,/^do_docker\(\)/' "$ROOT/install.sh")"
 printf '%s\n' "$reset_fn" | grep -q -- "--reset-admin-password-file" || fail "docker reset does not read the password from a file"
 printf '%s\n' "$reset_fn" | grep -q -- "--reset-admin-password " && fail "docker reset still passes the password as an argument"
 
+cat >"$tmp/old-compose.yml" <<'EOF'
+services:
+  liking:
+    ports:
+      - "127.0.0.1:8899:8899"
+    command:
+      - --addr
+      - 127.0.0.1:8899
+      - --db
+      - /var/lib/liking/panel.db
+EOF
+env \
+  LIKING_INSTALL_TEST=1 \
+  LIKING_TEST_ROOT="$ROOT" \
+  LIKING_TEST_TMP="$tmp" \
+  bash --noprofile --norc -c '
+    set -euo pipefail
+    source "$LIKING_TEST_ROOT/install.sh"
+    rewrite_container_listen "$LIKING_TEST_TMP/old-compose.yml"
+  '
+grep -q '127.0.0.1:8899:8899' "$tmp/old-compose.yml" || fail "host publish address was rewritten"
+grep -q '0.0.0.0:8899' "$tmp/old-compose.yml" || fail "container listen was not rewritten"
+grep -q '127.0.0.1:8899$' "$tmp/old-compose.yml" && fail "container still listens on loopback"
+
 echo "install-docker: OK"

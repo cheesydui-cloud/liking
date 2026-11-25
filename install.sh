@@ -858,19 +858,39 @@ health_url() {
   fi
 }
 
+rewrite_container_listen() {
+  local file="$1" tmp
+  [[ -f "$file" ]] || return 0
+  tmp="$(mktemp)"
+  awk '
+    /^[[:space:]]*command:/ { incmd=1; print; next }
+    incmd && /^[[:space:]]*[A-Za-z0-9_]+:/ { incmd=0 }
+    incmd {
+      gsub(/127\.0\.0\.1:/, "0.0.0.0:")
+      gsub(/localhost:/, "0.0.0.0:")
+      gsub(/\[::1\]:/, "0.0.0.0:")
+    }
+    { print }
+  ' "$file" >"$tmp"
+  mv "$tmp" "$file"
+}
+
 wait_panel_health() {
-  local url i
+  local url i inside=0
   url="$(health_url)"
   for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40; do
-    if docker exec "$CONTAINER_NAME" /usr/local/bin/liking-server --health http://127.0.0.1:8899/healthz >/dev/null 2>&1; then
-      return 0
-    fi
     if curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
       return 0
+    fi
+    if docker exec "$CONTAINER_NAME" /usr/local/bin/liking-server --health http://127.0.0.1:8899/healthz >/dev/null 2>&1; then
+      inside=1
     fi
     sleep 1
   done
   docker logs --tail 40 "$CONTAINER_NAME" >&2 || true
+  if [[ "$inside" -eq 1 ]]; then
+    die "容器里面是好的，但宿主机 $url 没通。看 compose 端口，以及容器里的 --addr 是不是 0.0.0.0"
+  fi
   die "容器已启动，但健康检查没有通过。看上面的日志"
 }
 
@@ -1082,6 +1102,7 @@ do_docker() {
       ensure_compose_mount "$OPT_DIR/docker-compose.yml" "/var/run/docker.sock:/var/run/docker.sock" || warn "没能写上 docker.sock 挂载"
       ensure_compose_mount "$OPT_DIR/docker-compose.yml" "$OPT_DIR:/opt/liking-docker" || warn "没能写上构建目录挂载"
     fi
+    rewrite_container_listen "$OPT_DIR/docker-compose.yml"
     note "沿用已有 docker-compose.yml"
   fi
 
