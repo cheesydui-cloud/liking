@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,6 +29,7 @@ func run(args []string) int {
 		addr, dbPath, bootstrapPw    string
 		bootstrapPwFile              string
 		resetAdminPw, resetAdminUser string
+		resetAdminPwFile             string
 	)
 	fs := flag.NewFlagSet("liking-server", flag.ExitOnError)
 	fs.StringVar(&addr, "addr", "127.0.0.1:8899", "panel HTTP address")
@@ -34,14 +37,23 @@ func run(args []string) int {
 	fs.StringVar(&bootstrapPw, "bootstrap-admin-password", "", "set admin password on first boot")
 	fs.StringVar(&bootstrapPwFile, "bootstrap-admin-password-file", "", "read first-boot admin password from a file")
 	fs.StringVar(&resetAdminPw, "reset-admin-password", "", "reset admin password and exit")
+	fs.StringVar(&resetAdminPwFile, "reset-admin-password-file", "", "read admin reset password from a file and exit")
 	fs.StringVar(&resetAdminUser, "reset-admin-username", "admin", "admin username for reset")
 	showVer := fs.Bool("version", false, "print version")
+	healthURL := fs.String("health", "", "GET a loopback /healthz URL and exit")
 	dockerUpgrade := fs.Bool("docker-upgrade", false, "rebuild the panel image and recreate the container")
 	dockerTarget := fs.String("docker-target", "", "container id to recreate")
 	dockerRelease := fs.String("docker-release", "", "release tag to install")
 	_ = fs.Parse(args)
 	if *showVer {
 		fmt.Println(version.Version)
+		return 0
+	}
+	if *healthURL != "" {
+		if err := server.CheckHealthURL(*healthURL); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
 		return 0
 	}
 	// 助手容器只负责下载、构建和替换，不能打开 panel.db。
@@ -59,15 +71,38 @@ func run(args []string) int {
 	if bootstrapPwFile != "" {
 		b, err := os.ReadFile(bootstrapPwFile)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "read bootstrap password:", err)
+			if !errors.Is(err, os.ErrNotExist) {
+				fmt.Fprintln(os.Stderr, "read bootstrap password:", err)
+				return 1
+			}
+		} else {
+			bootstrapPw = strings.TrimRight(string(b), "\r\n")
+			for i := range b {
+				b[i] = 0
+			}
+			if bootstrapPw == "" {
+				fmt.Fprintln(os.Stderr, "bootstrap password file is empty")
+				return 1
+			}
+		}
+	}
+
+	if resetAdminPw != "" && resetAdminPwFile != "" {
+		fmt.Fprintln(os.Stderr, "reset password and password file cannot be used together")
+		return 2
+	}
+	if resetAdminPwFile != "" {
+		b, err := os.ReadFile(resetAdminPwFile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "read reset password:", err)
 			return 1
 		}
-		bootstrapPw = string(b)
+		resetAdminPw = strings.TrimRight(string(b), "\r\n")
 		for i := range b {
 			b[i] = 0
 		}
-		if bootstrapPw == "" {
-			fmt.Fprintln(os.Stderr, "bootstrap password file is empty")
+		if resetAdminPw == "" {
+			fmt.Fprintln(os.Stderr, "reset password file is empty")
 			return 1
 		}
 	}

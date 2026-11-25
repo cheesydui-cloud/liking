@@ -84,6 +84,12 @@ func runDockerUpgrade(ctx context.Context, target, release, dir, goarch string, 
 	if err := stageReleaseFn(ctx, tag, dir, goarch, log); err != nil {
 		return err
 	}
+	if err := ensureManagedDockerfile(dir); err != nil {
+		return fmt.Errorf("写 Dockerfile 失败，正在运行的容器没有被替换：%s", err.Error())
+	}
+	if err := ensureCABundle(dir); err != nil {
+		return fmt.Errorf("没有 CA 证书包，正在运行的容器没有被替换")
+	}
 	if err := dockerfileReady(dir); err != nil {
 		return err
 	}
@@ -135,11 +141,13 @@ func startDockerUpgrade(release string) error {
 		return fmt.Errorf("读不到当前镜像")
 	}
 	if err := api.createHelper(ctx, helperSpec{
-		Image:   image,
-		Bin:     panelBinary(ins),
-		Target:  ins.ID,
-		Release: strings.TrimSpace(release),
-		Env:     proxyEnviron(),
+		Image:      image,
+		Bin:        panelBinary(ins),
+		Target:     ins.ID,
+		Release:    strings.TrimSpace(release),
+		Env:        proxyEnviron(),
+		DNS:        append([]string{}, ins.HostConfig.DNS...),
+		ExtraHosts: append([]string{}, ins.HostConfig.ExtraHosts...),
 		Binds: []string{
 			dockerUpgradeSock + ":" + dockerUpgradeSock,
 			dockerUpgradeDir + ":" + dockerUpgradeDir,
@@ -249,12 +257,14 @@ func listItemIsPanel(item dockerListItem) bool {
 }
 
 type helperSpec struct {
-	Image   string
-	Bin     string
-	Target  string
-	Release string
-	Env     []string
-	Binds   []string
+	Image      string
+	Bin        string
+	Target     string
+	Release    string
+	Env        []string
+	DNS        []string
+	ExtraHosts []string
+	Binds      []string
 }
 
 func (d *dockerAPI) createHelper(ctx context.Context, spec helperSpec) error {
@@ -272,16 +282,26 @@ func (d *dockerAPI) createHelper(ctx context.Context, spec helperSpec) error {
 		}
 		cmd = append(cmd, "--docker-release", spec.Release)
 	}
+	host := map[string]any{
+		"Binds":       spec.Binds,
+		"NetworkMode": "bridge",
+		"AutoRemove":  false,
+		"CapDrop":     []string{"ALL"},
+		"SecurityOpt": []string{"no-new-privileges:true"},
+		"PidsLimit":   256,
+	}
+	if len(spec.DNS) > 0 {
+		host["Dns"] = spec.DNS
+	}
+	if len(spec.ExtraHosts) > 0 {
+		host["ExtraHosts"] = spec.ExtraHosts
+	}
 	body := map[string]any{
 		"Image":      spec.Image,
 		"Entrypoint": []string{bin},
 		"Cmd":        cmd,
 		"Env":        spec.Env,
-		"HostConfig": map[string]any{
-			"Binds":       spec.Binds,
-			"NetworkMode": "bridge",
-			"AutoRemove":  false,
-		},
+		"HostConfig": host,
 	}
 	_, err := d.create(ctx, dockerHelperName, body)
 	if err != nil {
@@ -346,6 +366,17 @@ type restartPolicy struct {
 	MaximumRetryCount int    `json:"MaximumRetryCount,omitempty"`
 }
 
+type dockerUlimit struct {
+	Name string `json:"Name"`
+	Soft int64  `json:"Soft"`
+	Hard int64  `json:"Hard"`
+}
+
+type dockerLogConfig struct {
+	Type   string            `json:"Type"`
+	Config map[string]string `json:"Config"`
+}
+
 type dockerMount struct {
 	Type        string `json:"Type"`
 	Source      string `json:"Source"`
@@ -380,6 +411,17 @@ type dockerInspect struct {
 		DNS            []string                 `json:"Dns"`
 		DNSSearch      []string                 `json:"DnsSearch"`
 		ReadonlyRootfs bool                     `json:"ReadonlyRootfs"`
+		CapAdd         []string                 `json:"CapAdd"`
+		CapDrop        []string                 `json:"CapDrop"`
+		SecurityOpt    []string                 `json:"SecurityOpt"`
+		GroupAdd       []string                 `json:"GroupAdd"`
+		Sysctls        map[string]string        `json:"Sysctls"`
+		Ulimits        []dockerUlimit           `json:"Ulimits"`
+		LogConfig      dockerLogConfig          `json:"LogConfig"`
+		PidsLimit      *int64                   `json:"PidsLimit"`
+		Memory         int64                    `json:"Memory"`
+		NanoCpus       int64                    `json:"NanoCpus"`
+		ShmSize        int64                    `json:"ShmSize"`
 	} `json:"HostConfig"`
 	Mounts []dockerMount `json:"Mounts"`
 	State  struct {
@@ -443,18 +485,25 @@ func recreateCreateBody(ins dockerInspect, image string) (map[string]any, error)
 	if len(ins.HostConfig.DNSSearch) > 0 {
 		host["DnsSearch"] = ins.HostConfig.DNSSearch
 	}
+	for k, v := range hostLimitFields(ins) {
+		host[k] = v
+	}
 	body := map[string]any{
 		"Image":      image,
 		"HostConfig": host,
 	}
-	if len(ins.Config.Entrypoint) > 0 {
-		body["Entrypoint"] = ins.Config.Entrypoint
+	ep, cmd, keepCmd := panelProcessArgs(ins)
+	if keepCmd {
+		if len(ep) > 0 {
+			body["Entrypoint"] = ep
+		}
+		if len(cmd) > 0 {
+			body["Cmd"] = cmd
+		}
 	}
-	if len(ins.Config.Cmd) > 0 {
-		body["Cmd"] = ins.Config.Cmd
-	}
-	if len(ins.Config.Env) > 0 {
-		body["Env"] = ins.Config.Env
+	env := ensureGatewayTrustEnv(ins.Config.Env, ins.HostConfig.PortBindings)
+	if len(env) > 0 {
+		body["Env"] = env
 	}
 	if len(ins.Config.Labels) > 0 {
 		body["Labels"] = ins.Config.Labels
@@ -562,6 +611,116 @@ func panelBinary(ins dockerInspect) string {
 		}
 	}
 	return "/usr/local/bin/liking-server"
+}
+
+func hostLimitFields(ins dockerInspect) map[string]any {
+	h := ins.HostConfig
+	out := map[string]any{}
+	if len(h.CapAdd) > 0 {
+		out["CapAdd"] = h.CapAdd
+	}
+	if len(h.CapDrop) > 0 {
+		out["CapDrop"] = h.CapDrop
+	}
+	if len(h.SecurityOpt) > 0 {
+		out["SecurityOpt"] = h.SecurityOpt
+	}
+	if len(h.GroupAdd) > 0 {
+		out["GroupAdd"] = h.GroupAdd
+	}
+	if len(h.Sysctls) > 0 {
+		out["Sysctls"] = h.Sysctls
+	}
+	if len(h.Ulimits) > 0 {
+		out["Ulimits"] = h.Ulimits
+	}
+	if h.LogConfig.Type != "" {
+		out["LogConfig"] = h.LogConfig
+	}
+	if h.PidsLimit != nil && *h.PidsLimit > 0 {
+		out["PidsLimit"] = *h.PidsLimit
+	}
+	if h.Memory > 0 {
+		out["Memory"] = h.Memory
+	}
+	if h.NanoCpus > 0 {
+		out["NanoCpus"] = h.NanoCpus
+	}
+	if h.ShmSize > 0 {
+		out["ShmSize"] = h.ShmSize
+	}
+	return out
+}
+
+func panelProcessArgs(ins dockerInspect) (ep, cmd []string, keep bool) {
+	ep = append([]string{}, ins.Config.Entrypoint...)
+	cmd = append([]string{}, ins.Config.Cmd...)
+	bin := ""
+	switch {
+	case len(ep) > 0:
+		bin = ep[0]
+	case len(cmd) > 0:
+		bin = cmd[0]
+	default:
+		return nil, nil, false
+	}
+	if bin != "liking-server" && !strings.HasSuffix(bin, "/liking-server") {
+		return nil, nil, false
+	}
+	if len(ins.HostConfig.PortBindings) > 0 {
+		ep = rewriteLoopbackListen(ep)
+		cmd = rewriteLoopbackListen(cmd)
+	}
+	return ep, cmd, true
+}
+
+func rewriteLoopbackListen(args []string) []string {
+	out := append([]string{}, args...)
+	for i := 0; i+1 < len(out); i++ {
+		if out[i] != "--addr" && out[i] != "-addr" {
+			continue
+		}
+		host, port, err := net.SplitHostPort(out[i+1])
+		if err != nil || port == "" {
+			continue
+		}
+		if host == "127.0.0.1" || host == "::1" || host == "localhost" {
+			out[i+1] = net.JoinHostPort("0.0.0.0", port)
+		}
+	}
+	return out
+}
+
+func publishedOnlyLocal(ports map[string][]portBinding) bool {
+	if len(ports) == 0 {
+		return false
+	}
+	for _, bindings := range ports {
+		if len(bindings) == 0 {
+			return false
+		}
+		for _, b := range bindings {
+			switch strings.TrimSpace(b.HostIP) {
+			case "127.0.0.1", "::1":
+			default:
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func ensureGatewayTrustEnv(env []string, ports map[string][]portBinding) []string {
+	for _, item := range env {
+		if strings.HasPrefix(item, "LIKING_TRUST_DOCKER_GATEWAY=") {
+			return append([]string{}, env...)
+		}
+	}
+	if !publishedOnlyLocal(ports) {
+		return append([]string{}, env...)
+	}
+	out := append([]string{}, env...)
+	return append(out, "LIKING_TRUST_DOCKER_GATEWAY=1")
 }
 
 func containerName(name string) string {
@@ -1100,10 +1259,12 @@ type upgradeLogger struct {
 }
 
 func openUpgradeLog(dir string) *upgradeLogger {
-	f, err := os.OpenFile(filepath.Join(dir, "upgrade.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	path := filepath.Join(dir, "upgrade.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return &upgradeLogger{}
 	}
+	_ = os.Chmod(path, 0o600)
 	return &upgradeLogger{f: f}
 }
 
@@ -1389,7 +1550,7 @@ func writeDockerContext(dir string, w io.Writer) error {
 	}
 	for _, ent := range entries {
 		name := ent.Name()
-		if skipContextName(name) || ent.IsDir() {
+		if !contextFileAllowed(name) || ent.IsDir() {
 			continue
 		}
 		info, err := ent.Info()
@@ -1421,11 +1582,14 @@ func writeDockerContext(dir string, w io.Writer) error {
 	return tw.Close()
 }
 
-func skipContextName(name string) bool {
-	if name == "upgrade.log" || strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".tmp") || strings.HasSuffix(name, ".part") {
+func contextFileAllowed(name string) bool {
+	switch name {
+	case "Dockerfile", "ca-certificates.crt", "liking-server",
+		"liking-server-linux-amd64", "liking-server-linux-arm64":
 		return true
+	default:
+		return false
 	}
-	return false
 }
 
 func dockerStatus(res *http.Response) error {

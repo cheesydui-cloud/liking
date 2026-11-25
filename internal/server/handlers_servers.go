@@ -452,6 +452,15 @@ func allowedAgentArch(arch string) bool {
 	return arch == "amd64" || arch == "arm64"
 }
 
+func agentBinaryDirs() []string {
+	dirs := []string{"/opt/liking-docker", "/usr/local/sbin"}
+	extra := strings.TrimSpace(os.Getenv("LIKING_AGENT_DIR"))
+	if extra == "" || !filepath.IsAbs(extra) || strings.Contains(extra, "..") {
+		return dirs
+	}
+	return append([]string{extra}, dirs...)
+}
+
 func findAgentBinary(goos, arch string) string {
 	goos = strings.ToLower(strings.TrimSpace(goos))
 	arch = strings.ToLower(strings.TrimSpace(arch))
@@ -475,6 +484,9 @@ func findAgentBinary(goos, arch string) string {
 		if runtime.GOOS == goos && runtime.GOARCH == arch {
 			candidates = append(candidates, filepath.Join(dir, "liking-agent"))
 		}
+	}
+	for _, dir := range agentBinaryDirs() {
+		candidates = append(candidates, filepath.Join(dir, name))
 	}
 	candidates = append(candidates, filepath.Join("bin", name), filepath.Join(".", name))
 	if runtime.GOOS == goos && runtime.GOARCH == arch {

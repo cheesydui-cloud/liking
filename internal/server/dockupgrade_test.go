@@ -332,7 +332,7 @@ func TestDockerUpgradeBuildFailureDoesNotStopContainer(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\nCOPY liking-server /liking-server\nCOPY ca-certificates.crt /ca-certificates.crt\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "ca-certificates.crt"), []byte("cert"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "ca-certificates.crt"), bytes.Repeat([]byte("x"), 1200), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "liking-server"), []byte{0x7f, 'E', 'L', 'F'}, 0o755); err != nil {

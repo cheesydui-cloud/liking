@@ -47,6 +47,19 @@ bash <(curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/cheesyd
 
 浏览器打开安装结束时打印的地址。首次安装会打印用户名 `admin` 和密码；未指定时随机生成。忘记密码：`liking-upgrade reset-password`。配置下发失败会显示在「服务器」页。
 
+## 用 Docker 安装
+
+没有 systemd，或想把面板放在容器里，用 docker 模式。需要 root 和 Docker。脚本下载发布包后在本机构建 `liking:panel`，不拉取基础镜像。
+
+```bash
+bash <(curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/cheesydui-cloud/liking/main/install.sh) \
+  docker --gh-proxy https://gh-proxy.com/ --bootstrap-admin-password '改成你的密码'
+```
+
+默认只在宿主机 `127.0.0.1:8899` 发布。数据在 `/var/lib/liking`。构建目录在 `/opt/liking-docker`。挂上 Docker 套接字之后，设置页可以自己升级。不想让容器操作宿主机 Docker 时加 `--no-sock`，以后在宿主机执行 `liking-upgrade docker`。
+
+已有这份安装、又没有 systemd 服务时，直接 `liking-upgrade` 也会走容器。对所有地址开放端口用 `--addr 0.0.0.0:8899`。这种发布方式不信任转发头。
+
 ## 升级
 
 ```bash
@@ -56,8 +69,10 @@ liking-upgrade
 指定版本：
 
 ```bash
-liking-upgrade --release v0.3.27
+liking-upgrade --release v0.3.54
 ```
+
+Docker 安装之后同样用 `liking-upgrade`。要钉版本就写成 `liking-upgrade docker --release v0.3.54`。
 
 只更新安装脚本本身：
 

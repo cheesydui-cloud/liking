@@ -115,7 +115,7 @@ func (s *Server) handlePanelUpgrade(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "container":
-		jsonErr(w, http.StatusBadRequest, "容器还没挂载 /var/run/docker.sock 和 /opt/liking-docker，不能在页面里升级")
+		jsonErr(w, http.StatusBadRequest, "容器还没挂载 /var/run/docker.sock 和 /opt/liking-docker。在宿主机执行 install.sh docker 可以装好")
 		return
 	default:
 		jsonErr(w, http.StatusBadRequest, "这台机器没有 liking-upgrade，不能在页面里升级")

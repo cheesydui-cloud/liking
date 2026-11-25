@@ -895,7 +895,7 @@ function PanelUpgradeCard() {
       {info && !info.script ? (
         <p className="text-[12.5px] text-[var(--color-danger)]">
           {info.mode === 'container'
-            ? '容器还没挂载 /var/run/docker.sock 和 /opt/liking-docker，不能在页面里升级。'
+            ? '容器还没挂载 /var/run/docker.sock 和 /opt/liking-docker，不能在页面里升级。在宿主机执行 install.sh docker 可以装好并挂上。'
             : '这台机器没有 liking-upgrade，不能在页面里升级。'}
         </p>
       ) : null}

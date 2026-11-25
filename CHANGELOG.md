@@ -2,6 +2,24 @@
 
 每个版本必须先写本章节，再打 tag / 发 GitHub Release。
 
+## v0.3.54 — 2026-11-25
+
+面板可以在没有 systemd 的机器上用 Docker 一次装好，并在容器里长期升级。
+
+### 变更
+- 新增 `install.sh docker`。本机下载发布包，核对 SHA256 和 ELF，用 scratch 镜像构建 `liking:panel`，不拉取基础镜像。数据在 `/var/lib/liking`，构建目录在 `/opt/liking-docker`
+- 默认只把端口发布到 `127.0.0.1`。容器丢掉全部能力，禁止提权，限制进程数和日志大小。构建上下文只允许 Dockerfile、面板程序和 CA 证书
+- 端口只绑在本机时，才信任 Docker 网桥网关转发的客户端 IP。对所有地址开放时不信任转发头，避免伪造来源绕过 IP 白名单和登录限速
+- 已有容器安装、又没有 systemd 服务时，`liking-upgrade`、重置密码和卸载会走容器。页面升级会保留能力限制，并把容器内的回环监听改成 `0.0.0.0`，这样宿主机端口映射才进得去
+- 健康检查只允许访问本机 `/healthz`。重置管理员密码从文件读取，不写进容器启动参数
+- 容器里也能找到 `/opt/liking-docker` 下的 Agent 程序，一键升级节点不再漏文件
+
+### 升级注意
+- 正在跑的容器先在宿主机执行一次 `install.sh docker`。数据目录不动。执行完之后，设置 → 升级可以在页面里点
+- 这次只改面板。实例上的 Agent 不用为这个升级
+- 挂载 `/var/run/docker.sock` 之后，这个容器可以操作宿主机上的 Docker。不想这样时安装加 `--no-sock`，以后在宿主机执行 `liking-upgrade docker`
+- 回滚：宿主机 `liking-upgrade docker --release v0.3.53`
+
 ## v0.3.53 — 2026-11-24
 
 Docker 或 1Panel 里的面板可以在设置页直接升级。

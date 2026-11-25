@@ -7,7 +7,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -59,6 +62,84 @@ func isLoopbackRequest(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+var (
+	dockerTrustOnce sync.Once
+	dockerTrustOn   bool
+	// trustDockerGateway reports whether this process should accept
+	// X-Forwarded-For from the container's default gateway. Tests replace it.
+	trustDockerGateway = func() bool {
+		dockerTrustOnce.Do(func() {
+			dockerTrustOn = detectDockerGatewayTrust()
+		})
+		return dockerTrustOn
+	}
+	defaultGateway = readProcDefaultGateway
+)
+
+func peerTrustedForForward(r *http.Request) bool {
+	if isLoopbackRequest(r) {
+		return true
+	}
+	if !trustDockerGateway() {
+		return false
+	}
+	ip := remoteIP(r)
+	gw := defaultGateway()
+	return ip != nil && gw != nil && ip.Equal(gw)
+}
+
+func detectDockerGatewayTrust() bool {
+	switch strings.TrimSpace(os.Getenv("LIKING_TRUST_DOCKER_GATEWAY")) {
+	case "1":
+		return true
+	case "0":
+		return false
+	}
+	st, err := os.Stat(dockerUpgradeSock)
+	if err != nil || st.IsDir() {
+		return false
+	}
+	api, err := dockerDial(dockerUpgradeSock)
+	if err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	id, err := resolveSelfContainer(ctx, api)
+	if err != nil {
+		return false
+	}
+	ins, err := api.inspect(ctx, id)
+	if err != nil {
+		return false
+	}
+	return publishedOnlyLocal(ins.HostConfig.PortBindings)
+}
+
+func readProcDefaultGateway() net.IP {
+	b, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		return nil
+	}
+	return parseProcRouteGateway(string(b))
+}
+
+func parseProcRouteGateway(text string) net.IP {
+	lines := strings.Split(text, "\n")
+	for _, line := range lines[1:] {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[1] != "00000000" {
+			continue
+		}
+		gw, err := strconv.ParseUint(fields[2], 16, 32)
+		if err != nil || gw == 0 {
+			continue
+		}
+		return net.IPv4(byte(gw), byte(gw>>8), byte(gw>>16), byte(gw>>24)).To4()
+	}
+	return nil
+}
+
 func isSecureRequest(r *http.Request) bool {
 	if v, ok := r.Context().Value(secureReqKey).(bool); ok {
 		return v
@@ -70,7 +151,7 @@ func detectSecureRequest(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
-	if isLoopbackRequest(r) {
+	if peerTrustedForForward(r) {
 		if proto := r.Header.Get("X-Forwarded-Proto"); strings.EqualFold(proto, "https") {
 			return true
 		}
@@ -79,13 +160,15 @@ func detectSecureRequest(r *http.Request) bool {
 }
 
 // trustedForwarded copies X-Real-IP / X-Forwarded-For into RemoteAddr only when
-// the immediate peer is loopback (nginx on this machine). Public :8899 ignores spoofed headers.
-// Secure-cookie / HSTS use the peer address from before this rewrite.
+// the immediate peer is loopback, or is the Docker bridge gateway of a panel
+// whose ports are published only on loopback. A public listener ignores
+// spoofed headers. Secure-cookie / HSTS use the peer address from before this
+// rewrite.
 func trustedForwarded(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		secure := detectSecureRequest(r)
 		r = r.WithContext(context.WithValue(r.Context(), secureReqKey, secure))
-		if isLoopbackRequest(r) {
+		if peerTrustedForForward(r) {
 			if ip := forwardedClientIP(r); ip != "" {
 				_, port, err := net.SplitHostPort(r.RemoteAddr)
 				if err != nil {
