@@ -276,12 +276,12 @@ function TelegramBindBox() {
         <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
           {bound
             ? '已绑定。私聊里用菜单的 /start、/me、/sub、/unbind。没有底部按钮。不能改密码或重置订阅。'
-            : `点「用 Telegram 打开」，在私聊 ${who} 里按开始就绑定好了。10 分钟内有效。`}
+            : `点「用 Telegram 打开」，在私聊 ${who} 里按开始就绑定好了。10 分钟内有效。如果说绑定码不对，不要再按开始，把下面的 6 位码按 /bind 加空格加码发过去。`}
         </p>
       </div>
       {code && !bound ? (
         <div>
-          <div className="text-[12px] text-ink-mut">打不开时，私聊机器人发送 /bind {code}</div>
+          <div className="text-[12px] text-ink-mut">如果说绑定码不对，不要再按开始。私聊发送 /bind {code}</div>
           <div className="text-[12px] text-ink-mut mt-1">{exp ? `${fmtDate(exp)} 前有效` : '10 分钟内有效'}</div>
         </div>
       ) : null}

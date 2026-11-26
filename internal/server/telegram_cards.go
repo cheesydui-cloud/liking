@@ -39,7 +39,7 @@ func (s *Server) tgHandleText(chatID int64, cmd, arg, raw string) {
 		s.tgLookupName(chatID, arg)
 	case "/bind":
 		if arg == "" {
-			s.tgReply(chatID, tgOpenHint+"打不开时发送 /bind 和 6 位绑定码。")
+			s.tgReply(chatID, "发送 /bind 加空格，再加面板上的 6 位码。不要再点开始，开始里可能还是旧码。")
 			return
 		}
 		s.tgApplyCode(chatID, arg)

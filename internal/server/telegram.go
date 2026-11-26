@@ -22,7 +22,6 @@ const (
 	tgDefaultBase = "https://api.telegram.org"
 	tgRepeat      = 6 * time.Hour
 	tgBindTTL     = 10 * time.Minute
-	tgBindMaxFail = 5
 	tgScanEvery   = 10 * time.Minute
 	// tgAlertGap keeps a burst of machine cards under Telegram's per-chat limit.
 	// A 429 otherwise looks like a failed send, the row is not remembered, and the
@@ -35,6 +34,8 @@ const (
 )
 
 const tgOpenHint = "回到面板，点「用 Telegram 打开」。"
+
+const tgBindMismatch = "绑定码不对。不要再点开始，开始里可能还是旧码。回到面板点一次「用 Telegram 打开」，复制页面上的 6 位码，发送 /bind 加空格加那 6 位。"
 
 type tgUpdate struct {
 	UpdateID int64       `json:"update_id"`
@@ -266,17 +267,20 @@ func (s *Server) tgIsAdmin(chatID int64) bool {
 }
 
 func (s *Server) tgApplyCode(chatID int64, code string) {
-	code = strings.TrimSpace(code)
+	code = tgNormalizeBindCode(code)
 	if code == "" {
 		s.tgReply(chatID, tgOpenHint)
 		return
 	}
-	userID, kind, msg, err := db.TakeTGCode(s.DB, code, time.Now().Unix(), tgBindMaxFail)
+	userID, kind, msg, err := db.TakeTGCode(s.DB, code, time.Now().Unix())
 	if err != nil {
 		s.tgReply(chatID, "绑定失败")
 		return
 	}
 	if userID == 0 {
+		if msg == "绑定码不对" {
+			msg = tgBindMismatch
+		}
 		s.tgReply(chatID, msg)
 		return
 	}
@@ -369,17 +373,17 @@ func (s *Server) tgSubLink(u *db.User) (string, error) {
 }
 
 func (s *Server) issueTGCode(userID int64, kind string) (string, time.Time, error) {
-	exp := time.Now().Add(tgBindTTL)
-	issued := time.Now()
+	now := time.Now()
+	exp := now.Add(tgBindTTL)
 	var last error
 	for i := 0; i < 5; i++ {
 		code, err := randomTGCode()
 		if err != nil {
 			return "", time.Time{}, err
 		}
-		err = db.IssueTGCode(s.DB, userID, kind, code, exp.Unix(), issued.Unix())
+		stored, storedExp, err := db.IssueTGCode(s.DB, userID, kind, code, exp.Unix(), now.Unix())
 		if err == nil {
-			return code, exp, nil
+			return stored, time.Unix(storedExp, 0), nil
 		}
 		if !errors.Is(err, db.ErrTGCodeTaken) {
 			return "", time.Time{}, err
@@ -1097,6 +1101,37 @@ func validateTGToken(raw string) (string, error) {
 		}
 	}
 	return next, nil
+}
+
+func tgNormalizeBindCode(code string) string {
+	code = strings.TrimSpace(code)
+	if dec, err := url.QueryUnescape(code); err == nil {
+		code = strings.TrimSpace(dec)
+	}
+	if tgDigits(code) {
+		return code
+	}
+	var run, only string
+	runs := 0
+	flush := func() {
+		if len(run) == 6 {
+			runs++
+			only = run
+		}
+		run = ""
+	}
+	for _, r := range code {
+		if r >= '0' && r <= '9' {
+			run += string(r)
+			continue
+		}
+		flush()
+	}
+	flush()
+	if runs == 1 {
+		return only
+	}
+	return strings.TrimSpace(code)
 }
 
 func tgDigits(text string) bool {

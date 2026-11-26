@@ -281,15 +281,22 @@ func TestTelegramCommandsAndAlerts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	again, _, err := srv.issueTGCode(alice.ID, db.TGKindBind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again != code {
+		t.Fatalf("second open rotated the code %s -> %s", code, again)
+	}
 	for i := 0; i < 5; i++ {
-		srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "/bind 000000", Chat: tgChat{ID: 200, Type: "private"}}})
+		srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "/start 000000", Chat: tgChat{ID: 200, Type: "private"}}})
 	}
-	if !strings.Contains(cap.joined(), "已作废") {
-		t.Fatalf("fails %s", cap.joined())
+	if !strings.Contains(cap.joined(), "不要再点开始") {
+		t.Fatalf("mismatch hint %s", cap.joined())
 	}
-	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "/bind " + code, Chat: tgChat{ID: 200, Type: "private"}}})
-	if _, ok := srv.tgBoundUser(200); ok {
-		t.Fatal("voided code still bound")
+	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "/start " + code, Chat: tgChat{ID: 200, Type: "private"}}})
+	if _, ok := srv.tgBoundUser(200); !ok {
+		t.Fatal("stale start payload destroyed the live code")
 	}
 
 	code, _, err = srv.issueTGCode(alice.ID, db.TGKindBind)
