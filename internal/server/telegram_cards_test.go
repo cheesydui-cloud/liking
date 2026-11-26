@@ -87,23 +87,37 @@ func TestTelegramCards(t *testing.T) {
 	}
 	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "/bind " + code, Chat: tgChat{ID: 200, Type: "private"}}})
 	home := cap.texts()
-	if len(home) == 0 || !strings.Contains(home[len(home)-1], "alice") || !strings.Contains(home[len(home)-1], "还剩") {
-		t.Fatalf("home %v", home)
+	if len(home) == 0 || !strings.Contains(home[len(home)-1], "alice") || !strings.Contains(home[len(home)-1], "还剩") || !strings.Contains(home[len(home)-1], "/traffic") {
+		t.Fatalf("bind %v", home)
 	}
-	if strings.Contains(home[len(home)-1], alice.SubToken) {
-		t.Fatalf("home leaked token %s", home[len(home)-1])
+	if strings.Contains(home[len(home)-1], alice.SubToken) || strings.Contains(home[len(home)-1], "节点 ") || strings.Contains(home[len(home)-1], "近 7 日") {
+		t.Fatalf("bind leaked extras %s", home[len(home)-1])
 	}
 	body := cap.raw()
 	if !strings.Contains(body, `"remove_keyboard":true`) {
-		t.Fatalf("user home kept the reply keyboard %s", body)
+		t.Fatalf("user bind kept the reply keyboard %s", body)
 	}
 	for _, label := range []string{`"text":"节点"`, `"text":"订阅"`, `"text":"近7日"`} {
 		if strings.Contains(body, label) {
 			t.Fatalf("user keyboard still has %s in %s", label, body)
 		}
 	}
-	if strings.Contains(home[len(home)-1], "节点 ") {
-		t.Fatalf("user home listed nodes %s", home[len(home)-1])
+
+	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "/traffic", Chat: tgChat{ID: 200, Type: "private"}}})
+	if got := cap.texts(); !strings.Contains(got[len(got)-1], "流量") || !strings.Contains(got[len(got)-1], "还剩") || strings.Contains(got[len(got)-1], "节点 ") || strings.Contains(got[len(got)-1], alice.SubToken) {
+		t.Fatalf("traffic %s", got[len(got)-1])
+	}
+	alice.Direction = "oneway"
+	if text := srv.tgTrafficText(alice); !strings.Contains(text, "单向") || strings.Contains(text, "节点 ") {
+		t.Fatalf("traffic direction %s", text)
+	}
+	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "/start", Chat: tgChat{ID: 200, Type: "private"}}})
+	if got := cap.texts(); !strings.Contains(got[len(got)-1], "/sub") || !strings.Contains(got[len(got)-1], "/unbind") || strings.Contains(got[len(got)-1], "节点 ") {
+		t.Fatalf("bare start %s", got[len(got)-1])
+	}
+	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "/nope", Chat: tgChat{ID: 200, Type: "private"}}})
+	if got := cap.texts(); !strings.Contains(got[len(got)-1], "/traffic") || strings.Contains(got[len(got)-1], "/me") || strings.Contains(got[len(got)-1], "/start") {
+		t.Fatalf("unknown command %s", got[len(got)-1])
 	}
 
 	edge, err := db.CreateServer(srv.DB, "edge", "203.0.113.21", "edge-tok")
@@ -158,23 +172,22 @@ func TestTelegramCards(t *testing.T) {
 	}
 
 	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "节点", Chat: tgChat{ID: 200, Type: "private"}}})
-	if got := cap.texts(); !strings.Contains(got[len(got)-1], "管理员已关闭节点") || strings.Contains(got[len(got)-1], "203.0.113.21") || strings.Contains(got[len(got)-1], "在线") {
+	if got := cap.texts(); !strings.Contains(got[len(got)-1], "/sub") || strings.Contains(got[len(got)-1], "203.0.113.21") || strings.Contains(got[len(got)-1], "在线") {
 		t.Fatalf("nodes should stay closed %s", got[len(got)-1])
 	}
 	if err := db.SetSetting(srv.DB, "tg_user_nodes", "1"); err != nil {
 		t.Fatal(err)
 	}
-	before := len(cap.texts())
+	if err := db.SetSetting(srv.DB, "tg_user_week", "1"); err != nil {
+		t.Fatal(err)
+	}
 	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "节点", Chat: tgChat{ID: 200, Type: "private"}}})
-	nodes := strings.Join(cap.texts()[before:], "\n")
-	if !strings.Contains(nodes, "203.0.113.21:39198") || !strings.Contains(nodes, "在线") || !strings.Contains(nodes, "停用") {
-		t.Fatalf("nodes %s", nodes)
+	if got := cap.texts(); strings.Contains(got[len(got)-1], "203.0.113.21") || strings.Contains(got[len(got)-1], "在线") || strings.Contains(got[len(got)-1], "mierus://") || strings.Contains(got[len(got)-1], "nodepass-9") {
+		t.Fatalf("node setting must not list lines %s", got[len(got)-1])
 	}
-	if strings.Contains(nodes, "mierus://") || strings.Contains(nodes, "nodepass-9") || strings.Contains(nodes, alice.SubToken) {
-		t.Fatalf("node list leaked %s", nodes)
-	}
-	if !strings.Contains(cap.raw(), "这条链接") {
-		t.Fatal("missing link button")
+	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "近7日", Chat: tgChat{ID: 200, Type: "private"}}})
+	if got := cap.texts(); strings.Contains(got[len(got)-1], "近 7 日") || strings.Contains(got[len(got)-1], "203.0.113.21") {
+		t.Fatalf("week must stay hidden %s", got[len(got)-1])
 	}
 	srv.tgHandleUpdate(tgUpdate{Callback: &tgCallback{
 		ID:   "n1",
@@ -185,8 +198,19 @@ func TestTelegramCards(t *testing.T) {
 		},
 	}})
 	revealed := cap.texts()
-	if !strings.Contains(revealed[len(revealed)-1], "mierus://") || !strings.Contains(revealed[len(revealed)-1], "nodepass-9") {
+	if strings.Contains(revealed[len(revealed)-1], "mierus://") || strings.Contains(revealed[len(revealed)-1], "nodepass-9") || strings.Contains(revealed[len(revealed)-1], "203.0.113.21") {
 		t.Fatalf("link tap %s", revealed[len(revealed)-1])
+	}
+	srv.tgHandleUpdate(tgUpdate{Callback: &tgCallback{
+		ID:   "user-self",
+		Data: "user:" + strconv.FormatInt(alice.ID, 10),
+		Message: &tgMessage{
+			MessageID: 8,
+			Chat:      tgChat{ID: 200, Type: "private"},
+		},
+	}})
+	if got := cap.texts(); !strings.Contains(got[len(got)-1], "流量") || strings.Contains(got[len(got)-1], "203.0.113.21") || strings.Contains(got[len(got)-1], "近 7 日") || strings.Contains(got[len(got)-1], alice.SubToken) {
+		t.Fatalf("user account button %s", got[len(got)-1])
 	}
 
 	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "机器", Chat: tgChat{ID: 200, Type: "private"}}})
@@ -286,14 +310,29 @@ func TestTelegramCards(t *testing.T) {
 	if def == "" {
 		t.Fatal("default command scope missing")
 	}
-	for _, keep := range []string{`"command":"start"`, `"command":"me"`, `"command":"sub"`, `"command":"unbind"`} {
+	for _, keep := range []string{`"command":"sub"`, `"description":"订阅链接"`, `"command":"traffic"`, `"description":"流量查询"`, `"command":"unbind"`, `"description":"解除绑定"`} {
 		if !strings.Contains(def, keep) {
 			t.Fatalf("default menu missing %s in %s", keep, def)
 		}
 	}
-	for _, drop := range []string{`"command":"help"`, `"command":"status"`, `"command":"user"`, `"command":"bind"`} {
+	for _, drop := range []string{`"command":"start"`, `"command":"me"`, `"command":"help"`, `"command":"status"`, `"command":"user"`, `"command":"bind"`} {
 		if strings.Contains(def, drop) {
 			t.Fatalf("default menu still has %s in %s", drop, def)
 		}
+	}
+	adminMenu := ""
+	cap.mu.Lock()
+	for _, call := range cap.calls {
+		if strings.Contains(call, "setMyCommands") && strings.Contains(call, `"type":"chat"`) {
+			adminMenu = call
+			break
+		}
+	}
+	cap.mu.Unlock()
+	if adminMenu == "" || !strings.Contains(adminMenu, `"command":"status"`) || !strings.Contains(adminMenu, `"command":"user"`) {
+		t.Fatalf("admin menu %s", adminMenu)
+	}
+	if strings.Contains(adminMenu, `"command":"sub"`) || strings.Contains(adminMenu, `"command":"traffic"`) {
+		t.Fatalf("admin menu copied the user list %s", adminMenu)
 	}
 }

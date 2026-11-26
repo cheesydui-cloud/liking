@@ -15,12 +15,22 @@ const tgTextLimit = 3900
 
 func (s *Server) tgHandleText(chatID int64, cmd, arg, raw string) {
 	switch cmd {
-	case "/start", "/help":
-		if cmd == "/start" && arg != "" {
+	case "/start":
+		if arg != "" {
 			s.tgApplyCode(chatID, arg)
 			return
 		}
-		s.tgOpen(chatID, "home", 0)
+		if s.tgIsAdmin(chatID) {
+			s.tgOpen(chatID, "home", 0)
+			return
+		}
+		s.tgUserMenu(chatID)
+	case "/help":
+		if s.tgIsAdmin(chatID) {
+			s.tgReply(chatID, "可用 /status、/user。")
+			return
+		}
+		s.tgUserMenu(chatID)
 	case "/status":
 		if !s.tgIsAdmin(chatID) {
 			s.tgReply(chatID, "这个对话还不是管理员。"+tgOpenHint)
@@ -43,12 +53,12 @@ func (s *Server) tgHandleText(chatID int64, cmd, arg, raw string) {
 			return
 		}
 		s.tgApplyCode(chatID, arg)
-	case "/me":
+	case "/me", "/traffic":
 		if _, ok := s.tgBoundUser(chatID); !ok {
 			s.tgReply(chatID, "还没有绑定")
 			return
 		}
-		s.tgOpen(chatID, "home", 0)
+		s.tgOpen(chatID, "traffic", 0)
 	case "/sub":
 		if _, ok := s.tgBoundUser(chatID); !ok {
 			s.tgReply(chatID, "还没有绑定")
@@ -62,16 +72,29 @@ func (s *Server) tgHandleText(chatID int64, cmd, arg, raw string) {
 			s.tgApplyCode(chatID, raw)
 			return
 		}
+		if !s.tgIsAdmin(chatID) {
+			switch strings.TrimSpace(raw) {
+			case "首页", "节点", "近7日":
+				s.tgUserMenu(chatID)
+				return
+			case "订阅":
+				s.tgOpen(chatID, "sub", 0)
+				return
+			case "流量":
+				s.tgOpen(chatID, "traffic", 0)
+				return
+			}
+		}
 		if act := tgButtonAction(raw); act != "" {
 			s.tgOpen(chatID, act, 0)
 			return
 		}
 		if strings.HasPrefix(cmd, "/") {
 			if s.tgIsAdmin(chatID) {
-				s.tgReply(chatID, "不认识这个命令。可用 /start、/me、/sub、/status、/user、/unbind。")
+				s.tgReply(chatID, "不认识这个命令。可用 /status、/user。")
 				return
 			}
-			s.tgReply(chatID, "不认识这个命令。可用 /start、/me、/sub、/unbind。")
+			s.tgReply(chatID, "不认识这个命令。可用 /sub、/traffic、/unbind。")
 			return
 		}
 		if s.tgIsAdmin(chatID) {
@@ -83,11 +106,19 @@ func (s *Server) tgHandleText(chatID int64, cmd, arg, raw string) {
 				s.tgReply(chatID, "没有权限")
 				return
 			}
-			s.tgReply(chatID, "发送 /start、/me、/sub 或 /unbind。")
+			s.tgReply(chatID, "发送 /sub、/traffic 或 /unbind。")
 			return
 		}
 		s.tgReply(chatID, tgOpenHint)
 	}
+}
+
+func (s *Server) tgUserMenu(chatID int64) {
+	if _, ok := s.tgBoundUser(chatID); ok {
+		s.tgReply(chatID, tgUserMenuHint)
+		return
+	}
+	s.tgReply(chatID, tgOpenHint)
 }
 
 func tgButtonAction(text string) string {
@@ -177,7 +208,7 @@ func (s *Server) tgBuild(chatID int64, action string) (tgCard, string) {
 	switch action {
 	case "home":
 		if bound && !admin {
-			return tgCard{Text: s.tgUserHomeText(user), Reply: true}, ""
+			return tgCard{Text: tgUserMenuHint}, ""
 		}
 		if bound {
 			return tgCard{Text: s.tgAccountText(user), Reply: true}, ""
@@ -186,27 +217,26 @@ func (s *Server) tgBuild(chatID int64, action string) (tgCard, string) {
 			return tgCard{Text: "已连接\n" + s.tgOverviewText(), Reply: true}, ""
 		}
 		return tgCard{}, tgOpenHint
+	case "bound":
+		if !bound {
+			return tgCard{}, "已绑定"
+		}
+		return tgCard{Text: "已绑定\n" + s.tgTrafficText(user) + "\n\n" + tgUserMenuHint}, ""
+	case "traffic":
+		if !bound {
+			return tgCard{}, "还没有绑定"
+		}
+		return tgCard{Text: s.tgTrafficText(user)}, ""
 	case "overview":
 		if !admin {
 			return tgCard{}, "没有权限"
 		}
 		return tgCard{Text: s.tgOverviewText(), Reply: true}, ""
-	case "nodes":
-		if !bound {
-			return tgCard{}, "没有权限"
+	case "nodes", "week":
+		if !admin {
+			return tgCard{}, tgUserMenuHint
 		}
-		if !s.tgUserOn("tg_user_nodes", false) {
-			return tgCard{}, "管理员已关闭节点"
-		}
-		return s.tgNodesCard(user), ""
-	case "week":
-		if !bound {
-			return tgCard{}, "没有权限"
-		}
-		if !s.tgUserOn("tg_user_week", true) {
-			return tgCard{}, "管理员已关闭近 7 日"
-		}
-		return tgCard{Text: s.tgWeekText(user), Inline: s.tgInlineNav(chatID)}, ""
+		return tgCard{}, "没有权限"
 	case "sub":
 		if !bound {
 			return tgCard{}, "还没有绑定"
@@ -272,8 +302,8 @@ func (s *Server) tgUserAction(chatID, msgID int64, data string) {
 	text := s.tgAccountText(u)
 	markup := s.tgAccountMarkup(chatID)
 	if !s.tgIsAdmin(chatID) {
-		text = s.tgUserHomeText(u)
-		markup = s.tgInlineNav(chatID)
+		text = s.tgTrafficText(u)
+		markup = nil
 	}
 	s.tgEditOrSend(chatID, msgID, text, markup)
 }
@@ -348,13 +378,17 @@ func (s *Server) tgSubAction(chatID, msgID int64, data string) {
 }
 
 func (s *Server) tgNodeLinkAction(chatID, msgID int64, data string) {
+	if !s.tgIsAdmin(chatID) {
+		if msgID > 0 {
+			_ = s.tgEdit(chatID, msgID, tgUserMenuHint, nil)
+			return
+		}
+		s.tgReply(chatID, tgUserMenuHint)
+		return
+	}
 	u, ok := s.tgBoundUser(chatID)
 	if !ok {
 		s.tgReply(chatID, "没有权限")
-		return
-	}
-	if !s.tgUserOn("tg_user_nodes", false) {
-		s.tgReply(chatID, "管理员已关闭节点")
 		return
 	}
 	id, err := strconv.ParseInt(strings.TrimPrefix(data, "nlink:"), 10, 64)
@@ -391,12 +425,18 @@ func (s *Server) tgAccountText(u *db.User) string {
 	return s.tgAccountBody(u, true)
 }
 
-func (s *Server) tgUserHomeText(u *db.User) string {
-	text := s.tgAccountBody(u, s.tgUserOn("tg_user_nodes", false))
-	if s.tgUserOn("tg_user_week", true) {
-		text += "\n\n" + s.tgWeekText(u)
+func (s *Server) tgTrafficText(u *db.User) string {
+	if u == nil {
+		return "没有这个用户"
 	}
-	return text
+	line := tgTrafficLine(u)
+	switch u.Direction {
+	case "oneway":
+		line += " · 单向"
+	case "twoway":
+		line += " · 双向"
+	}
+	return u.Username + "\n" + line + "\n" + s.tgExpiryLine(u)
 }
 
 func (s *Server) tgAccountBody(u *db.User, nodes bool) string {
@@ -469,62 +509,6 @@ func (s *Server) tgUserNodes(u *db.User, withURI bool) ([]facingNode, []hiddenNo
 	nodes, hidden := s.listFacingNodes(ids, u, withURI, nil)
 	extra, extraHidden := s.trafficNodesForUser(u, withURI)
 	return append(nodes, extra...), append(hidden, extraHidden...)
-}
-
-func (s *Server) tgNodesCard(u *db.User) tgCard {
-	live, hidden := s.tgUserNodes(u, false)
-	var b strings.Builder
-	b.WriteString("可用")
-	if len(live) == 0 {
-		b.WriteString("\n没有可用线路")
-	}
-	for _, n := range live {
-		fmt.Fprintf(&b, "\n· %s · %s · %s\n  %s", tgNodeTitle(n), tgProfileLabel(n.Profile), tgOnlineWord(n.ServerOnline), tgHostPort(n))
-	}
-	if len(hidden) > 0 {
-		b.WriteString("\n\n未进订阅")
-		for _, n := range hidden {
-			name := strings.TrimSpace(n.Name)
-			if name == "" {
-				name = "线路"
-			}
-			fmt.Fprintf(&b, "\n· %s · %s", name, n.Reason)
-		}
-	}
-	var rows [][]tgButton
-	n := 0
-	for _, node := range live {
-		if n >= 8 {
-			break
-		}
-		label := "这条链接"
-		if len(live) > 1 {
-			label = tgShort(tgNodeTitle(node), 10) + " · 这条链接"
-		}
-		rows = append(rows, []tgButton{{Text: label, Data: "nlink:" + strconv.FormatInt(node.ID, 10)}})
-		n++
-	}
-	rows = append(rows, []tgButton{{Text: "刷新", Data: "nodes"}, {Text: "首页", Data: "home"}})
-	return tgCard{Text: b.String(), Inline: &tgMarkup{Keyboard: rows}}
-}
-
-func tgNodeTitle(n facingNode) string {
-	name := strings.TrimSpace(n.Name)
-	if name == "" {
-		name = "线路"
-	}
-	return name
-}
-
-func tgHostPort(n facingNode) string {
-	host := strings.TrimSpace(n.Host)
-	if host == "" {
-		host = "未填地址"
-	}
-	if n.Port > 0 {
-		return host + ":" + strconv.Itoa(n.Port)
-	}
-	return host
 }
 
 func tgOnlineWord(online int) string {
@@ -894,22 +878,10 @@ func tgRemoveKeyboard() *tgReplyRemove {
 }
 
 func (s *Server) tgInlineNav(chatID int64) *tgMarkup {
-	admin := s.tgIsAdmin(chatID)
-	_, bound := s.tgBoundUser(chatID)
-	var row []tgButton
-	if bound && !admin {
-		row = append(row, tgButton{Text: "首页", Data: "home"})
-		if s.tgUserOn("tg_user_nodes", false) {
-			row = append(row, tgButton{Text: "节点", Data: "nodes"})
-		}
-	}
-	if admin {
-		row = append(row, tgButton{Text: "总览", Data: "overview"})
-	}
-	if len(row) == 0 {
+	if !s.tgIsAdmin(chatID) {
 		return nil
 	}
-	return &tgMarkup{Keyboard: [][]tgButton{row}}
+	return &tgMarkup{Keyboard: [][]tgButton{{{Text: "总览", Data: "overview"}}}}
 }
 
 type tgReplyKeyboard struct {

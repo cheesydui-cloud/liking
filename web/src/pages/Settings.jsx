@@ -275,7 +275,7 @@ function TelegramBindBox() {
         <div className="text-[15px] font-medium">Telegram</div>
         <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
           {bound
-            ? '已绑定。私聊里用菜单的 /start、/me、/sub、/unbind。没有底部按钮。不能改密码或重置订阅。'
+            ? '已绑定。私聊左下角菜单只有订阅链接、流量查询、解除绑定。没有底部按钮。不能改密码或重置订阅。'
             : `点「用 Telegram 打开」，在私聊 ${who} 里按开始就绑定好了。10 分钟内有效。如果说绑定码不对，不要再按开始，把下面的 6 位码按 /bind 加空格加码发过去。`}
         </p>
       </div>
@@ -306,8 +306,6 @@ function TelegramCard() {
     tg_alert_backup: true,
     tg_alert_expire: true,
     tg_alert_traffic: true,
-    tg_user_nodes: false,
-    tg_user_week: true,
     tg_user_push_expire: true,
     tg_user_push_traffic: true,
   })
@@ -331,8 +329,6 @@ function TelegramCard() {
       tg_alert_backup: d.tg_alert_backup !== false,
       tg_alert_expire: d.tg_alert_expire !== false,
       tg_alert_traffic: d.tg_alert_traffic !== false,
-      tg_user_nodes: !!d.tg_user_nodes,
-      tg_user_week: d.tg_user_week !== false,
       tg_user_push_expire: d.tg_user_push_expire !== false,
       tg_user_push_traffic: d.tg_user_push_traffic !== false,
     })
@@ -369,8 +365,6 @@ function TelegramCard() {
         tg_alert_backup: f.tg_alert_backup,
         tg_alert_expire: f.tg_alert_expire,
         tg_alert_traffic: f.tg_alert_traffic,
-        tg_user_nodes: f.tg_user_nodes,
-        tg_user_week: f.tg_user_week,
         tg_user_push_expire: f.tg_user_push_expire,
         tg_user_push_traffic: f.tg_user_push_traffic,
         tg_templates: Object.fromEntries((templates || []).map(t => [t.key, t.value || ''])),
@@ -429,7 +423,7 @@ function TelegramCard() {
       <div>
         <div className="text-[15px] font-medium">Telegram</div>
         <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
-          用户只用菜单里的 /start、/me、/sub、/unbind，没有底部按钮。机器和节点状态只推给管理员。不在群里说话，也不能在 Telegram 里改密码、重置订阅或删用户。保存 Token 后，点「用 Telegram 打开」，在私聊里按开始。
+          用户菜单只有 /sub 订阅链接、/traffic 流量查询、/unbind 解除绑定。没有底部按钮。机器和节点状态只推给管理员。不在群里说话，也不能在 Telegram 里改密码、重置订阅或删用户。保存 Token 后，点「用 Telegram 打开」，在私聊里按开始。
           {bot ? ` 当前 Bot：@${bot}。` : ''}
         </p>
       </div>
@@ -460,10 +454,8 @@ function TelegramCard() {
       </div>
       <div className="space-y-2">
         <div className="text-[13px] font-medium">用户机器人</div>
-        <p className="text-[12.5px] text-ink-mut leading-relaxed">菜单固定为 /start、/me、/sub、/unbind。旧的底部按钮会在面板启动时收起，用户自己关不掉。节点和机器的在线状态不会推给用户。</p>
+        <p className="text-[12.5px] text-ink-mut leading-relaxed">菜单只有订阅链接、流量查询、解除绑定。节点和机器状态不出现在菜单里，也不会推给用户。到期和流量提醒可以分别关掉。</p>
         {[
-          ['tg_user_nodes', '在 /me 里显示节点', '默认关闭。打开后，/me 和发送「节点」会列出线路，仍然不推送在线或离线。'],
-          ['tg_user_week', '在 /me 里显示近 7 日', '关掉后，账号回复里不再附带近 7 日流量。'],
           ['tg_user_push_expire', '到期提醒推送给用户', '管理员那边仍由上面的「用户 3 天内到期」控制。'],
           ['tg_user_push_traffic', '流量提醒推送给用户', '管理员那边仍由上面的「流量到 80% 或用尽」控制。'],
         ].map(([key, label, hint]) => (

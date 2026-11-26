@@ -69,10 +69,10 @@ liking-upgrade
 指定版本：
 
 ```bash
-liking-upgrade --release v0.3.58
+liking-upgrade --release v0.3.59
 ```
 
-Docker 安装之后同样用 `liking-upgrade`。要钉版本就写成 `liking-upgrade docker --release v0.3.58`。
+Docker 安装之后同样用 `liking-upgrade`。要钉版本就写成 `liking-upgrade docker --release v0.3.59`。
 
 只更新安装脚本本身：
 

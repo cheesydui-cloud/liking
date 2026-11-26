@@ -35,6 +35,11 @@ const (
 
 const tgOpenHint = "回到面板，点「用 Telegram 打开」。"
 
+// tgUserMenuHint is the only user-facing command list. Command names stay
+// latin because Telegram rejects Chinese in the name; the menu button shows
+// the Chinese description.
+const tgUserMenuHint = "用左下角菜单：/sub 订阅链接，/traffic 流量查询，/unbind 解除绑定。"
+
 const tgBindMismatch = "绑定码不对。不要再点开始，开始里可能还是旧码。回到面板点一次「用 Telegram 打开」，复制页面上的 6 位码，发送 /bind 加空格加那 6 位。"
 
 type tgUpdate struct {
@@ -331,7 +336,7 @@ func (s *Server) tgFinishBind(chatID, userID int64) {
 		s.tgReply(chatID, "已绑定")
 		return
 	}
-	s.tgOpen(chatID, "home", 0)
+	s.tgOpen(chatID, "bound", 0)
 }
 
 func (s *Server) tgCmdUnbind(chatID int64) {
@@ -807,10 +812,16 @@ func (s *Server) tgRememberBot(ctx context.Context) {
 
 func tgUserCommands() []map[string]string {
 	return []map[string]string{
-		{"command": "start", "description": "首页"},
-		{"command": "me", "description": "我的账号"},
 		{"command": "sub", "description": "订阅链接"},
+		{"command": "traffic", "description": "流量查询"},
 		{"command": "unbind", "description": "解除绑定"},
+	}
+}
+
+func tgAdminCommands() []map[string]string {
+	return []map[string]string{
+		{"command": "status", "description": "机器状态"},
+		{"command": "user", "description": "查询用户"},
 	}
 }
 
@@ -823,12 +834,8 @@ func (s *Server) tgEnsureMenu(ctx context.Context) {
 		"scope":    map[string]any{"type": "default"},
 	}, nil)
 	if admin, ok := s.tgAdminChat(); ok {
-		cmds := append(tgUserCommands(),
-			map[string]string{"command": "status", "description": "机器状态"},
-			map[string]string{"command": "user", "description": "查询用户"},
-		)
 		_ = s.tgCall(ctx, "setMyCommands", map[string]any{
-			"commands": cmds,
+			"commands": tgAdminCommands(),
 			"scope":    map[string]any{"type": "chat", "chat_id": admin},
 		}, nil)
 	}
@@ -886,7 +893,7 @@ func (s *Server) tgClearUserReplyKeyboards() {
 		if i > 0 && tgAlertGap > 0 && !s.sleepOrStop(tgAlertGap) {
 			return
 		}
-		id, err := s.tgSendRaw(chat, "底部按钮已收起。以后用左下角的菜单。", tgRemoveKeyboard())
+		id, err := s.tgSendRaw(chat, "底部按钮已收起。以后用左下角菜单：订阅链接、流量查询、解除绑定。", tgRemoveKeyboard())
 		if err != nil || id == 0 {
 			failed = true
 			continue
