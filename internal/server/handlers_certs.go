@@ -391,29 +391,34 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		PanelName         *string   `json:"panel_name"`
-		PanelURL          *string   `json:"panel_url"`
-		AcmeEmail         *string   `json:"acme_email"`
-		CFToken           *string   `json:"cf_api_token"`
-		Announce          *string   `json:"announce"`
-		AdminCIDRs        *string   `json:"admin_cidrs"`
-		Timezone          *string   `json:"timezone"`
-		PanelTLSCertID    *string   `json:"panel_tls_cert_id"`
-		BackupHour        *string   `json:"backup_hour"`
-		BackupKeep        *int      `json:"backup_keep"`
-		BackupPassword    *string   `json:"backup_password"`
-		CurrentPassword   *string   `json:"current_password"`
-		SubRulePreset     *string   `json:"sub_rule_preset"`
-		SubRuleCategories *[]string `json:"sub_rule_categories"`
-		TGEnabled         *bool     `json:"tg_enabled"`
-		TGToken           *string   `json:"tg_bot_token"`
-		TGChat            *string   `json:"tg_admin_chat"`
-		TGBase            *string   `json:"tg_api_base"`
-		TGAlertServer     *bool     `json:"tg_alert_server"`
-		TGAlertCert       *bool     `json:"tg_alert_cert"`
-		TGAlertBackup     *bool     `json:"tg_alert_backup"`
-		TGAlertExpire     *bool     `json:"tg_alert_expire"`
-		TGAlertTraffic    *bool     `json:"tg_alert_traffic"`
+		PanelName         *string           `json:"panel_name"`
+		PanelURL          *string           `json:"panel_url"`
+		AcmeEmail         *string           `json:"acme_email"`
+		CFToken           *string           `json:"cf_api_token"`
+		Announce          *string           `json:"announce"`
+		AdminCIDRs        *string           `json:"admin_cidrs"`
+		Timezone          *string           `json:"timezone"`
+		PanelTLSCertID    *string           `json:"panel_tls_cert_id"`
+		BackupHour        *string           `json:"backup_hour"`
+		BackupKeep        *int              `json:"backup_keep"`
+		BackupPassword    *string           `json:"backup_password"`
+		CurrentPassword   *string           `json:"current_password"`
+		SubRulePreset     *string           `json:"sub_rule_preset"`
+		SubRuleCategories *[]string         `json:"sub_rule_categories"`
+		TGEnabled         *bool             `json:"tg_enabled"`
+		TGToken           *string           `json:"tg_bot_token"`
+		TGChat            *string           `json:"tg_admin_chat"`
+		TGBase            *string           `json:"tg_api_base"`
+		TGAlertServer     *bool             `json:"tg_alert_server"`
+		TGAlertCert       *bool             `json:"tg_alert_cert"`
+		TGAlertBackup     *bool             `json:"tg_alert_backup"`
+		TGAlertExpire     *bool             `json:"tg_alert_expire"`
+		TGAlertTraffic    *bool             `json:"tg_alert_traffic"`
+		TGUserNodes       *bool             `json:"tg_user_nodes"`
+		TGUserWeek        *bool             `json:"tg_user_week"`
+		TGUserPushExpire  *bool             `json:"tg_user_push_expire"`
+		TGUserPushTraffic *bool             `json:"tg_user_push_traffic"`
+		TGTemplates       map[string]string `json:"tg_templates"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "无效请求")
@@ -508,6 +513,10 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		names := corecfg.NormalizeCategoryNames(*req.SubRuleCategories)
 		raw, _ := json.Marshal(names)
 		_ = db.SetSetting(s.DB, "sub_rule_categories", string(raw))
+	}
+	if err := s.saveTGUserPrefs(req.TGUserNodes, req.TGUserWeek, req.TGUserPushExpire, req.TGUserPushTraffic, req.TGTemplates); err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	if err := s.saveTelegramSettings(req.TGEnabled, req.TGToken, req.TGChat, req.TGBase, req.TGAlertServer, req.TGAlertCert, req.TGAlertBackup, req.TGAlertExpire, req.TGAlertTraffic); err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())

@@ -67,7 +67,11 @@ func (s *Server) tgHandleText(chatID int64, cmd, arg, raw string) {
 			return
 		}
 		if strings.HasPrefix(cmd, "/") {
-			s.tgReply(chatID, "不认识这个命令。发送 /help 查看可用命令。")
+			if s.tgIsAdmin(chatID) {
+				s.tgReply(chatID, "不认识这个命令。可用 /start、/me、/sub、/status、/user、/unbind。")
+				return
+			}
+			s.tgReply(chatID, "不认识这个命令。可用 /start、/me、/sub、/unbind。")
 			return
 		}
 		if s.tgIsAdmin(chatID) {
@@ -79,7 +83,7 @@ func (s *Server) tgHandleText(chatID int64, cmd, arg, raw string) {
 				s.tgReply(chatID, "没有权限")
 				return
 			}
-			s.tgReply(chatID, "点底部按钮，或发送 /help。")
+			s.tgReply(chatID, "发送 /start、/me、/sub 或 /unbind。")
 			return
 		}
 		s.tgReply(chatID, tgOpenHint)
@@ -161,8 +165,8 @@ func (c tgCard) sendMarkup(chatID int64, s *Server) any {
 	if c.Inline != nil {
 		return c.Inline
 	}
-	if c.Reply {
-		return s.tgReplyKeyboard(chatID)
+	if c.Reply || !s.tgIsAdmin(chatID) {
+		return s.tgChatKeyboard(chatID)
 	}
 	return nil
 }
@@ -172,6 +176,9 @@ func (s *Server) tgBuild(chatID int64, action string) (tgCard, string) {
 	user, bound := s.tgBoundUser(chatID)
 	switch action {
 	case "home":
+		if bound && !admin {
+			return tgCard{Text: s.tgUserHomeText(user), Reply: true}, ""
+		}
 		if bound {
 			return tgCard{Text: s.tgAccountText(user), Reply: true}, ""
 		}
@@ -188,10 +195,16 @@ func (s *Server) tgBuild(chatID int64, action string) (tgCard, string) {
 		if !bound {
 			return tgCard{}, "没有权限"
 		}
+		if !s.tgUserOn("tg_user_nodes", false) {
+			return tgCard{}, "管理员已关闭节点"
+		}
 		return s.tgNodesCard(user), ""
 	case "week":
 		if !bound {
 			return tgCard{}, "没有权限"
+		}
+		if !s.tgUserOn("tg_user_week", true) {
+			return tgCard{}, "管理员已关闭近 7 日"
 		}
 		return tgCard{Text: s.tgWeekText(user), Inline: s.tgInlineNav(chatID)}, ""
 	case "sub":
@@ -256,7 +269,13 @@ func (s *Server) tgUserAction(chatID, msgID int64, data string) {
 		s.tgReply(chatID, "没有这个用户")
 		return
 	}
-	s.tgEditOrSend(chatID, msgID, s.tgAccountText(u), s.tgAccountMarkup(chatID))
+	text := s.tgAccountText(u)
+	markup := s.tgAccountMarkup(chatID)
+	if !s.tgIsAdmin(chatID) {
+		text = s.tgUserHomeText(u)
+		markup = s.tgInlineNav(chatID)
+	}
+	s.tgEditOrSend(chatID, msgID, text, markup)
 }
 
 func (s *Server) tgServerAction(chatID, msgID int64, data string) {
@@ -334,6 +353,10 @@ func (s *Server) tgNodeLinkAction(chatID, msgID int64, data string) {
 		s.tgReply(chatID, "没有权限")
 		return
 	}
+	if !s.tgUserOn("tg_user_nodes", false) {
+		s.tgReply(chatID, "管理员已关闭节点")
+		return
+	}
 	id, err := strconv.ParseInt(strings.TrimPrefix(data, "nlink:"), 10, 64)
 	if err != nil || id == 0 {
 		s.tgReply(chatID, "不认识这个按钮")
@@ -365,6 +388,18 @@ func (s *Server) tgNodeLinkAction(chatID, msgID int64, data string) {
 }
 
 func (s *Server) tgAccountText(u *db.User) string {
+	return s.tgAccountBody(u, true)
+}
+
+func (s *Server) tgUserHomeText(u *db.User) string {
+	text := s.tgAccountBody(u, s.tgUserOn("tg_user_nodes", false))
+	if s.tgUserOn("tg_user_week", true) {
+		text += "\n\n" + s.tgWeekText(u)
+	}
+	return text
+}
+
+func (s *Server) tgAccountBody(u *db.User, nodes bool) string {
 	if u == nil {
 		return "没有这个用户"
 	}
@@ -376,8 +411,10 @@ func (s *Server) tgAccountText(u *db.User) string {
 	b.WriteString("\n" + tgPackageLine(u))
 	b.WriteString("\n" + s.tgExpiryLine(u))
 	b.WriteString("\n" + tgTrafficLine(u))
-	live, hidden := s.tgUserNodes(u, false)
-	fmt.Fprintf(&b, "\n节点 %d 条可用，%d 条未进订阅", len(live), len(hidden))
+	if nodes {
+		live, hidden := s.tgUserNodes(u, false)
+		fmt.Fprintf(&b, "\n节点 %d 条可用，%d 条未进订阅", len(live), len(hidden))
+	}
 	return b.String()
 }
 
@@ -687,13 +724,59 @@ func (s *Server) tgServerToday(id int64) (int64, int64) {
 }
 
 func (s *Server) tgServerAlert(x *db.Server, up bool) (string, *tgMarkup) {
-	lead := x.Name + " 离线"
+	key := "tg_tpl_server_down"
 	if up {
-		lead = x.Name + " 已恢复在线"
+		key = "tg_tpl_server_up"
 	}
-	text := lead + "\n" + s.tgServerDetail(x)
+	text := s.tgTpl(key, map[string]string{
+		"server": x.Name,
+		"detail": s.tgServerDetail(x),
+	})
 	markup := &tgMarkup{Keyboard: [][]tgButton{{{Text: "查看机器", Data: "srv:" + strconv.FormatInt(x.ID, 10)}}}}
 	return text, markup
+}
+
+func (s *Server) tgExpireTexts(u *db.User, delta int) (string, string) {
+	key := "tg_tpl_expire_soon"
+	days := strconv.Itoa(delta)
+	if delta < 0 {
+		key = "tg_tpl_expire_done"
+		days = strconv.Itoa(-delta)
+	} else if delta == 0 {
+		key = "tg_tpl_expire_today"
+		days = "0"
+	}
+	date := ""
+	if u != nil {
+		exp := soonerExpiry(u.ExpiresAt, u.PkgExpires)
+		if exp > 0 {
+			date = time.Unix(exp, 0).In(db.ClockNow(s.DB).Location()).Format("2006-01-02")
+		}
+	}
+	name := ""
+	if u != nil {
+		name = u.Username
+	}
+	admin := s.tgTpl(key, map[string]string{"user": name, "days": days, "date": date, "account": s.tgAccountText(u)})
+	user := s.tgTpl(key, map[string]string{"user": name, "days": days, "date": date, "account": s.tgAccountBody(u, false)})
+	return admin, user
+}
+
+func (s *Server) tgTrafficTexts(u *db.User, ratio int, restored bool) (string, string) {
+	key := "tg_tpl_traffic_warn"
+	if restored {
+		key = "tg_tpl_traffic_back"
+	} else if ratio >= 100 {
+		key = "tg_tpl_traffic_over"
+	}
+	name := ""
+	if u != nil {
+		name = u.Username
+	}
+	vars := func(account string) map[string]string {
+		return map[string]string{"user": name, "ratio": strconv.Itoa(ratio), "account": account}
+	}
+	return s.tgTpl(key, vars(s.tgAccountText(u))), s.tgTpl(key, vars(s.tgAccountBody(u, false)))
 }
 
 func (s *Server) tgDueCard() tgCard {
@@ -756,25 +839,13 @@ func (s *Server) tgUserListCard(title, empty string, match func(*db.User, time.T
 }
 
 func (s *Server) tgExpireAlert(u *db.User, delta int) (string, *tgMarkup) {
-	lead := u.Username + " 已到期"
-	if delta >= 0 {
-		if delta <= 0 {
-			lead = u.Username + " 今天到期"
-		} else {
-			lead = u.Username + " 将于 " + strconv.Itoa(delta) + " 天后到期"
-		}
-	}
-	return lead + "\n\n" + s.tgAccountText(u), tgViewUser(u.ID)
+	text, _ := s.tgExpireTexts(u, delta)
+	return text, tgViewUser(u.ID)
 }
 
 func (s *Server) tgTrafficAlert(u *db.User, ratio int, restored bool) (string, *tgMarkup) {
-	lead := u.Username + " 流量已用尽"
-	if restored {
-		lead = u.Username + " 流量已回到额度内"
-	} else if ratio < 100 {
-		lead = u.Username + " 流量已用 " + strconv.Itoa(ratio) + "%"
-	}
-	return lead + "\n\n" + s.tgAccountText(u), tgViewUser(u.ID)
+	text, _ := s.tgTrafficTexts(u, ratio, restored)
+	return text, tgViewUser(u.ID)
 }
 
 func (s *Server) tgAccountMarkup(chatID int64) *tgMarkup {
@@ -802,29 +873,35 @@ func tgSubMenuMarkup() *tgMarkup {
 }
 
 func (s *Server) tgReplyKeyboard(chatID int64) *tgReplyKeyboard {
-	admin := s.tgIsAdmin(chatID)
-	_, bound := s.tgBoundUser(chatID)
-	var rows [][]tgReplyKey
-	if bound {
-		rows = append(rows, []tgReplyKey{{Text: "首页"}, {Text: "节点"}})
-		rows = append(rows, []tgReplyKey{{Text: "订阅"}, {Text: "近7日"}})
-	}
-	if admin {
-		rows = append(rows, []tgReplyKey{{Text: "总览"}, {Text: "机器"}})
-		rows = append(rows, []tgReplyKey{{Text: "到期"}, {Text: "流量"}, {Text: "查用户"}})
-	}
-	if len(rows) == 0 {
+	if !s.tgIsAdmin(chatID) {
 		return nil
 	}
-	return &tgReplyKeyboard{Keyboard: rows, Resize: true, Persistent: true}
+	return &tgReplyKeyboard{Keyboard: [][]tgReplyKey{
+		{{Text: "总览"}, {Text: "机器"}},
+		{{Text: "到期"}, {Text: "流量"}, {Text: "查用户"}},
+	}, Resize: true, Persistent: true}
+}
+
+func (s *Server) tgChatKeyboard(chatID int64) any {
+	if kb := s.tgReplyKeyboard(chatID); kb != nil {
+		return kb
+	}
+	return tgRemoveKeyboard()
+}
+
+func tgRemoveKeyboard() *tgReplyRemove {
+	return &tgReplyRemove{Remove: true}
 }
 
 func (s *Server) tgInlineNav(chatID int64) *tgMarkup {
 	admin := s.tgIsAdmin(chatID)
 	_, bound := s.tgBoundUser(chatID)
 	var row []tgButton
-	if bound {
-		row = append(row, tgButton{Text: "首页", Data: "home"}, tgButton{Text: "节点", Data: "nodes"})
+	if bound && !admin {
+		row = append(row, tgButton{Text: "首页", Data: "home"})
+		if s.tgUserOn("tg_user_nodes", false) {
+			row = append(row, tgButton{Text: "节点", Data: "nodes"})
+		}
 	}
 	if admin {
 		row = append(row, tgButton{Text: "总览", Data: "overview"})
@@ -839,6 +916,10 @@ type tgReplyKeyboard struct {
 	Keyboard   [][]tgReplyKey `json:"keyboard"`
 	Resize     bool           `json:"resize_keyboard"`
 	Persistent bool           `json:"is_persistent"`
+}
+
+type tgReplyRemove struct {
+	Remove bool `json:"remove_keyboard"`
 }
 
 type tgReplyKey struct {

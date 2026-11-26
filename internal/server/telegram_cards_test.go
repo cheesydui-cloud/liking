@@ -43,10 +43,16 @@ func TestTelegramCards(t *testing.T) {
 		t.Fatalf("home leaked token %s", home[len(home)-1])
 	}
 	body := cap.raw()
-	for _, label := range []string{`"text":"首页"`, `"text":"节点"`, `"text":"订阅"`, `"text":"近7日"`} {
-		if !strings.Contains(body, label) {
-			t.Fatalf("missing %s in %s", label, body)
+	if !strings.Contains(body, `"remove_keyboard":true`) {
+		t.Fatalf("user home kept the reply keyboard %s", body)
+	}
+	for _, label := range []string{`"text":"节点"`, `"text":"订阅"`, `"text":"近7日"`} {
+		if strings.Contains(body, label) {
+			t.Fatalf("user keyboard still has %s in %s", label, body)
 		}
+	}
+	if strings.Contains(home[len(home)-1], "节点 ") {
+		t.Fatalf("user home listed nodes %s", home[len(home)-1])
 	}
 
 	edge, err := db.CreateServer(srv.DB, "edge", "203.0.113.21", "edge-tok")
@@ -100,6 +106,13 @@ func TestTelegramCards(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "节点", Chat: tgChat{ID: 200, Type: "private"}}})
+	if got := cap.texts(); !strings.Contains(got[len(got)-1], "管理员已关闭节点") || strings.Contains(got[len(got)-1], "203.0.113.21") || strings.Contains(got[len(got)-1], "在线") {
+		t.Fatalf("nodes should stay closed %s", got[len(got)-1])
+	}
+	if err := db.SetSetting(srv.DB, "tg_user_nodes", "1"); err != nil {
+		t.Fatal(err)
+	}
 	before := len(cap.texts())
 	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "节点", Chat: tgChat{ID: 200, Type: "private"}}})
 	nodes := strings.Join(cap.texts()[before:], "\n")
@@ -191,6 +204,14 @@ func TestTelegramCards(t *testing.T) {
 	if !strings.Contains(cap.joined(), "kyoto 离线") || strings.Contains(cap.joined(), "kyo-tok") {
 		t.Fatalf("offline alert %s", cap.joined())
 	}
+	cap.mu.Lock()
+	for _, raw := range cap.calls {
+		if strings.Contains(raw, "sendMessage") && strings.Contains(raw, "离线") && strings.Contains(raw, `"chat_id":200`) {
+			cap.mu.Unlock()
+			t.Fatalf("node status pushed to user %s", raw)
+		}
+	}
+	cap.mu.Unlock()
 	if !strings.Contains(cap.raw(), "查看机器") {
 		t.Fatal("missing machine button")
 	}
@@ -198,7 +219,30 @@ func TestTelegramCards(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	srv.tgRememberBot(ctx)
-	if !strings.Contains(cap.raw(), "setMyCommands") {
+	raw := cap.raw()
+	if !strings.Contains(raw, "setMyCommands") {
 		t.Fatal("commands not registered")
+	}
+	def := ""
+	cap.mu.Lock()
+	for _, call := range cap.calls {
+		if strings.Contains(call, "setMyCommands") && strings.Contains(call, `"type":"default"`) {
+			def = call
+			break
+		}
+	}
+	cap.mu.Unlock()
+	if def == "" {
+		t.Fatal("default command scope missing")
+	}
+	for _, keep := range []string{`"command":"start"`, `"command":"me"`, `"command":"sub"`, `"command":"unbind"`} {
+		if !strings.Contains(def, keep) {
+			t.Fatalf("default menu missing %s in %s", keep, def)
+		}
+	}
+	for _, drop := range []string{`"command":"help"`, `"command":"status"`, `"command":"user"`, `"command":"bind"`} {
+		if strings.Contains(def, drop) {
+			t.Fatalf("default menu still has %s in %s", drop, def)
+		}
 	}
 }

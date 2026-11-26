@@ -19,11 +19,15 @@ import (
 )
 
 const (
-	tgDefaultBase   = "https://api.telegram.org"
-	tgRepeat        = 6 * time.Hour
-	tgBindTTL       = 10 * time.Minute
-	tgBindMaxFail   = 5
-	tgScanEvery     = 10 * time.Minute
+	tgDefaultBase = "https://api.telegram.org"
+	tgRepeat      = 6 * time.Hour
+	tgBindTTL     = 10 * time.Minute
+	tgBindMaxFail = 5
+	tgScanEvery   = 10 * time.Minute
+	// tgAlertGap keeps a burst of machine cards under Telegram's per-chat limit.
+	// A 429 otherwise looks like a failed send, the row is not remembered, and the
+	// next 10-minute scan sends the same offline card again.
+	tgAlertGap      = time.Second
 	tgPollSleep     = 15 * time.Second
 	tgCertSoon      = 30 * 24 * time.Hour
 	tgExpireSoonDay = 3
@@ -147,6 +151,10 @@ func (s *Server) tgAdminChat() (int64, bool) {
 
 func (s *Server) tgAlert(key string) bool {
 	return db.SettingOn(s.DB, key, true)
+}
+
+func (s *Server) tgUserOn(key string, def bool) bool {
+	return db.SettingOn(s.DB, key, def)
 }
 
 func (s *Server) tgPoll(ctx context.Context) {
@@ -288,6 +296,10 @@ func (s *Server) tgClaimAdmin(chatID, userID int64) {
 	if userID > 0 {
 		db.AddAudit(s.DB, &userID, "tg.admin", strconv.FormatInt(chatID, 10))
 	}
+	if had && prev != chatID {
+		go s.tgDropAdminCommands(prev)
+	}
+	go s.tgRefreshMenu()
 	_ = s.tgSend(chatID, "已连接\n"+s.tgOverviewText(), s.tgReplyKeyboard(chatID))
 }
 
@@ -407,6 +419,8 @@ func (s *Server) tgScanServers() {
 	}
 	s.decorateServers(list)
 	now := time.Now().Unix()
+	booted := panelBootedAt.Unix()
+	sent := 0
 	for _, x := range list {
 		if x == nil || x.LastSeen <= 0 {
 			continue
@@ -418,19 +432,47 @@ func (s *Server) tgScanServers() {
 		}
 		down := x.Online != 1
 		if down {
+			// A disconnect from before this process started is already known.
+			// Migration restarts used to re-send it every scan, including after
+			// the agent had come back to another copy of the panel.
+			if x.LastSeen < booted {
+				if !ok || state != "down" {
+					_ = db.TGNotifyPut(s.DB, key, now, "down")
+				}
+				continue
+			}
 			if ok && state == "down" && now-last < int64(tgRepeat/time.Second) {
 				continue
 			}
-			text, markup := s.tgServerAlert(x, false)
-			if s.tgAdminCard(text, markup) == nil {
-				_ = db.TGNotifyPut(s.DB, key, now, "down")
+			// Remember first. A slow Telegram response can deliver the card and
+			// still return an error; the next scan must not send it again.
+			if err := db.TGNotifyPut(s.DB, key, now, "down"); err != nil {
+				continue
 			}
+			if sent > 0 && tgAlertGap > 0 {
+				time.Sleep(tgAlertGap)
+			}
+			text, markup := s.tgServerAlert(x, false)
+			if err := s.tgAdminCard(text, markup); err != nil {
+				log.Printf("telegram: %s offline: %v", x.Name, err)
+				if tgRetrySoon(err) {
+					_ = db.TGNotifyPut(s.DB, key, now-int64(tgRepeat/time.Second), "down")
+				}
+				continue
+			}
+			sent++
 			continue
 		}
 		if state == "down" {
+			if err := db.TGNotifyPut(s.DB, key, now, "up"); err != nil {
+				continue
+			}
 			text, markup := s.tgServerAlert(x, true)
-			if s.tgAdminCard(text, markup) == nil {
-				_ = db.TGNotifyPut(s.DB, key, now, "up")
+			if err := s.tgAdminCard(text, markup); err != nil {
+				log.Printf("telegram: %s online: %v", x.Name, err)
+				if tgRetrySoon(err) {
+					_ = db.TGNotifyPut(s.DB, key, now, "down")
+				}
 			}
 			continue
 		}
@@ -460,12 +502,12 @@ func (s *Server) tgScanCerts() {
 		if err != nil || (ok && state == sig) {
 			continue
 		}
-		text := "证书 " + c.Name + " 即将到期"
-		if c.ExpiresAt < now {
-			text = "证书 " + c.Name + " 已过期"
-		}
 		when := time.Unix(c.ExpiresAt, 0).In(db.ClockNow(s.DB).Location()).Format("2006-01-02")
-		text += "\n到期 " + when
+		tpl := "tg_tpl_cert_soon"
+		if c.ExpiresAt < now {
+			tpl = "tg_tpl_cert_done"
+		}
+		text := s.tgTpl(tpl, map[string]string{"name": c.Name, "date": when})
 		markup := &tgMarkup{Keyboard: [][]tgButton{{{Text: "回总览", Data: "overview"}}}}
 		if s.tgAdminCard(text, markup) == nil {
 			_ = db.TGNotifyPut(s.DB, key, now, sig)
@@ -480,22 +522,24 @@ func (s *Server) tgScanUsers() {
 	}
 	nowT := db.ClockNow(s.DB)
 	now := nowT.Unix()
-	expireOn := s.tgAlert("tg_alert_expire")
-	trafficOn := s.tgAlert("tg_alert_traffic")
+	expireAdmin := s.tgAlert("tg_alert_expire")
+	expireUser := s.tgUserOn("tg_user_push_expire", true)
+	trafficAdmin := s.tgAlert("tg_alert_traffic")
+	trafficUser := s.tgUserOn("tg_user_push_traffic", true)
 	for _, u := range users {
 		if u == nil || u.Role == "admin" || !u.Enabled {
 			continue
 		}
-		if expireOn {
-			s.tgScanExpire(u, nowT, now)
+		if expireAdmin || expireUser {
+			s.tgScanExpire(u, nowT, now, expireAdmin, expireUser)
 		}
-		if trafficOn {
-			s.tgScanTraffic(u, now)
+		if trafficAdmin || trafficUser {
+			s.tgScanTraffic(u, now, trafficAdmin, trafficUser)
 		}
 	}
 }
 
-func (s *Server) tgScanExpire(u *db.User, nowT time.Time, now int64) {
+func (s *Server) tgScanExpire(u *db.User, nowT time.Time, now int64, adminOn, userOn bool) {
 	exp := soonerExpiry(u.ExpiresAt, u.PkgExpires)
 	if exp <= 0 {
 		return
@@ -516,13 +560,13 @@ func (s *Server) tgScanExpire(u *db.User, nowT time.Time, now int64) {
 	if err != nil || (ok && state == sig) {
 		return
 	}
-	text, markup := s.tgExpireAlert(u, delta)
-	if s.tgAdminAndUserCard(u, text, markup) {
+	adminText, userText := s.tgExpireTexts(u, delta)
+	if s.tgNotifyPair(u, adminText, userText, tgViewUser(u.ID), adminOn, userOn) {
 		_ = db.TGNotifyPut(s.DB, key, now, sig)
 	}
 }
 
-func (s *Server) tgScanTraffic(u *db.User, now int64) {
+func (s *Server) tgScanTraffic(u *db.User, now int64, adminOn, userOn bool) {
 	if u.TrafficCap <= 0 {
 		return
 	}
@@ -537,13 +581,13 @@ func (s *Server) tgScanTraffic(u *db.User, now int64) {
 		if ok && state == "over" && now-last < int64(tgRepeat/time.Second) {
 			return
 		}
-		text, markup := s.tgTrafficAlert(u, ratio, false)
-		if s.tgAdminAndUserCard(u, text, markup) {
+		adminText, userText := s.tgTrafficTexts(u, ratio, false)
+		if s.tgNotifyPair(u, adminText, userText, tgViewUser(u.ID), adminOn, userOn) {
 			_ = db.TGNotifyPut(s.DB, key, now, "over")
 		}
 	case state == "over":
-		text, markup := s.tgTrafficAlert(u, ratio, true)
-		if s.tgAdminAndUserCard(u, text, markup) {
+		adminText, userText := s.tgTrafficTexts(u, ratio, true)
+		if s.tgNotifyPair(u, adminText, userText, tgViewUser(u.ID), adminOn, userOn) {
 			next := "ok"
 			if ratio >= 80 {
 				next = "warn"
@@ -554,8 +598,8 @@ func (s *Server) tgScanTraffic(u *db.User, now int64) {
 		if ok && state == "warn" && now-last < int64(tgRepeat/time.Second) {
 			return
 		}
-		text, markup := s.tgTrafficAlert(u, ratio, false)
-		if s.tgAdminAndUserCard(u, text, markup) {
+		adminText, userText := s.tgTrafficTexts(u, ratio, false)
+		if s.tgNotifyPair(u, adminText, userText, tgViewUser(u.ID), adminOn, userOn) {
 			_ = db.TGNotifyPut(s.DB, key, now, "warn")
 		}
 	default:
@@ -580,17 +624,20 @@ func (s *Server) tgBackupFailed(err error) {
 		msg = msg[:180]
 	}
 	markup := &tgMarkup{Keyboard: [][]tgButton{{{Text: "回总览", Data: "overview"}}}}
-	if s.tgAdminCard("定时备份失败："+msg, markup) == nil {
+	if s.tgAdminCard(s.tgTpl("tg_tpl_backup", map[string]string{"error": msg}), markup) == nil {
 		_ = db.TGNotifyPut(s.DB, key, time.Now().Unix(), "fail")
 	}
 }
 
-func (s *Server) tgAdminAndUserCard(u *db.User, text string, markup any) bool {
-	adminOK := s.tgAdminCard(text, markup) == nil
+func (s *Server) tgNotifyPair(u *db.User, adminText, userText string, adminMarkup any, adminOn, userOn bool) bool {
+	adminOK := false
+	if adminOn {
+		adminOK = s.tgAdminCard(adminText, adminMarkup) == nil
+	}
 	userOK := false
-	if u != nil {
-		if chat, bound, err := db.TGChatByUser(s.DB, u.ID); err == nil && bound {
-			userOK = s.tgSend(chat, text, markup) == nil
+	if userOn && u != nil {
+		if chat, bound, err := db.TGChatByUser(s.DB, u.ID); err == nil && bound && chat > 0 && !s.tgIsAdmin(chat) {
+			userOK = s.tgSend(chat, userText, tgRemoveKeyboard()) == nil
 		}
 	}
 	return adminOK || userOK
@@ -609,7 +656,11 @@ func (s *Server) tgAdminCard(text string, markup any) error {
 }
 
 func (s *Server) tgReply(chatID int64, text string) {
-	_ = s.tgSend(chatID, text, nil)
+	if s.tgIsAdmin(chatID) {
+		_ = s.tgSend(chatID, text, nil)
+		return
+	}
+	_ = s.tgSend(chatID, text, tgRemoveKeyboard())
 }
 
 func (s *Server) tgSend(chatID int64, text string, markup any) error {
@@ -624,6 +675,14 @@ func (s *Server) tgSend(chatID int64, text string, markup any) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	return s.tgCall(ctx, "sendMessage", body, nil)
+}
+
+func tgRetrySoon(err error) bool {
+	if err == nil {
+		return false
+	}
+	low := strings.ToLower(err.Error())
+	return strings.Contains(low, "too many") || strings.Contains(low, "retry after") || strings.Contains(low, "429")
 }
 
 func tgSameMessage(err error) bool {
@@ -684,20 +743,49 @@ func (s *Server) tgRememberBot(ctx context.Context) {
 	s.tgEnsureMenu(ctx)
 }
 
+func tgUserCommands() []map[string]string {
+	return []map[string]string{
+		{"command": "start", "description": "首页"},
+		{"command": "me", "description": "我的账号"},
+		{"command": "sub", "description": "订阅链接"},
+		{"command": "unbind", "description": "解除绑定"},
+	}
+}
+
 func (s *Server) tgEnsureMenu(ctx context.Context) {
 	if ctx == nil {
 		return
 	}
 	_ = s.tgCall(ctx, "setMyCommands", map[string]any{
-		"commands": []map[string]string{
-			{"command": "start", "description": "首页"},
-			{"command": "help", "description": "说明"},
-			{"command": "me", "description": "我的账号"},
-			{"command": "sub", "description": "订阅链接"},
-			{"command": "status", "description": "机器状态"},
-			{"command": "user", "description": "查询用户"},
-			{"command": "unbind", "description": "解除绑定"},
-		},
+		"commands": tgUserCommands(),
+		"scope":    map[string]any{"type": "default"},
+	}, nil)
+	if admin, ok := s.tgAdminChat(); ok {
+		cmds := append(tgUserCommands(),
+			map[string]string{"command": "status", "description": "机器状态"},
+			map[string]string{"command": "user", "description": "查询用户"},
+		)
+		_ = s.tgCall(ctx, "setMyCommands", map[string]any{
+			"commands": cmds,
+			"scope":    map[string]any{"type": "chat", "chat_id": admin},
+		}, nil)
+	}
+}
+
+func (s *Server) tgRefreshMenu() {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	s.tgEnsureMenu(ctx)
+}
+
+func (s *Server) tgDropAdminCommands(chatID int64) {
+	if chatID == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	_ = s.tgCall(ctx, "deleteMyCommands", map[string]any{
+		"scope": map[string]any{"type": "chat", "chat_id": chatID},
 	}, nil)
 }
 
@@ -1015,16 +1103,50 @@ func (s *Server) tgPublicSettings() map[string]any {
 	name, _ := db.GetSetting(s.DB, "tg_bot_username")
 	last, _ := db.GetSetting(s.DB, tgLastErrorKey)
 	return map[string]any{
-		"tg_enabled":       db.SettingOn(s.DB, "tg_enabled", false),
-		"tg_admin_chat":    strings.TrimSpace(chat),
-		"tg_api_base":      strings.TrimSpace(base),
-		"tg_bot_token_set": s.tgToken() != "",
-		"tg_bot_username":  strings.TrimPrefix(strings.TrimSpace(name), "@"),
-		"tg_last_error":    strings.TrimSpace(last),
-		"tg_alert_server":  db.SettingOn(s.DB, "tg_alert_server", true),
-		"tg_alert_cert":    db.SettingOn(s.DB, "tg_alert_cert", true),
-		"tg_alert_backup":  db.SettingOn(s.DB, "tg_alert_backup", true),
-		"tg_alert_expire":  db.SettingOn(s.DB, "tg_alert_expire", true),
-		"tg_alert_traffic": db.SettingOn(s.DB, "tg_alert_traffic", true),
+		"tg_enabled":           db.SettingOn(s.DB, "tg_enabled", false),
+		"tg_admin_chat":        strings.TrimSpace(chat),
+		"tg_api_base":          strings.TrimSpace(base),
+		"tg_bot_token_set":     s.tgToken() != "",
+		"tg_bot_username":      strings.TrimPrefix(strings.TrimSpace(name), "@"),
+		"tg_last_error":        strings.TrimSpace(last),
+		"tg_alert_server":      db.SettingOn(s.DB, "tg_alert_server", true),
+		"tg_alert_cert":        db.SettingOn(s.DB, "tg_alert_cert", true),
+		"tg_alert_backup":      db.SettingOn(s.DB, "tg_alert_backup", true),
+		"tg_alert_expire":      db.SettingOn(s.DB, "tg_alert_expire", true),
+		"tg_alert_traffic":     db.SettingOn(s.DB, "tg_alert_traffic", true),
+		"tg_user_nodes":        db.SettingOn(s.DB, "tg_user_nodes", false),
+		"tg_user_week":         db.SettingOn(s.DB, "tg_user_week", true),
+		"tg_user_push_expire":  db.SettingOn(s.DB, "tg_user_push_expire", true),
+		"tg_user_push_traffic": db.SettingOn(s.DB, "tg_user_push_traffic", true),
+		"tg_templates":         s.tgTemplatePublic(),
 	}
+}
+
+func (s *Server) saveTGUserPrefs(nodes, week, pushExpire, pushTraffic *bool, templates map[string]string) error {
+	if templates != nil {
+		for _, item := range tgTemplateCatalog {
+			raw, ok := templates[item.Key]
+			if !ok {
+				continue
+			}
+			next, err := normalizeTGTemplate(raw)
+			if err != nil {
+				return fmt.Errorf("%s：%s", item.Label, err.Error())
+			}
+			if err := db.SetSetting(s.DB, item.Key, next); err != nil {
+				return err
+			}
+		}
+	}
+	writeBool := func(key string, v *bool) {
+		if v == nil {
+			return
+		}
+		_ = db.SetSetting(s.DB, key, boolSetting(*v))
+	}
+	writeBool("tg_user_nodes", nodes)
+	writeBool("tg_user_week", week)
+	writeBool("tg_user_push_expire", pushExpire)
+	writeBool("tg_user_push_traffic", pushTraffic)
+	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +19,8 @@ type tgCapture struct {
 	mu            sync.Mutex
 	calls         []string
 	editUnchanged bool
+	failSend      bool
+	failSendBody  string
 }
 
 func (c *tgCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +43,20 @@ func (c *tgCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if unchanged {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: message is not modified"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":7}}`))
+	case strings.Contains(r.URL.Path, "sendMessage"):
+		c.mu.Lock()
+		fail := c.failSend
+		body := c.failSendBody
+		c.mu.Unlock()
+		if fail {
+			if body == "" {
+				body = `{"ok":false,"description":"Bad Gateway"}`
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(body))
 			return
 		}
 		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":7}}`))
@@ -125,6 +142,83 @@ func newTGPanel(t *testing.T) (*Server, *tgCapture, *httptest.Server) {
 	}
 	t.Cleanup(srv.Close)
 	return srv, cap, fake
+}
+
+func TestTelegramInheritedOfflineIsQuiet(t *testing.T) {
+	srv, cap, _ := newTGPanel(t)
+	row, err := db.CreateServer(srv.DB, "singapore", "203.0.113.40", "sg-tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.DB.Exec(`UPDATE servers SET online=0, last_seen=? WHERE id=?`, panelBootedAt.Unix()-86400, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	srv.tgScanServers()
+	srv.tgScanServers()
+	if strings.Contains(cap.joined(), "离线") {
+		t.Fatalf("inherited outage was announced %s", cap.joined())
+	}
+	last, state, ok, err := db.TGNotifyGet(srv.DB, "server.online:"+strconv.FormatInt(row.ID, 10))
+	if err != nil || !ok || state != "down" || last <= 0 {
+		t.Fatalf("state not remembered: %d %q %v %v", last, state, ok, err)
+	}
+
+	srv.Hub.mu.Lock()
+	srv.Hub.conns[row.ID] = &agentConn{closed: make(chan struct{})}
+	srv.Hub.mu.Unlock()
+	t.Cleanup(func() {
+		srv.Hub.mu.Lock()
+		delete(srv.Hub.conns, row.ID)
+		srv.Hub.mu.Unlock()
+	})
+	if _, err := srv.DB.Exec(`UPDATE servers SET last_seen=? WHERE id=?`, time.Now().Unix(), row.ID); err != nil {
+		t.Fatal(err)
+	}
+	srv.tgScanServers()
+	if strings.Count(cap.joined(), "已恢复在线") != 1 {
+		t.Fatalf("recovery %s", cap.joined())
+	}
+	srv.tgScanServers()
+	if strings.Count(cap.joined(), "已恢复在线") != 1 {
+		t.Fatalf("recovery repeated %s", cap.joined())
+	}
+}
+
+func TestTelegramOfflineSendErrorDoesNotRepeat(t *testing.T) {
+	srv, cap, _ := newTGPanel(t)
+	row, err := db.CreateServer(srv.DB, "tokyo", "203.0.113.10", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.DB.Exec(`UPDATE servers SET online=0, last_seen=? WHERE id=?`, time.Now().Unix(), row.ID); err != nil {
+		t.Fatal(err)
+	}
+	cap.failSend = true
+	srv.tgScanServers()
+	if cap.count("sendMessage") != 1 {
+		t.Fatalf("first send %d", cap.count("sendMessage"))
+	}
+	srv.tgScanServers()
+	if cap.count("sendMessage") != 1 {
+		t.Fatalf("lost response was retried %d", cap.count("sendMessage"))
+	}
+
+	cap.failSend = false
+	cap.failSendBody = `{"ok":false,"description":"Too Many Requests: retry after 5"}`
+	cap.failSend = true
+	if _, err := srv.DB.Exec(`DELETE FROM tg_notify_state`); err != nil {
+		t.Fatal(err)
+	}
+	before := cap.count("sendMessage")
+	srv.tgScanServers()
+	if cap.count("sendMessage") != before+1 {
+		t.Fatalf("rate limit send %d", cap.count("sendMessage"))
+	}
+	cap.failSend = false
+	srv.tgScanServers()
+	if cap.count("sendMessage") != before+2 {
+		t.Fatalf("rate limit should retry once, got %d", cap.count("sendMessage")-before)
+	}
 }
 
 func TestTelegramCommandsAndAlerts(t *testing.T) {

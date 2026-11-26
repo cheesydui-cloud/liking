@@ -275,7 +275,7 @@ function TelegramBindBox() {
         <div className="text-[15px] font-medium">Telegram</div>
         <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
           {bound
-            ? '已绑定。私聊里可以查账号、节点、近 7 日和订阅。不能改密码或重置订阅。'
+            ? '已绑定。私聊里用菜单的 /start、/me、/sub、/unbind。没有底部按钮。不能改密码或重置订阅。'
             : `点「用 Telegram 打开」，在私聊 ${who} 里按开始就绑定好了。10 分钟内有效。`}
         </p>
       </div>
@@ -306,7 +306,12 @@ function TelegramCard() {
     tg_alert_backup: true,
     tg_alert_expire: true,
     tg_alert_traffic: true,
+    tg_user_nodes: false,
+    tg_user_week: true,
+    tg_user_push_expire: true,
+    tg_user_push_traffic: true,
   })
+  const [templates, setTemplates] = useState([])
   const [tokenSet, setTokenSet] = useState(false)
   const [bot, setBot] = useState('')
   const [chatID, setChatID] = useState('')
@@ -326,7 +331,12 @@ function TelegramCard() {
       tg_alert_backup: d.tg_alert_backup !== false,
       tg_alert_expire: d.tg_alert_expire !== false,
       tg_alert_traffic: d.tg_alert_traffic !== false,
+      tg_user_nodes: !!d.tg_user_nodes,
+      tg_user_week: d.tg_user_week !== false,
+      tg_user_push_expire: d.tg_user_push_expire !== false,
+      tg_user_push_traffic: d.tg_user_push_traffic !== false,
     })
+    setTemplates(Array.isArray(d.tg_templates) ? d.tg_templates : [])
     setTokenSet(!!d.tg_bot_token_set)
     setBot(d.tg_bot_username || '')
     setChatID(d.tg_admin_chat || '')
@@ -359,6 +369,11 @@ function TelegramCard() {
         tg_alert_backup: f.tg_alert_backup,
         tg_alert_expire: f.tg_alert_expire,
         tg_alert_traffic: f.tg_alert_traffic,
+        tg_user_nodes: f.tg_user_nodes,
+        tg_user_week: f.tg_user_week,
+        tg_user_push_expire: f.tg_user_push_expire,
+        tg_user_push_traffic: f.tg_user_push_traffic,
+        tg_templates: Object.fromEntries((templates || []).map(t => [t.key, t.value || ''])),
       }
       if (f.tg_bot_token.trim()) body.tg_bot_token = f.tg_bot_token.trim()
       await api.put('/settings', body)
@@ -414,7 +429,7 @@ function TelegramCard() {
       <div>
         <div className="text-[15px] font-medium">Telegram</div>
         <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">
-          可以在私聊里查账号、节点、订阅和机器。不在群里说话，也不能在 Telegram 里改密码、重置订阅或删用户。保存 Token 后，点「用 Telegram 打开」，在私聊里按开始。
+          用户只用菜单里的 /start、/me、/sub、/unbind，没有底部按钮。机器和节点状态只推给管理员。不在群里说话，也不能在 Telegram 里改密码、重置订阅或删用户。保存 Token 后，点「用 Telegram 打开」，在私聊里按开始。
           {bot ? ` 当前 Bot：@${bot}。` : ''}
         </p>
       </div>
@@ -435,6 +450,7 @@ function TelegramCard() {
         </Field>
       </div>
       <div className="space-y-2">
+        <div className="text-[13px] font-medium">推送给管理员</div>
         {checks.map(([key, label]) => (
           <label key={key} className="flex items-start gap-2.5 text-[13px] leading-relaxed cursor-pointer">
             <input type="checkbox" className="mt-1" checked={!!f[key]} onChange={e => setF({ ...f, [key]: e.target.checked })} />
@@ -442,6 +458,43 @@ function TelegramCard() {
           </label>
         ))}
       </div>
+      <div className="space-y-2">
+        <div className="text-[13px] font-medium">用户机器人</div>
+        <p className="text-[12.5px] text-ink-mut leading-relaxed">菜单固定为 /start、/me、/sub、/unbind。底部按钮会在用户下一次发消息时收起。节点和机器的在线状态不会推给用户。</p>
+        {[
+          ['tg_user_nodes', '在 /me 里显示节点', '默认关闭。打开后，/me 和发送「节点」会列出线路，仍然不推送在线或离线。'],
+          ['tg_user_week', '在 /me 里显示近 7 日', '关掉后，账号回复里不再附带近 7 日流量。'],
+          ['tg_user_push_expire', '到期提醒推送给用户', '管理员那边仍由上面的「用户 3 天内到期」控制。'],
+          ['tg_user_push_traffic', '流量提醒推送给用户', '管理员那边仍由上面的「流量到 80% 或用尽」控制。'],
+        ].map(([key, label, hint]) => (
+          <label key={key} className="flex items-start gap-2.5 text-[13px] leading-relaxed cursor-pointer">
+            <input type="checkbox" className="mt-1" checked={!!f[key]} onChange={e => setF({ ...f, [key]: e.target.checked })} />
+            <span>
+              {label}
+              <span className="block text-[11.5px] text-ink-mut mt-0.5">{hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      {templates.length ? (
+        <div className="space-y-3">
+          <div>
+            <div className="text-[13px] font-medium">推送模板</div>
+            <p className="text-[12.5px] text-ink-mut mt-1 leading-relaxed">留空就用默认文案。用户收到的账号摘要不含节点。机器、证书和备份只发给管理员。</p>
+          </div>
+          {templates.map(t => (
+            <Field key={t.key} label={`${t.audience === 'admin' ? '管理员 · ' : '用户 · '}${t.label}`} hint={t.hint}>
+              <textarea
+                className="input-field font-mono text-[12px] min-h-[72px]"
+                value={t.value || ''}
+                placeholder={t.fallback || ''}
+                maxLength={400}
+                onChange={e => setTemplates(list => list.map(x => x.key === t.key ? { ...x, value: e.target.value } : x))}
+              />
+            </Field>
+          ))}
+        </div>
+      ) : null}
       <div className="flex items-center gap-2 flex-wrap">
         <button className="btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button>
         <button type="button" className="btn-ghost" disabled={linking || busy || testing || !tokenSet || !f.tg_enabled || !!f.tg_bot_token.trim()} onClick={openTG}>{linking ? '打开中…' : '用 Telegram 打开'}</button>
