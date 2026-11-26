@@ -460,7 +460,7 @@ function TelegramCard() {
       </div>
       <div className="space-y-2">
         <div className="text-[13px] font-medium">用户机器人</div>
-        <p className="text-[12.5px] text-ink-mut leading-relaxed">菜单固定为 /start、/me、/sub、/unbind。底部按钮会在用户下一次发消息时收起。节点和机器的在线状态不会推给用户。</p>
+        <p className="text-[12.5px] text-ink-mut leading-relaxed">菜单固定为 /start、/me、/sub、/unbind。旧的底部按钮会在面板启动时收起，用户自己关不掉。节点和机器的在线状态不会推给用户。</p>
         {[
           ['tg_user_nodes', '在 /me 里显示节点', '默认关闭。打开后，/me 和发送「节点」会列出线路，仍然不推送在线或离线。'],
           ['tg_user_week', '在 /me 里显示近 7 日', '关掉后，账号回复里不再附带近 7 日流量。'],

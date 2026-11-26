@@ -118,6 +118,7 @@ func newTGPanel(t *testing.T) (*Server, *tgCapture, *httptest.Server) {
 	if _, err := db.CreateUser(d, "admin", hash, "admin", ""); err != nil {
 		t.Fatal(err)
 	}
+	tgClearOnMenu = false
 	cap := &tgCapture{}
 	fake := httptest.NewServer(cap)
 	t.Cleanup(fake.Close)

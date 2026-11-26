@@ -120,6 +120,9 @@ func (s *Server) telegramScanLoop() {
 		case <-s.stop:
 			return
 		case <-t.C:
+			if tgClearOnMenu {
+				s.tgClearUserReplyKeyboards()
+			}
 			s.tgScan()
 		}
 	}
@@ -664,6 +667,34 @@ func (s *Server) tgReply(chatID int64, text string) {
 }
 
 func (s *Server) tgSend(chatID int64, text string, markup any) error {
+	_, err := s.tgSendID(chatID, text, markup)
+	return err
+}
+
+// tgSendID delivers text. A user chat cannot carry an inline keyboard and a
+// reply-keyboard removal on the same message, so the removal goes out first
+// and the buttons are attached with a follow-up edit. Otherwise the old
+// 首页/节点/订阅/近7日 row stays until the user can dismiss it, which they cannot.
+func (s *Server) tgSendID(chatID int64, text string, markup any) (int64, error) {
+	if !s.tgIsAdmin(chatID) {
+		if inline, ok := markup.(*tgMarkup); ok && inline != nil {
+			id, err := s.tgSendRaw(chatID, text, tgRemoveKeyboard())
+			if err != nil || id == 0 {
+				return id, err
+			}
+			if editErr := s.tgEditMarkup(chatID, id, inline); editErr != nil {
+				log.Printf("telegram: keep inline buttons: %v", editErr)
+			}
+			return id, nil
+		}
+		if markup == nil {
+			markup = tgRemoveKeyboard()
+		}
+	}
+	return s.tgSendRaw(chatID, text, markup)
+}
+
+func (s *Server) tgSendRaw(chatID int64, text string, markup any) (int64, error) {
 	body := map[string]any{
 		"chat_id":                  chatID,
 		"text":                     tgClip(text),
@@ -672,9 +703,36 @@ func (s *Server) tgSend(chatID int64, text string, markup any) error {
 	if markup != nil {
 		body["reply_markup"] = markup
 	}
+	var sent struct {
+		MessageID int64 `json:"message_id"`
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	return s.tgCall(ctx, "sendMessage", body, nil)
+	err := s.tgCall(ctx, "sendMessage", body, &sent)
+	return sent.MessageID, err
+}
+
+func (s *Server) tgEditMarkup(chatID, messageID int64, markup any) error {
+	body := map[string]any{
+		"chat_id":      chatID,
+		"message_id":   messageID,
+		"reply_markup": markup,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return s.tgCall(ctx, "editMessageReplyMarkup", body, nil)
+}
+
+func (s *Server) tgDelete(chatID, messageID int64) error {
+	if chatID == 0 || messageID == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return s.tgCall(ctx, "deleteMessage", map[string]any{
+		"chat_id":    chatID,
+		"message_id": messageID,
+	}, nil)
 }
 
 func tgRetrySoon(err error) bool {
@@ -769,6 +827,97 @@ func (s *Server) tgEnsureMenu(ctx context.Context) {
 			"commands": cmds,
 			"scope":    map[string]any{"type": "chat", "chat_id": admin},
 		}, nil)
+	}
+	if tgClearOnMenu {
+		go s.tgClearUserReplyKeyboards()
+	}
+}
+
+// tgClearOnMenu is turned off in tests. The poll loop would otherwise sweep
+// in the background and add a send while an assertion is counting messages.
+// tgKeyboardClearHold keeps the removal message long enough for the client
+// to apply ReplyKeyboardRemove. Deleting it in the same instant can win,
+// and the 首页/节点/订阅/近7日 row stays.
+var (
+	tgClearOnMenu       = true
+	tgKeyboardClearHold = 2 * time.Second
+)
+
+// tgClearUserReplyKeyboards removes the old 首页/节点/订阅/近7日 row from
+// chats that already have it. Telegram only hides that row when a later
+// message asks it to, and the user cannot dismiss it themselves.
+func (s *Server) tgClearUserReplyKeyboards() {
+	if !s.tgKBClear.TryLock() {
+		return
+	}
+	defer s.tgKBClear.Unlock()
+	if db.SettingOn(s.DB, "tg_user_kb_cleared", false) {
+		return
+	}
+	rows, err := s.DB.Query(`SELECT chat_id FROM tg_binds`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	var chats []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return
+		}
+		if id > 0 && !s.tgIsAdmin(id) {
+			chats = append(chats, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return
+	}
+	failed := false
+	type sentNotice struct {
+		chat int64
+		id   int64
+	}
+	var notices []sentNotice
+	for i, chat := range chats {
+		if i > 0 && tgAlertGap > 0 && !s.sleepOrStop(tgAlertGap) {
+			return
+		}
+		id, err := s.tgSendRaw(chat, "底部按钮已收起。以后用左下角的菜单。", tgRemoveKeyboard())
+		if err != nil || id == 0 {
+			failed = true
+			continue
+		}
+		notices = append(notices, sentNotice{chat: chat, id: id})
+	}
+	if len(notices) > 0 && tgKeyboardClearHold > 0 && !s.sleepOrStop(tgKeyboardClearHold) {
+		return
+	}
+	for _, n := range notices {
+		if err := s.tgDelete(n.chat, n.id); err != nil {
+			log.Printf("telegram: clear keyboard notice: %v", err)
+		}
+	}
+	if !failed {
+		_ = db.SetSetting(s.DB, "tg_user_kb_cleared", "1")
+	}
+}
+
+func (s *Server) sleepOrStop(d time.Duration) bool {
+	if d <= 0 {
+		select {
+		case <-s.stop:
+			return false
+		default:
+			return true
+		}
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-s.stop:
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 

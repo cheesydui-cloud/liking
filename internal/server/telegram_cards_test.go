@@ -17,6 +17,57 @@ func (c *tgCapture) raw() string {
 	return strings.Join(c.calls, "\n")
 }
 
+func TestUserSubClearsReplyKeyboard(t *testing.T) {
+	prev := tgKeyboardClearHold
+	tgKeyboardClearHold = 0
+	t.Cleanup(func() { tgKeyboardClearHold = prev })
+	srv, cap, _ := newTGPanel(t)
+	alice, err := db.CreateUser(srv.DB, "alice", "x", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.DB.Exec(`UPDATE users SET enabled=1 WHERE id=?`, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	code, _, err := srv.issueTGCode(alice.ID, db.TGKindBind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "/bind " + code, Chat: tgChat{ID: 200, Type: "private"}}})
+	before := cap.count("sendMessage")
+	srv.tgHandleUpdate(tgUpdate{Message: &tgMessage{Text: "/sub", Chat: tgChat{ID: 200, Type: "private"}}})
+	if cap.count("sendMessage") != before+1 {
+		t.Fatalf("sub sends %d", cap.count("sendMessage")-before)
+	}
+	raw := cap.raw()
+	if !strings.Contains(raw, `"remove_keyboard":true`) {
+		t.Fatalf("sub left the reply keyboard %s", raw)
+	}
+	if !strings.Contains(raw, "editMessageReplyMarkup") || !strings.Contains(raw, "通用") {
+		t.Fatalf("sub buttons %s", raw)
+	}
+	for _, label := range []string{`"text":"首页"`, `"text":"节点"`, `"text":"订阅"`, `"text":"近7日"`} {
+		if strings.Contains(raw, label) {
+			t.Fatalf("reply key %s still sent %s", label, raw)
+		}
+	}
+
+	sent := cap.count("sendMessage")
+	srv.tgClearUserReplyKeyboards()
+	if cap.count("sendMessage") != sent+1 || !strings.Contains(cap.raw(), "底部按钮已收起") || !strings.Contains(cap.raw(), "deleteMessage") {
+		t.Fatalf("clear %d %s", cap.count("sendMessage")-sent, cap.raw())
+	}
+	for _, call := range strings.Split(cap.raw(), "\n") {
+		if strings.Contains(call, "底部按钮已收起") && strings.Contains(call, `"chat_id":100`) {
+			t.Fatalf("cleared the admin keyboard %s", call)
+		}
+	}
+	srv.tgClearUserReplyKeyboards()
+	if cap.count("sendMessage") != sent+1 {
+		t.Fatalf("cleared again %d", cap.count("sendMessage")-sent)
+	}
+}
+
 func TestTelegramCards(t *testing.T) {
 	srv, cap, _ := newTGPanel(t)
 	alice, err := db.CreateUser(srv.DB, "alice", "x", "user", "")

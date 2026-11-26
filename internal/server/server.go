@@ -31,6 +31,7 @@ type Server struct {
 	kickRun      map[int64]bool
 	acmeMu       sync.Mutex
 	backupMu     sync.Mutex
+	tgKBClear    sync.Mutex
 	certCache    panelCertCache
 	CFAPI        string // test override for Cloudflare API base URL
 }
