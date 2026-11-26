@@ -12,6 +12,10 @@ import (
 	"liking/internal/db"
 )
 
+// applyWait is how long a save request waits for the background push.
+// A healthy agent answers well inside this. A stuck agent must not hold the HTTP call.
+const applyWait = 2 * time.Second
+
 func (s *Server) lockServer(id int64) *sync.Mutex {
 	v, _ := s.pushMu.LoadOrStore(id, &sync.Mutex{})
 	return v.(*sync.Mutex)
@@ -72,8 +76,8 @@ func transientApplyErr(err error) bool {
 		return false
 	}
 	msg := err.Error()
+	// 回复超时不要重试。每次等待本身就是 2 分钟，再试两次会把后台下发拖到 6 分钟。
 	return strings.Contains(msg, "连接在回复前断开") ||
-		strings.Contains(msg, "等待 Agent 回复超时") ||
 		strings.Contains(msg, "not connected")
 }
 
@@ -114,7 +118,11 @@ func (s *Server) syncLoop(id int64) {
 		}
 		s.kickWant[id] = false
 		s.kickMu.Unlock()
-		if err := s.pushServer(id); err != nil {
+		err := s.pushServer(id)
+		if err != nil {
+			err = s.recoverBusyPorts(id, err)
+		}
+		if err != nil {
 			msg := err.Error()
 			if msg != last {
 				log.Printf("sync server %d: %v", id, err)
@@ -123,6 +131,51 @@ func (s *Server) syncLoop(id int64) {
 		} else {
 			last = ""
 		}
+	}
+}
+
+func (s *Server) recoverBusyPorts(id int64, applyErr error) error {
+	if applyErr == nil {
+		return nil
+	}
+	ports := parseBusyPorts(applyErr.Error())
+	if len(ports) == 0 {
+		return applyErr
+	}
+	n, err := db.DisableInboundsOnPorts(s.DB, id, ports)
+	if err != nil || n == 0 {
+		return applyErr
+	}
+	if _, err := corecfg.ProvisionAll(s.DB); err != nil {
+		return err
+	}
+	return s.pushServer(id)
+}
+
+func (s *Server) syncIdle(ids []int64) bool {
+	s.kickMu.Lock()
+	defer s.kickMu.Unlock()
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if s.kickWant[id] || s.kickRun[id] {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Server) waitSyncIdle(ids []int64, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if s.syncIdle(ids) {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(15 * time.Millisecond)
 	}
 }
 

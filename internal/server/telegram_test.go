@@ -15,8 +15,9 @@ import (
 )
 
 type tgCapture struct {
-	mu    sync.Mutex
-	calls []string
+	mu            sync.Mutex
+	calls         []string
+	editUnchanged bool
 }
 
 func (c *tgCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -32,9 +33,32 @@ func (c *tgCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"ok":true,"result":{"username":"liking_bot"}}`))
 	case strings.Contains(r.URL.Path, "answerCallbackQuery"):
 		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	case strings.Contains(r.URL.Path, "editMessageText"):
+		c.mu.Lock()
+		unchanged := c.editUnchanged
+		c.mu.Unlock()
+		if unchanged {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: message is not modified"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":7}}`))
 	default:
 		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":7}}`))
 	}
+}
+
+func (c *tgCapture) count(method string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	needle := "/" + method + " "
+	for _, raw := range c.calls {
+		if strings.Contains(raw, needle) {
+			n++
+		}
+	}
+	return n
 }
 
 func (c *tgCapture) texts() []string {

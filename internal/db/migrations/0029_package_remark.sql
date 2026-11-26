@@ -1,0 +1,1 @@
+ALTER TABLE packages ADD COLUMN remark TEXT NOT NULL DEFAULT '';

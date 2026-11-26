@@ -125,6 +125,7 @@ type Package struct {
 	SiteDenyDomains    []string  `json:"site_deny_domains"`
 	SiteFilterMode     string    `json:"site_filter_mode"`
 	LeakProtect        bool      `json:"leak_protect"`
+	Remark             string    `json:"remark"`
 }
 
 type Inbound struct {

@@ -143,8 +143,41 @@ func TestTelegramCards(t *testing.T) {
 	if !strings.Contains(adminCard[len(adminCard)-1], "alice") || !strings.Contains(adminCard[len(adminCard)-1], "还剩") || strings.Contains(adminCard[len(adminCard)-1], alice.SubToken) {
 		t.Fatalf("admin name %s", adminCard[len(adminCard)-1])
 	}
-	if !strings.Contains(cap.raw(), "查看账号") {
-		t.Fatal("missing account button")
+	last := ""
+	cap.mu.Lock()
+	for i := len(cap.calls) - 1; i >= 0; i-- {
+		if strings.Contains(cap.calls[i], "sendMessage") && strings.Contains(cap.calls[i], "alice") {
+			last = cap.calls[i]
+			break
+		}
+	}
+	cap.mu.Unlock()
+	if !strings.Contains(last, "回总览") || !strings.Contains(last, `"callback_data":"overview"`) {
+		t.Fatalf("account button %s", last)
+	}
+	if strings.Contains(last, "查看账号") || strings.Contains(last, `"callback_data":"user:`) {
+		t.Fatalf("account loop %s", last)
+	}
+	_, alertMarkup := srv.tgExpireAlert(alice, 2)
+	if alertMarkup == nil || len(alertMarkup.Keyboard) == 0 || len(alertMarkup.Keyboard[0]) == 0 || alertMarkup.Keyboard[0][0].Text != "查看账号" {
+		t.Fatal("alert should keep 查看账号")
+	}
+
+	cap.editUnchanged = true
+	beforeSend := cap.count("sendMessage")
+	srv.tgHandleUpdate(tgUpdate{Callback: &tgCallback{
+		ID:   "home-refresh",
+		Data: "home",
+		Message: &tgMessage{
+			MessageID: 9,
+			Chat:      tgChat{ID: 100, Type: "private"},
+		},
+	}})
+	if cap.count("sendMessage") != beforeSend {
+		t.Fatalf("unchanged refresh duplicated a card\n%s", cap.raw())
+	}
+	if cap.count("editMessageText") == 0 {
+		t.Fatal("refresh did not edit")
 	}
 
 	kyoto, err := db.CreateServer(srv.DB, "kyoto", "203.0.113.30", "kyo-tok")
@@ -169,4 +202,3 @@ func TestTelegramCards(t *testing.T) {
 		t.Fatal("commands not registered")
 	}
 }
-

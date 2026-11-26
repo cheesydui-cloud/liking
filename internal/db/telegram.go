@@ -62,6 +62,25 @@ func TGUserByChat(d *sql.DB, chatID int64) (int64, error) {
 	return id, err
 }
 
+func TGBoundIDs(d *sql.DB) (map[int64]struct{}, error) {
+	rows, err := d.Query(`SELECT user_id FROM tg_binds`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]struct{}{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		if id > 0 {
+			out[id] = struct{}{}
+		}
+	}
+	return out, rows.Err()
+}
+
 func TGChatByUser(d *sql.DB, userID int64) (int64, bool, error) {
 	var id int64
 	err := d.QueryRow(`SELECT chat_id FROM tg_binds WHERE user_id=?`, userID).Scan(&id)

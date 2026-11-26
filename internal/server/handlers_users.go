@@ -61,6 +61,10 @@ func adminUserViewLive(u *db.User, loginPW string, live []userLiveNode) any {
 }
 
 func adminUserViewWG(u *db.User, loginPW string, live []userLiveNode, wgStats string) any {
+	return adminUserViewMarked(u, loginPW, live, wgStats, false)
+}
+
+func adminUserViewMarked(u *db.User, loginPW string, live []userLiveNode, wgStats string, tgBound bool) any {
 	if u == nil {
 		return nil
 	}
@@ -69,12 +73,13 @@ func adminUserViewWG(u *db.User, loginPW string, live []userLiveNode, wgStats st
 		Password  string         `json:"password,omitempty"`
 		LiveNodes []userLiveNode `json:"live_nodes,omitempty"`
 		WGStats   string         `json:"wg_stats,omitempty"`
+		TGBound   bool           `json:"tg_bound,omitempty"`
 	}
 	pw := ""
 	if u.Role != "admin" {
 		pw = loginPW
 	}
-	return view{User: u, Password: pw, LiveNodes: live, WGStats: wgStats}
+	return view{User: u, Password: pw, LiveNodes: live, WGStats: wgStats, TGBound: tgBound}
 }
 
 // userWGStats tells the card why a WireGuard rate is zero. An older agent
@@ -164,13 +169,19 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	bound, err := db.TGBoundIDs(s.DB)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	out := make([]any, 0, len(list))
 	for _, u := range list {
 		if up, down, ok := s.Hub.UserLive(u.ID); ok {
 			u.NetUpBps = up
 			u.NetDownBps = down
 		}
-		out = append(out, adminUserViewWG(u, "", s.userLiveNodes(u.ID), s.userWGStats(u.ID)))
+		_, tgBound := bound[u.ID]
+		out = append(out, adminUserViewMarked(u, "", s.userLiveNodes(u.ID), s.userWGStats(u.ID), tgBound))
 	}
 	jsonOK(w, map[string]any{"users": out})
 }

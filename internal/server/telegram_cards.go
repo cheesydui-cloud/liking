@@ -145,9 +145,7 @@ func (s *Server) tgOpen(chatID int64, action string, editID int64) {
 		if markup == nil {
 			markup = s.tgInlineNav(chatID)
 		}
-		if err := s.tgEdit(chatID, editID, card.Text, markup); err != nil {
-			_ = s.tgSend(chatID, card.Text, card.sendMarkup(chatID, s))
-		}
+		s.tgEditOrSend(chatID, editID, card.Text, markup)
 		return
 	}
 	_ = s.tgSend(chatID, card.Text, card.sendMarkup(chatID, s))
@@ -237,7 +235,7 @@ func (s *Server) tgLookupName(chatID int64, name string) {
 		s.tgReply(chatID, "没有这个用户")
 		return
 	}
-	s.tgSend(chatID, s.tgAccountText(u), &tgMarkup{Keyboard: [][]tgButton{{{Text: "查看账号", Data: "user:" + strconv.FormatInt(u.ID, 10)}}}})
+	s.tgSend(chatID, s.tgAccountText(u), s.tgAccountMarkup(chatID))
 }
 
 func (s *Server) tgUserAction(chatID, msgID int64, data string) {
@@ -258,13 +256,7 @@ func (s *Server) tgUserAction(chatID, msgID int64, data string) {
 		s.tgReply(chatID, "没有这个用户")
 		return
 	}
-	markup := &tgMarkup{Keyboard: [][]tgButton{{{Text: "查看账号", Data: "user:" + strconv.FormatInt(u.ID, 10)}}}}
-	if msgID > 0 {
-		if err := s.tgEdit(chatID, msgID, s.tgAccountText(u), markup); err == nil {
-			return
-		}
-	}
-	_ = s.tgSend(chatID, s.tgAccountText(u), markup)
+	s.tgEditOrSend(chatID, msgID, s.tgAccountText(u), s.tgAccountMarkup(chatID))
 }
 
 func (s *Server) tgServerAction(chatID, msgID int64, data string) {
@@ -289,12 +281,7 @@ func (s *Server) tgServerAction(chatID, msgID int64, data string) {
 		{{Text: "刷新", Data: "srv:" + strconv.FormatInt(id, 10)}},
 		{{Text: "回总览", Data: "overview"}},
 	}}
-	if msgID > 0 {
-		if err := s.tgEdit(chatID, msgID, text, markup); err == nil {
-			return
-		}
-	}
-	_ = s.tgSend(chatID, text, markup)
+	s.tgEditOrSend(chatID, msgID, text, markup)
 }
 
 func (s *Server) tgSubAction(chatID, msgID int64, data string) {
@@ -304,10 +291,7 @@ func (s *Server) tgSubAction(chatID, msgID int64, data string) {
 		return
 	}
 	if data == "sub:hide" || data == "sub:menu" {
-		if msgID > 0 && s.tgEdit(chatID, msgID, tgSubMenuText, tgSubMenuMarkup()) == nil {
-			return
-		}
-		_ = s.tgSend(chatID, tgSubMenuText, tgSubMenuMarkup())
+		s.tgEditOrSend(chatID, msgID, tgSubMenuText, tgSubMenuMarkup())
 		return
 	}
 	kind := ""
@@ -334,9 +318,11 @@ func (s *Server) tgSubAction(chatID, msgID int64, data string) {
 	}
 	text := "订阅链接：\n" + link
 	markup := &tgMarkup{Keyboard: [][]tgButton{{{Text: "隐藏", Data: "sub:hide"}}}}
-	if msgID > 0 && s.tgEdit(chatID, msgID, text, markup) == nil {
-		db.AddAudit(s.DB, &u.ID, "tg.sub", u.Username)
-		return
+	if msgID > 0 {
+		if err := s.tgEdit(chatID, msgID, text, markup); err == nil || tgSameMessage(err) {
+			db.AddAudit(s.DB, &u.ID, "tg.sub", u.Username)
+			return
+		}
 	}
 	_ = s.tgSend(chatID, text, markup)
 	db.AddAudit(s.DB, &u.ID, "tg.sub", u.Username)
@@ -375,10 +361,7 @@ func (s *Server) tgNodeLinkAction(chatID, msgID int64, data string) {
 	}
 	text := found.Name + "\n" + body
 	markup := &tgMarkup{Keyboard: [][]tgButton{{{Text: "返回节点", Data: "nodes"}}}}
-	if msgID > 0 && s.tgEdit(chatID, msgID, text, markup) == nil {
-		return
-	}
-	_ = s.tgSend(chatID, text, markup)
+	s.tgEditOrSend(chatID, msgID, text, markup)
 }
 
 func (s *Server) tgAccountText(u *db.User) string {
@@ -792,6 +775,13 @@ func (s *Server) tgTrafficAlert(u *db.User, ratio int, restored bool) (string, *
 		lead = u.Username + " 流量已用 " + strconv.Itoa(ratio) + "%"
 	}
 	return lead + "\n\n" + s.tgAccountText(u), tgViewUser(u.ID)
+}
+
+func (s *Server) tgAccountMarkup(chatID int64) *tgMarkup {
+	if s.tgIsAdmin(chatID) {
+		return &tgMarkup{Keyboard: [][]tgButton{{{Text: "回总览", Data: "overview"}}}}
+	}
+	return s.tgInlineNav(chatID)
 }
 
 func tgViewUser(id int64) *tgMarkup {

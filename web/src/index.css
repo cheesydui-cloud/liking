@@ -1855,6 +1855,24 @@ html.dark.page-aliyun .machine.drag-float:hover {
   flex-wrap: wrap;
   gap: 6px;
 }
+.tg-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+  padding: 0 6px 0 5px;
+  border-radius: 999px;
+  background: #229ed9;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.tg-mark svg {
+  display: block;
+}
 .machine-name {
   font-size: 15px;
   font-weight: 600;

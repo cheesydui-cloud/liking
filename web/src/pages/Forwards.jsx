@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
+import { noteApply } from '../lib/applyNote'
 import { cacheGen, peekList, putList } from '../lib/listCache'
 import { startPoll } from '../lib/poll'
 import { createOpLock } from '../lib/opLock'
@@ -597,8 +598,7 @@ function ForwardsPanel() {
       const d = trafficEditId
         ? await api.put(`/traffic-forwards/${trafficEditId}`, body)
         : await api.post('/traffic-forwards', body)
-      if (d.apply_error) toast(d.apply_error, 'error')
-      else toast(trafficEditId ? '已保存。到套餐里勾选这条流量中转，订阅才会带上。' : '已创建。到套餐里勾选这条流量中转，订阅才会带上。')
+      noteApply(toast, d, trafficEditId ? '已保存。到套餐里勾选这条流量中转，订阅才会带上。' : '已创建。到套餐里勾选这条流量中转，订阅才会带上。')
       closeForm()
       load()
     } catch (err) { toast(err.message, 'error') }
@@ -680,9 +680,10 @@ function ForwardsPanel() {
     setBusy(true)
     try {
       const d = wasEdit ? await api.put(`/inbounds/${editId}`, body) : await api.post('/inbounds', body)
-      if (d.apply_error) toast(d.apply_error, 'error')
-      else if (f.kind === 'chain') toast(wasEdit ? '已保存。到套餐里勾选这条入口，订阅才会带上。' : '已创建。到套餐里勾选这条入口，订阅才会带上。')
-      else toast(wasEdit ? '已保存' : '已创建')
+      const ok = f.kind === 'chain'
+        ? (wasEdit ? '已保存。到套餐里勾选这条入口，订阅才会带上。' : '已创建。到套餐里勾选这条入口，订阅才会带上。')
+        : (wasEdit ? '已保存' : '已创建')
+      noteApply(toast, d, ok)
       closeForm()
       load()
     } catch (err) { toast(err.message, 'error') }
@@ -712,7 +713,7 @@ function ForwardsPanel() {
           exit_uri: inb.exit_uri || '',
           cert_id: inb.cert_id,
         })
-        if (d.apply_error) toast(d.apply_error, 'error')
+        noteApply(toast, d, '')
         await load()
       } catch (err) { toast(err.message, 'error') }
     })
@@ -877,7 +878,7 @@ function ForwardsPanel() {
             dial_host: h.dial_host || '',
           })),
         })
-        if (d.apply_error) toast(d.apply_error, 'error')
+        noteApply(toast, d, '')
         await load()
       } catch (err) { toast(err.message, 'error') }
     })

@@ -12,7 +12,7 @@ import { SpeedField } from '../components/SpeedField'
 import { formatSpeedLimit, kbpsFromForm, speedFormFromKbps } from '../lib/speed'
 
 const emptyForm = {
-  name: '', gb: '', direction: 'oneway', reset_mode: 'anniversary', inbound_ids: [], transit_ids: [], forward_ids: [], multipliers: {},
+  name: '', remark: '', gb: '', direction: 'oneway', reset_mode: 'anniversary', inbound_ids: [], transit_ids: [], forward_ids: [], multipliers: {},
   speed_value: '', speed_unit: 'mbps', sub_rule_preset: '', sub_rule_categories: [],
   site_filter_mode: '', site_deny_categories: [], site_deny_domains: '',
   leak_protect: false,
@@ -284,6 +284,7 @@ export default function Packages() {
     setQ('')
     setF({
       name: p.name || '',
+      remark: p.remark || '',
       gb: p.traffic_bytes ? String(Math.round((p.traffic_bytes / 1024 / 1024 / 1024) * 1000) / 1000) : '',
       direction: p.direction || 'oneway',
       inbound_ids: selectedInboundIds(p, ins),
@@ -331,6 +332,7 @@ export default function Packages() {
     setBusy(true)
     const body = {
       name,
+      remark: f.remark.trim(),
       traffic_bytes: Math.round(gb * 1024 * 1024 * 1024),
       cycle_days: 0,
       direction: f.direction,
@@ -463,6 +465,11 @@ export default function Packages() {
                     <div className="machine-title">
                       <span className="machine-name truncate">{p.name}</span>
                     </div>
+                    {p.remark ? (
+                      <div className="machine-host">
+                        <span className="machine-remark" title={p.remark}>{p.remark}</span>
+                      </div>
+                    ) : null}
                     {meta.servers.length ? (
                       <div className="machine-host">
                         <span className="machine-host-addr" title={nodeTip}>{meta.servers.join(' · ')}</span>
@@ -544,6 +551,9 @@ export default function Packages() {
               <div className="text-[12px] text-ink-mut mt-1.5">{f.direction === 'twoway' ? '上行 + 下行计入额度' : '只计下行'}</div>
             </div>
           </div>
+          <Field label="备注" hint="只在管理面板显示，用户看不到">
+            <input className="input-field" maxLength={200} value={f.remark} onChange={e => setF({ ...f, remark: e.target.value })} placeholder="例如：月付家宽，不写进订阅" />
+          </Field>
           <div>
             <div className="text-[12px] font-medium text-ink-soft mb-1.5">每月清零</div>
             <div className="seg" role="group" aria-label="每月清零">

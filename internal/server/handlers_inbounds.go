@@ -528,7 +528,32 @@ func applyTargets(s *Server, in *db.Inbound) []int64 {
 }
 
 func (s *Server) respondAfterApply(w http.ResponseWriter, payload map[string]any, ids ...int64) {
-	var applyErr error
+	uniq := uniqueServerIDs(ids)
+	s.syncServers(uniq...)
+	if !s.waitSyncIdle(uniq, applyWait) {
+		payload["apply"] = "queued"
+		jsonOK(w, payload)
+		return
+	}
+	for _, id := range uniq {
+		srv, err := db.GetServer(s.DB, id)
+		if err != nil || srv == nil || srv.Online != 1 || srv.LastError == "" {
+			continue
+		}
+		payload["apply_error"] = srv.LastError
+		break
+	}
+	if raw, ok := payload["inbound"].(map[string]any); ok {
+		if n, ok := asInt64(raw["id"]); ok {
+			if fresh, err := db.GetInbound(s.DB, n); err == nil {
+				payload["inbound"] = inboundJSON(fresh)
+			}
+		}
+	}
+	jsonOK(w, payload)
+}
+
+func uniqueServerIDs(ids []int64) []int64 {
 	seen := map[int64]struct{}{}
 	var uniq []int64
 	for _, id := range ids {
@@ -540,37 +565,8 @@ func (s *Server) respondAfterApply(w http.ResponseWriter, payload map[string]any
 		}
 		seen[id] = struct{}{}
 		uniq = append(uniq, id)
-		if err := s.pushServer(id); err != nil && applyErr == nil {
-			applyErr = err
-		}
 	}
-	if applyErr != nil {
-		payload["apply_error"] = applyErr.Error()
-		ports := parseBusyPorts(applyErr.Error())
-		if len(ports) > 0 {
-			changed := 0
-			for _, id := range uniq {
-				n, err := db.DisableInboundsOnPorts(s.DB, id, ports)
-				if err == nil {
-					changed += n
-				}
-			}
-			if changed > 0 {
-				_, _ = corecfg.ProvisionAll(s.DB)
-				for _, id := range uniq {
-					_ = s.pushServer(id)
-				}
-				if raw, ok := payload["inbound"].(map[string]any); ok {
-					if n, ok := asInt64(raw["id"]); ok {
-						if fresh, err := db.GetInbound(s.DB, n); err == nil {
-							payload["inbound"] = inboundJSON(fresh)
-						}
-					}
-				}
-			}
-		}
-	}
-	jsonOK(w, payload)
+	return uniq
 }
 
 func asInt64(v any) (int64, bool) {

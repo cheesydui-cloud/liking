@@ -934,9 +934,9 @@ func insertPackageTx(tx *sql.Tx, p *Package) (int64, error) {
 	}
 	res, err := tx.Exec(`INSERT INTO packages(
 		name,traffic_bytes,cycle_days,reset_day,direction,created_at,speed_limit,
-		sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains,site_filter_mode,reset_mode,leak_protect
-	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, p.Name, p.TrafficBytes, cycleDays, p.ResetDay, direction, now(), p.SpeedLimit,
-		p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, mode, boolInt(p.LeakProtect))
+		sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains,site_filter_mode,reset_mode,leak_protect,remark
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, p.Name, p.TrafficBytes, cycleDays, p.ResetDay, direction, now(), p.SpeedLimit,
+		p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, mode, boolInt(p.LeakProtect), p.Remark)
 	if err != nil {
 		return 0, err
 	}
@@ -948,8 +948,8 @@ func updatePackageTx(tx *sql.Tx, p *Package) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`UPDATE packages SET name=?, traffic_bytes=?, cycle_days=?, reset_day=?, direction=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=?, site_filter_mode=?, reset_mode=?, leak_protect=? WHERE id=?`,
-		p.Name, p.TrafficBytes, p.CycleDays, p.ResetDay, p.Direction, p.SpeedLimit, p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, mode, boolInt(p.LeakProtect), p.ID)
+	_, err = tx.Exec(`UPDATE packages SET name=?, traffic_bytes=?, cycle_days=?, reset_day=?, direction=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=?, site_filter_mode=?, reset_mode=?, leak_protect=?, remark=? WHERE id=?`,
+		p.Name, p.TrafficBytes, p.CycleDays, p.ResetDay, p.Direction, p.SpeedLimit, p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, mode, boolInt(p.LeakProtect), p.Remark, p.ID)
 	return err
 }
 
@@ -1072,8 +1072,8 @@ func GetPackage(d *sql.DB, id int64) (*Package, error) {
 	p := &Package{}
 	var catsRaw, denyCatsRaw, denyDomsRaw string
 	var leak int
-	err := d.QueryRow(`SELECT id,name,traffic_bytes,cycle_days,reset_day,direction,created_at,speed_limit,sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains,site_filter_mode,reset_mode,leak_protect FROM packages WHERE id=?`, id).
-		Scan(&p.ID, &p.Name, &p.TrafficBytes, &p.CycleDays, &p.ResetDay, &p.Direction, &p.CreatedAt, &p.SpeedLimit, &p.SubRulePreset, &catsRaw, &denyCatsRaw, &denyDomsRaw, &p.SiteFilterMode, &p.ResetMode, &leak)
+	err := d.QueryRow(`SELECT id,name,traffic_bytes,cycle_days,reset_day,direction,created_at,speed_limit,sub_rule_preset,sub_rule_categories,site_deny_categories,site_deny_domains,site_filter_mode,reset_mode,leak_protect,remark FROM packages WHERE id=?`, id).
+		Scan(&p.ID, &p.Name, &p.TrafficBytes, &p.CycleDays, &p.ResetDay, &p.Direction, &p.CreatedAt, &p.SpeedLimit, &p.SubRulePreset, &catsRaw, &denyCatsRaw, &denyDomsRaw, &p.SiteFilterMode, &p.ResetMode, &leak, &p.Remark)
 	if err != nil {
 		return nil, err
 	}
@@ -1176,8 +1176,8 @@ func UpdatePackage(d *sql.DB, p *Package) error {
 	if err != nil {
 		return err
 	}
-	_, err = d.Exec(`UPDATE packages SET name=?, traffic_bytes=?, cycle_days=?, reset_day=?, direction=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=?, site_filter_mode=?, reset_mode=?, leak_protect=? WHERE id=?`,
-		p.Name, p.TrafficBytes, p.CycleDays, p.ResetDay, p.Direction, p.SpeedLimit, p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, mode, boolInt(p.LeakProtect), p.ID)
+	_, err = d.Exec(`UPDATE packages SET name=?, traffic_bytes=?, cycle_days=?, reset_day=?, direction=?, speed_limit=?, sub_rule_preset=?, sub_rule_categories=?, site_deny_categories=?, site_deny_domains=?, site_filter_mode=?, reset_mode=?, leak_protect=?, remark=? WHERE id=?`,
+		p.Name, p.TrafficBytes, p.CycleDays, p.ResetDay, p.Direction, p.SpeedLimit, p.SubRulePreset, encodeStringSlice(p.SubRuleCategories), encodeStringSlice(p.SiteDenyCategories), encodeStringSlice(p.SiteDenyDomains), p.SiteFilterMode, mode, boolInt(p.LeakProtect), p.Remark, p.ID)
 	return err
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
+import { noteApply } from '../lib/applyNote'
 import { copyText } from '../lib/copy'
 import { formatPortRange, serverPortRange } from '../lib/ports'
 import { isPanelNode, nodeStatus, serverHasCore } from '../lib/status'
@@ -609,8 +610,7 @@ export default function Nodes() {
     setBusy(true)
     try {
       const d = wasEdit ? await api.put(`/inbounds/${editId}`, bodyFromForm()) : await api.post('/inbounds', bodyFromForm())
-      if (d.apply_error) toast(d.apply_error, 'error')
-      else toast(wasEdit ? '已保存' : '已增加节点')
+      noteApply(toast, d, wasEdit ? '已保存' : '已增加节点')
       closeLine()
       load()
     } catch (e) { toast(e.message, 'error') }
@@ -648,8 +648,7 @@ export default function Nodes() {
           settings: inb.settings, line_kind: inb.line_kind, exit_inbound_id: inb.exit_inbound_id, exit_uri: inb.exit_uri || '', cert_id: inb.cert_id,
           reject_cn: next,
         })
-        if (d.apply_error) toast(d.apply_error, 'error')
-        else toast(next ? '已拒绝中国 IP' : '已允许中国 IP')
+        noteApply(toast, d, next ? '已拒绝中国 IP' : '已允许中国 IP')
         await load()
       } catch (e) { toast(e.message, 'error') }
     })
@@ -672,7 +671,7 @@ export default function Nodes() {
           settings: inb.settings, line_kind: inb.line_kind, exit_inbound_id: inb.exit_inbound_id, exit_uri: inb.exit_uri || '', cert_id: inb.cert_id,
           reject_cn: !!inb.reject_cn,
         })
-        if (d.apply_error) toast(d.apply_error, 'error')
+        noteApply(toast, d, '')
         await load()
       } catch (e) { toast(e.message, 'error') }
     })

@@ -199,6 +199,17 @@ function userExpiryTs(u) {
   return Math.min(a, b)
 }
 
+function TGMark() {
+  return (
+    <span className="tg-mark" title="已绑定 Telegram">
+      <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="currentColor" d="M21.8 4.2 2.9 11.4c-1.2.5-1.2 1.1-.2 1.4l4.8 1.5 11.1-7c.5-.3 1-.1.6.2l-9 8.2-.3 4.8c.5 0 .7-.2 1-.5l2.4-2.3 5 3.7c.9.5 1.6.2 1.8-.9l3.3-15.4c.3-1.3-.5-1.9-1.6-1.5z" />
+      </svg>
+      TG
+    </span>
+  )
+}
+
 function UserFlags({ u }) {
   if (u.role === 'admin') return null
   const flags = []
@@ -1197,6 +1208,7 @@ export default function Users() {
                   <div className="min-w-0 flex-1">
                     <div className="machine-title">
                       <span className="machine-name truncate">{u.username}</span>
+                      {u.tg_bound ? <TGMark /> : null}
                       <UserFlags u={u} />
                     </div>
                     {u.remark ? (

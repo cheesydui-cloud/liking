@@ -3,10 +3,21 @@ package server
 import (
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"liking/internal/corecfg"
 	"liking/internal/db"
 )
+
+const packageRemarkMax = 200
+
+func normalizePackageRemark(raw string) (string, error) {
+	s := strings.Join(strings.Fields(strings.TrimSpace(raw)), " ")
+	if utf8.RuneCountInString(s) > packageRemarkMax {
+		return "", simpleError("备注最多 200 字")
+	}
+	return s, nil
+}
 
 func (s *Server) handleListPackages(w http.ResponseWriter, r *http.Request) {
 	list, err := db.ListPackages(s.DB)
@@ -137,6 +148,7 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		TransitIDs   []int64   `json:"transit_ids"`
 		ServerIDs    []int64   `json:"server_ids"`
 		ForwardIDs   []int64   `json:"forward_ids"`
+		Remark       string    `json:"remark"`
 		packagePolicyReq
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -172,12 +184,17 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "请选择节点或流量中转")
 		return
 	}
+	remark, err := normalizePackageRemark(req.Remark)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	pol := &db.Package{}
 	if err := applyPackagePolicyReq(pol, req.packagePolicyReq); err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	p := &db.Package{Name: strings.TrimSpace(req.Name), TrafficBytes: req.TrafficBytes, CycleDays: req.CycleDays, ResetDay: req.ResetDay, ResetMode: resetMode, Direction: req.Direction}
+	p := &db.Package{Name: strings.TrimSpace(req.Name), TrafficBytes: req.TrafficBytes, CycleDays: req.CycleDays, ResetDay: req.ResetDay, ResetMode: resetMode, Direction: req.Direction, Remark: remark}
 	p.SpeedLimit = pol.SpeedLimit
 	p.SubRulePreset = pol.SubRulePreset
 	p.SubRuleCategories = pol.SubRuleCategories
@@ -244,6 +261,7 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 		TransitIDs   []int64   `json:"transit_ids"`
 		ServerIDs    []int64   `json:"server_ids"`
 		ForwardIDs   []int64   `json:"forward_ids"`
+		Remark       *string   `json:"remark"`
 		packagePolicyReq
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -288,6 +306,14 @@ func (s *Server) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.Direction = req.Direction
+	}
+	if req.Remark != nil {
+		remark, err := normalizePackageRemark(*req.Remark)
+		if err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		p.Remark = remark
 	}
 	if err := applyPackagePolicyReq(p, req.packagePolicyReq); err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())

@@ -626,6 +626,26 @@ func (s *Server) tgSend(chatID int64, text string, markup any) error {
 	return s.tgCall(ctx, "sendMessage", body, nil)
 }
 
+func tgSameMessage(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *tgAPIError
+	if errors.As(err, &apiErr) {
+		return strings.Contains(strings.ToLower(apiErr.Description), "message is not modified")
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "message is not modified")
+}
+
+func (s *Server) tgEditOrSend(chatID, msgID int64, text string, markup any) {
+	if msgID > 0 {
+		if err := s.tgEdit(chatID, msgID, text, markup); err == nil || tgSameMessage(err) {
+			return
+		}
+	}
+	_ = s.tgSend(chatID, text, markup)
+}
+
 func (s *Server) tgEdit(chatID, messageID int64, text string, markup any) error {
 	body := map[string]any{
 		"chat_id":                  chatID,
